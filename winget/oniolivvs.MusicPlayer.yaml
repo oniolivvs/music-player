@@ -1,5 +1,5 @@
 PackageIdentifier: oniolivvs.MusicPlayer
-PackageVersion: __VERSION__
+PackageVersion: 0.22.62
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: 1.6.0

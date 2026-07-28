@@ -1,9 +1,15 @@
-# winget installer manifest (template).
-# Replace __VERSION__, __URL__ and __SHA256__ (see winget/README.md), then submit
-# the three files to https://github.com/microsoft/winget-pkgs — or let the
-# winget-releaser action do it on release (see winget/README.md).
+# winget installer manifest, filled for v0.22.62.
+#
+# From v0.22.63 on, the `winget` job in .github/workflows/release.yml fills and
+# submits these on its own — it needs the WINGET_TOKEN secret. This copy is kept
+# current so a manual submission stays possible, and so the SHA256 of a shipped
+# installer is recorded in the tree.
+#
+# Regenerating by hand: take the *-setup.exe URL from the release, hash it
+# (`Get-FileHash -Algorithm SHA256` / `sha256sum`, uppercase hex), and bump
+# PackageVersion in all three files together.
 PackageIdentifier: oniolivvs.MusicPlayer
-PackageVersion: __VERSION__
+PackageVersion: 0.22.62
 InstallerType: nullsoft
 Scope: user
 InstallModes:
@@ -12,7 +18,7 @@ InstallModes:
 UpgradeBehavior: install
 Installers:
   - Architecture: x64
-    InstallerUrl: __URL__
-    InstallerSha256: __SHA256__
+    InstallerUrl: https://github.com/oniolivvs/music-player/releases/download/v0.22.62/MusicPlayer_0.22.62_x64-setup.exe
+    InstallerSha256: DB4B6B6C50BAF17BDE7F3367BBCF13976270AFF129CB3923DFE9AEFE4930E90A
 ManifestType: installer
 ManifestVersion: 1.6.0
