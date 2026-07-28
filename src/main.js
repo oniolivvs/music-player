@@ -750,7 +750,10 @@ function _virtSlice() {
   padBot.style.height = `${Math.max(0, view.length - end) * v.rowH}px`;
   rowsCont.innerHTML = view.slice(start, end).map((t, k) => _rowHtml(t, start + k, nowPath)).join("");
 
-  _sm.target = host.scrollTop;
+  // Only re-seed when no glide owns the position: a re-slice fires mid-wheel,
+  // and overwriting the target there would cut the animation short every time
+  // the rendered window moved.
+  if (!_sm.gliding) { _sm.target = host.scrollTop; _sm.expect = host.scrollTop; }
   hydrateCovers();
   proxyCovers(host);
   // These rows replaced the ones that carried the drag decorations.
@@ -817,8 +820,13 @@ function renderTracks(list, presorted = false) {
     if (savedTop > 0) host.scrollTop = savedTop;
   }
 
+  // A full re-render replaces the rows outright — any glide aimed at the old
+  // content is meaningless, so drop it rather than let it pull the new list.
+  if (_sm.raf) { cancelAnimationFrame(_sm.raf); _sm.raf = 0; }
+  _sm.gliding = false;
   _sm.el = host;
   _sm.target = host.scrollTop;
+  _sm.expect = host.scrollTop;
 
   // Rows use event delegation (wired once in init) — attaching thousands of
   // per-row listeners on every render made big libraries stutter.
@@ -831,7 +839,17 @@ function wireTrackList() {
   const host = $("#trackList");
   // Virtualized lists re-slice their window on scroll (one rAF max in flight).
   host.addEventListener("scroll", () => {
-    if (!_sm.raf) { _sm.el = host; _sm.target = host.scrollTop; }
+    // A scroll the glide did not produce — scrollbar drag, keyboard, touch — has
+    // to TAKE OVER it, not be undone by it. The old guard skipped this whole
+    // branch while an animation was in flight, so the glide kept lerping toward
+    // its stale target; the browser's own drag tracking hid that frame by frame
+    // and then let it snap the view back the instant the button was released.
+    const ours = _sm.gliding && _sm.el === host && Math.abs(host.scrollTop - _sm.expect) <= 1;
+    if (!ours) {
+      if (_sm.raf) { cancelAnimationFrame(_sm.raf); _sm.raf = 0; }
+      _sm.gliding = false;
+      _sm.el = host; _sm.target = host.scrollTop; _sm.expect = host.scrollTop;
+    }
     if (!_virt || _virt.raf) return;
     _virt.raf = requestAnimationFrame(() => { if (_virt) { _virt.raf = 0; _virtSlice(); } });
   }, { passive: true });
@@ -1552,26 +1570,21 @@ function fixThumbHeights(root) {
   });
 }
 // ─── Wheel smoothing ───
-// WebKitGTK applies wheel deltas as hard jumps ("it teleports then glides").
-// Ease the scroll position toward an accumulated target with rAF instead.
-// Touch devices keep native momentum; reduced-motion users keep raw jumps.
-function smoothWheel(el) {
-  if (!el || IS_TOUCH || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  let target = 0, raf = 0;
-  el.addEventListener("wheel", e => {
-    if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    const step = e.deltaMode === 1 ? e.deltaY * 18 : e.deltaY;
-    target = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, (raf ? target : el.scrollTop) + step));
-    if (!raf) tick();
-  }, { passive: false });
-  function tick() {
-    const cur = el.scrollTop, d = target - cur;
-    if (Math.abs(d) < 1) { el.scrollTop = target; raf = 0; return; }
-    el.scrollTop = cur + d * 0.24;
-    raf = requestAnimationFrame(tick);
-  }
-}
+// There used to be a second smoother here, smoothWheel(el), bound directly to
+// #trackList and .sidebar. It was removed: onWheelSmooth (see below) already
+// smooths every scrollable via scrollableFrom(), so the two ran on the same
+// element at once — both calling preventDefault(), both animating scrollTop
+// toward their own target, neither aware of the other or of the user.
+//
+// That duplicate was the cause of the "it scrolls back up on its own" bug. Its
+// tick() lerped toward a target it never re-checked, so any scroll the user
+// performed themselves — dragging the scrollbar above all — was undone frame by
+// frame. It also ignored the smoothScroll setting entirely (it gated only on
+// touch and reduced-motion), which is why turning that setting off changed
+// nothing.
+//
+// Rule for anything added here: scrollTop has exactly ONE owner at a time. If
+// you animate it, you must detect a scroll you did not produce and yield.
 let _thumbRz = 0;
 window.addEventListener("resize", () => {
   clearTimeout(_thumbRz);
@@ -3278,7 +3291,13 @@ function startPolling() {
 // frame. smoothStrength (1..5) sets both the wheel step and the glide length.
 // This handler also LOCKS the background: while a modal is open, a wheel over
 // anything not inside it is swallowed so the library/playlists don't scroll.
-const _sm = { el: null, target: 0, ease: 0.18, raf: 0 };
+// `gliding` says an animation owns the scroll position; `expect` is the exact
+// scrollTop the last frame wrote. A scroll event matching `expect` is our own
+// frame, anything else is the user. `gliding` must NOT be derived from `raf`:
+// _smStep clears raf on entry and re-arms it on exit, so a scroll event landing
+// between the two would read as "no glide" and let the listener fight the
+// animation frame by frame.
+const _sm = { el: null, target: 0, ease: 0.18, raf: 0, expect: -1, gliding: false };
 function scrollableFrom(node) {
   let el = node;
   while (el && el.nodeType === 1 && el !== document.body) {
@@ -3295,8 +3314,15 @@ function _smStep() {
   const el = _sm.el;
   if (!el) return;
   const diff = _sm.target - el.scrollTop;
-  if (Math.abs(diff) < 0.5) { el.scrollTop = _sm.target; return; }
+  if (Math.abs(diff) < 0.5) {
+    el.scrollTop = _sm.target;
+    _sm.expect = el.scrollTop; _sm.gliding = false;
+    return;
+  }
   el.scrollTop += diff * _sm.ease;
+  // Read back rather than trusting the assignment: the browser clamps and
+  // rounds, and the listener compares against this exact value.
+  _sm.expect = el.scrollTop;
   _sm.raf = requestAnimationFrame(_smStep);
 }
 function onWheelSmooth(e) {
@@ -3319,6 +3345,10 @@ function onWheelSmooth(e) {
   if (_sm.el !== el || !_sm.raf || Math.abs(_sm.target - el.scrollTop) > 150) { _sm.el = el; _sm.target = el.scrollTop; }
   const max = el.scrollHeight - el.clientHeight;
   _sm.target = Math.max(0, Math.min(max, _sm.target + delta * step));
+  // Claim ownership before the first frame runs, so the scroll events this
+  // glide is about to produce are recognised as ours and not as a user scroll.
+  _sm.gliding = true;
+  _sm.expect = el.scrollTop;
   if (!_sm.raf) _sm.raf = requestAnimationFrame(_smStep);
 }
 function initSmoothScroll() {
@@ -4786,8 +4816,6 @@ async function init() {
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") { const d = $("#srcDrop"); if (d && !d.hidden) { d.hidden = true; $("#navSources").classList.remove("active"); } }
   });
-  smoothWheel($("#trackList"));
-  smoothWheel(document.querySelector(".sidebar"));
   $("#shareClose").addEventListener("click", () => $("#shareModal").hidden = true);
   $("#shareModal").addEventListener("click", e => { if (e.target.id === "shareModal") $("#shareModal").hidden = true; });
   $("#shareHostStart").addEventListener("click", shareHostStart);
