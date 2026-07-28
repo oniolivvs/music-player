@@ -1,0 +1,23 @@
+# Node (Tauri CLI only)
+node_modules/
+npm-debug.log*
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Secrets — never commit (see docs/oauth-sync.md)
+src-tauri/.env
+.env
+*.secret
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# Private dev notes — never push to GitHub
+CLAUDE.md
+.foreman/

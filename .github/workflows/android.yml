@@ -1,0 +1,226 @@
+# Android APK build (Tauri 2 mobile). Runs on demand (Actions → android → Run
+# workflow) and on every v* tag. Produces a debug-signed APK (installable
+# directly — enable "install from unknown sources") for arm64 phones, uploaded
+# as a workflow artifact and attached to the release when triggered by a tag.
+name: android
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  NDK_VERSION: 26.1.10909125
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the APK to the release on tag builds
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK + platform
+        run: sdkmanager "ndk;${NDK_VERSION}" "platforms;android-34" "build-tools;34.0.0"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Use a STABLE debug signing key
+        run: |
+          # The runner would otherwise generate a fresh debug.keystore each build,
+          # changing the APK signature → Android refuses to upgrade over the old
+          # install → the user must uninstall → settings/library wiped. Ship a
+          # fixed keystore so every build shares one signature (upgrades keep data).
+          mkdir -p ~/.android
+          cp .github/android/debug.keystore ~/.android/debug.keystore
+          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey >/dev/null && echo "fixed debug key in place"
+
+      - name: Init Android project
+        run: |
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          npx tauri android init --ci
+
+      - name: Add audio/storage permissions to the manifest
+        run: |
+          M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          # Reading AND writing the shared Music folder (library scan + saving
+          # downloads there) needs All-Files-Access on Android 10+; scoped
+          # storage otherwise blocks both (empty library, failed downloads).
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" */>#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />#' "$M"
+          # LAN device sharing streams over plain HTTP on the local network —
+          # allow cleartext traffic (blocked by default since Android 9).
+          sed -i 's#<application #<application android:usesCleartextTraffic="true" #' "$M"
+          # In-app self-update: let the app hand a downloaded APK to the system
+          # installer (REQUEST_INSTALL_PACKAGES) via a FileProvider rooted at the
+          # app's external files dir (where download_apk saves update.apk).
+          sed -i 's#<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />#<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />#' "$M"
+          mkdir -p src-tauri/gen/android/app/src/main/res/xml
+          cat > src-tauri/gen/android/app/src/main/res/xml/file_paths.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths><external-files-path name="files" path="." /></paths>
+          XML
+          # De-indent the heredoc output (YAML indentation would break the XML).
+          sed -i 's/^          //' src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
+          sed -i 's#</application>#    <provider android:name="androidx.core.content.FileProvider" android:authorities="com.oniolivvs.musicplayer.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>\n    </application>#' "$M"
+          grep -n "uses-permission\|usesCleartextTraffic\|provider" "$M"
+
+      - name: Request media permission at startup (MainActivity)
+        run: |
+          # Declaring READ_MEDIA_AUDIO is not enough — it must be REQUESTED at
+          # runtime or the library scan silently sees nothing. The generated
+          # MainActivity is a bare TauriActivity; replace it with one that asks.
+          A=$(find src-tauri/gen/android -name MainActivity.kt | head -1)
+          PKG=$(grep -m1 '^package ' "$A")
+          cat > "$A" <<KT
+          $PKG
+
+          import android.os.Build
+          import android.os.Bundle
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.view.View
+          import android.view.ViewGroup
+          import android.webkit.WebView
+          import androidx.core.view.WindowCompat
+          import androidx.core.view.ViewCompat
+          import androidx.core.view.WindowInsetsCompat
+
+          class MainActivity : TauriActivity() {
+            // Registers this Activity's JavaVM + Context into ndk_context so
+            // cpal's AAudio backend can open the audio device (no sound without
+            // it). Implemented in Rust (src/lib.rs, JNI symbol matches).
+            private external fun initNdkContext()
+
+            override fun onCreate(savedInstanceState: Bundle?) {
+              super.onCreate(savedInstanceState)
+              try { initNdkContext() } catch (e: Throwable) { android.util.Log.e("MusicPlayer", "initNdkContext failed", e) }
+              // Edge-to-edge: draw the web content behind the status / nav bars so
+              // the app is truly fullscreen; the CSS uses safe-area insets to keep
+              // controls clear of them. Transparent bars over the dark UI.
+              WindowCompat.setDecorFitsSystemWindows(window, false)
+              window.statusBarColor = Color.TRANSPARENT
+              window.navigationBarColor = Color.TRANSPARENT
+              if (Build.VERSION.SDK_INT >= 28) {
+                window.attributes.layoutInDisplayCutoutMode =
+                  android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+              }
+
+              // True fullscreen: hide the status + navigation bars (the user
+              // wants no phone bar on top, like a video app). Swipe from an edge
+              // reveals them transiently. Re-applied in onWindowFocusChanged
+              // because Android restores the bars after dialogs / app switches.
+              hideSystemBars()
+
+              // Android WebView doesn't always surface env(safe-area-inset-*) to
+              // CSS, so push the real system-bar insets into CSS variables the
+              // frontend reads. Runs on every insets change (rotation, IME…).
+              val root = window.decorView
+              ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                val d = resources.displayMetrics.density
+                val t = (bars.top / d).toInt(); val b = (bars.bottom / d).toInt()
+                val l = (bars.left / d).toInt(); val r = (bars.right / d).toInt()
+                findWebView(root)?.post {
+                  findWebView(root)?.evaluateJavascript(
+                    "document.documentElement.style.setProperty('--android-inset-top','\${t}px');" +
+                    "document.documentElement.style.setProperty('--android-inset-bottom','\${b}px');" +
+                    "document.documentElement.style.setProperty('--android-inset-left','\${l}px');" +
+                    "document.documentElement.style.setProperty('--android-inset-right','\${r}px');" +
+                    "document.documentElement.classList.add('android');", null)
+                }
+                insets
+              }
+
+              val wanted = if (Build.VERSION.SDK_INT >= 33)
+                arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
+              else
+                arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+              val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+              if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1)
+
+              // All-Files-Access: the only way to read + write the shared Music
+              // folder like a desktop (scan the library, save downloads there).
+              // Opens the system grant screen once if not yet allowed.
+              if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
+                try {
+                  val i = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:\$packageName"))
+                  startActivity(i)
+                } catch (e: Exception) {
+                  try { startActivity(android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) } catch (e2: Exception) {}
+                }
+              }
+            }
+
+            // Hands a downloaded APK to the system installer (in-app update).
+            // Called from Rust via JNI (install_apk command). The FileProvider
+            // (manifest) exposes the external files dir where update.apk lands.
+            fun installApk(path: String) {
+              try {
+                val f = java.io.File(path)
+                val uri = androidx.core.content.FileProvider.getUriForFile(this, "\$packageName.fileprovider", f)
+                val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                i.setDataAndType(uri, "application/vnd.android.package-archive")
+                i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+              } catch (e: Exception) { android.util.Log.e("MusicPlayer", "installApk failed", e) }
+            }
+
+            private fun hideSystemBars() {
+              // Just hide the bars — the reveal gesture uses the platform default
+              // (swipe/tap). We avoid setting systemBarsBehavior because the
+              // TRANSIENT_BARS_BY_SWIPES constant isn't resolvable at this
+              // compileSdk and broke the build.
+              WindowCompat.getInsetsController(window, window.decorView)
+                .hide(WindowInsetsCompat.Type.systemBars())
+            }
+
+            override fun onWindowFocusChanged(hasFocus: Boolean) {
+              super.onWindowFocusChanged(hasFocus)
+              if (hasFocus) hideSystemBars()
+            }
+
+            private fun findWebView(v: View): WebView? {
+              if (v is WebView) return v
+              if (v is ViewGroup) for (i in 0 until v.childCount) findWebView(v.getChildAt(i))?.let { return it }
+              return null
+            }
+          }
+          KT
+          cat "$A"
+
+      - name: Build APK (arm64, debug-signed)
+        run: |
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          # rquickjs-sys regenerates its QuickJS bindings with bindgen on
+          # Android — point clang at the NDK sysroot for the target headers.
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot --target=aarch64-linux-android28"
+          npx tauri android build --apk --debug --target aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicPlayer-android-arm64-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - name: Attach APK to the release (tag builds)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/gen/android/app/build/outputs/apk/**/*.apk

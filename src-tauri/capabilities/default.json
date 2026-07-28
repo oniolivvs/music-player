@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the main window: core APIs + native folder picker (dialog open).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "notification:default",
+    "opener:allow-open-url"
+  ]
+}

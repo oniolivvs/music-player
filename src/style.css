@@ -1,0 +1,1136 @@
+/* MP_CSS 0.22.40 — version marker read by the main.js OTA self-heal (ota_apply
+   fetches css and modules separately, so this file alone can be a stale CDN
+   copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
+:root {
+  --bg-0: #0b0b0f;
+  --bg-1: #121218;
+  --bg-2: #17171f;
+  --bg-3: #20202b;
+  --bg-4: #2a2a38;
+  --tx-1: #f4f5f8;
+  --tx-2: #a6a9b8;
+  --tx-3: #6d7080;
+  --accent: #8B5CF6;
+  --accent-2: #A78BFA;
+  --bd: rgba(255, 255, 255, 0.07);
+  --bd-2: rgba(255, 255, 255, 0.12);
+  --vio-glow: rgba(139, 92, 246, 0.14);
+  --r: 12px;
+}
+
+* {
+  box-sizing: border-box; margin: 0; padding: 0;
+  /* Mobile: tapping a button used to flash a blue rectangle over its hitbox. */
+  -webkit-tap-highlight-color: transparent;
+}
+/* Native-app feel: text isn't selectable, except where you actually type. */
+html { user-select: none; -webkit-user-select: none; }
+input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
+/* Buttons keep their own :hover/:active styling; no default focus ring flash. */
+button { -webkit-tap-highlight-color: transparent; }
+button:focus:not(:focus-visible) { outline: none; }
+html, body { height: 100%; width: 100%; max-width: 100vw; overflow-x: hidden; }
+body {
+  font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--tx-1);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a4d; background-clip: padding-box; }
+/* Smooth scrolling (Performance → Smooth scrolling). Eases programmatic/keyboard
+   scrolls; scroll containers also stop chaining so lists feel less jumpy. */
+.tracklist, .modal-body, .src-list, .playlists-list, .np-next, .ck-list, .imp-hits, .imp-list, .side-section { overscroll-behavior: contain; }
+.tracklist { scroll-behavior: auto !important; }
+body.smooth .modal-body, body.smooth .src-list,
+body.smooth .playlists-list, body.smooth .np-next, body.smooth .ck-list,
+body.smooth .imp-hits, body.smooth .imp-list, body.smooth .side-section { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { *, body.smooth * { scroll-behavior: auto !important; } }
+
+.app { flex: 1; display: grid; grid-template-columns: var(--side-w, 268px) 1fr; min-height: 0; gap: 8px; padding: 8px; position: relative; }
+
+/* ─── Drag-resize handles (sidebar right edge, Now-playing left edge) ─── */
+.rs-handle {
+  position: absolute; top: 8px; bottom: 8px; width: 8px; cursor: col-resize;
+  z-index: 30; border-radius: 4px; transition: background .12s;
+}
+.rs-handle:hover, .rs-handle.dragging { background: var(--vio-glow); box-shadow: inset 0 0 0 1px var(--accent); }
+#sideResize { left: calc(var(--side-w, 268px) + 8px); }  /* sits on the grid gap */
+#npResize { left: -4px; top: 0; bottom: 0; }
+body.rs-dragging { cursor: col-resize; }
+body.rs-dragging .rs-handle { background: var(--vio-glow); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* ─── Sidebar ─── */
+.sidebar {
+  background: var(--bg-1);
+  border-radius: var(--r);
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  position: relative;
+}
+.brand { font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.brand span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-item {
+  text-align: left; background: transparent; border: none; color: var(--tx-2);
+  padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; gap: 12px; transition: background .12s, color .12s;
+}
+.nav-item .ni-ico { font-size: 16px; }
+.nav-item:hover { color: var(--tx-1); }
+.nav-item.active { background: var(--bg-3); color: var(--tx-1); }
+
+.folder-add { display: flex; flex-direction: column; gap: 8px; }
+.fa-head { display: flex; align-items: center; justify-content: space-between; }
+.folder-add label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
+.folder-add .row { display: flex; gap: 6px; margin-top: 6px; }
+.folder-add input { flex: 1; min-width: 0; }
+.manual summary { font-size: 11px; color: var(--tx-3); cursor: pointer; user-select: none; list-style: none; }
+.manual summary:hover { color: var(--tx-2); }
+
+.section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; margin-top: 4px; }
+.playlists-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.pl-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--tx-2); font-size: 13px; }
+.pl-row:hover { background: var(--bg-2); color: var(--tx-1); }
+.pl-row .pl-del { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 12px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; opacity: 0; }
+.pl-row:hover .pl-del { opacity: 1; }
+.pl-row .pl-del:hover { background: var(--bg-4); color: var(--tx-1); }
+.pl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-cover { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--tx-3); background: var(--bg-3); background-size: cover; background-position: center; overflow: hidden; }
+.pl-cover svg { width: 15px; height: 15px; }
+.pl-cover.has-cover { color: transparent; }
+.pl-row .pl-eye { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 13px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; opacity: 0; }
+.pl-row:hover .pl-eye { opacity: .85; }
+.pl-row .pl-eye:hover { background: var(--bg-4); opacity: 1; }
+.vh-icon.vh-cover.has-cover { background-size: cover; background-position: center; color: transparent; font-size: 0; }
+.pl-preview { position: fixed; z-index: 200; max-width: 340px; max-height: 60vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--bg-4); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.5); padding: 8px; font-size: 12px; }
+.plp-head { font-weight: 600; color: var(--tx-1); padding: 4px 6px 8px; border-bottom: 1px solid var(--bg-4); margin-bottom: 4px; position: sticky; top: -8px; background: var(--bg-2); }
+.plp-row { display: flex; gap: 8px; padding: 3px 6px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plp-n { color: var(--tx-3); min-width: 20px; text-align: right; flex-shrink: 0; }
+.plp-empty, .plp-more { padding: 6px; color: var(--tx-3); text-align: center; }
+/* Artist/channel header card at the top of a YouTube search */
+.artist-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; margin: 0 0 10px; border-radius: 12px; background: linear-gradient(135deg, var(--bg-2), var(--bg-3)); border: 1px solid var(--bg-4); }
+.ac-avatar { width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0; background: var(--bg-4) center/cover no-repeat; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.ac-meta { flex: 1; min-width: 0; }
+.ac-name { font-size: 19px; font-weight: 700; color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-sub { font-size: 12px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ac-actions .ac-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ac-pl { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.ac-pl:hover { background: var(--bg-2); }
+.ac-pl-t { font-size: 13px; font-weight: 600; color: var(--tx-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-pl-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
+
+.settings-btn { margin-top: auto; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 9px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; }
+.settings-btn:hover { border-color: var(--bd-2); color: var(--tx-1); }
+.update-btn {
+  margin-top: auto; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border: none; color: #fff; padding: 10px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 800;
+}
+.update-btn:hover { filter: brightness(1.1); }
+.update-btn:disabled { opacity: .75; cursor: default; }
+.update-btn + .settings-btn { margin-top: 8px; }
+
+input[type="text"], input[type="search"] {
+  background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1);
+  border-radius: 8px; padding: 9px 11px; font-size: 13px; outline: none;
+}
+input:focus { border-color: var(--accent); }
+
+/* ─── Custom checkboxes (replaces the native OS look everywhere) ─── */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 17px; height: 17px; margin: 0; flex-shrink: 0;
+  border: 1.5px solid var(--bd-2); border-radius: 5px;
+  background: var(--bg-3);
+  display: inline-grid; place-items: center;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+input[type="checkbox"]:hover { border-color: var(--accent-2); }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after {
+  content: ""; width: 8px; height: 4.5px; margin-top: -1.5px;
+  border: 2px solid #fff; border-top: none; border-right: none;
+  transform: rotate(-45deg);
+}
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+
+/* ─── Custom range sliders (volume, seek, settings) — no native rendering ─── */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  background: transparent; height: 16px; cursor: pointer; padding: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  /* played portion filled with the accent (JS keeps --fill in sync) */
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--bg-4) var(--fill, 0%));
+}
+/* Seek bar: clean line, thumb only appears on hover (à la Spotify) */
+.seekbar::-webkit-slider-thumb { opacity: 0; transition: opacity .12s, transform .1s; }
+.seekbar:hover::-webkit-slider-thumb, .seekbar:active::-webkit-slider-thumb { opacity: 1; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: var(--thumb-size, 12px); height: var(--thumb-size, 12px); border-radius: 50%;
+  margin-top: calc((4px - var(--thumb-size, 12px)) / 2);
+  background-color: var(--accent);
+  background-image: var(--thumb-img, none); background-size: cover; background-position: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  transition: transform .1s;
+}
+/* With a custom image, don't recolor on hover — just scale. */
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
+body:not(.has-thumb) input[type="range"]:hover::-webkit-slider-thumb { background-color: var(--accent-2); }
+/* no native blue focus ring — the accent thumb is the focus indicator */
+input[type="range"]:focus, input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--vio-glow), 0 1px 4px rgba(0, 0, 0, .45); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: 9px; padding: 9px 14px; font-weight: 700; cursor: pointer; font-size: 13px; line-height: 1; transition: filter .12s, transform .1s; }
+.btn:hover { filter: brightness(1.1); }
+.btn:active { transform: scale(.97); }
+.btn-block { width: 100%; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--tx-3); cursor: pointer; width: 30px; height: 30px; border-radius: 8px; transition: background .12s, color .12s; }
+.icon-btn:hover { background: var(--bg-3); color: var(--tx-1); }
+.icon-btn svg { width: 16px; height: 16px; display: block; }
+
+/* ─── Main ─── */
+.main { background: linear-gradient(180deg, rgba(139,92,246,0.08), var(--bg-1) 220px); border-radius: var(--r); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.topbar { padding: var(--topbar-pad, 13px) 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; row-gap: 8px; }
+body.compact-top .topbar { --topbar-pad: 7px; gap: 8px; }
+body.compact-top .search-wrap input { padding-top: 6px; padding-bottom: 6px; }
+body.compact-top .top-gear, body.compact-top .icon-btn { width: 26px; height: 26px; }
+.tk-idx .idx-play svg { width: 11px; height: 11px; }
+/* Search is the primary action of the top bar, so it sits centred and carries
+   real weight instead of hugging the left edge. The sibling controls are the
+   burger (hidden on desktop) and the selection counter (empty unless you are
+   selecting), so auto margins centre it against the view for real. */
+.search-wrap { position: relative; flex: 1 1 560px; max-width: min(620px, 62vw); margin-inline: auto; }
+.search-ico { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: .75; pointer-events: none; transition: opacity .12s, color .12s; }
+.search-wrap input {
+  width: 100%; padding-left: 38px; padding-top: 10px; padding-bottom: 10px;
+  font-size: 13.5px; border-radius: 11px;
+  background: var(--bg-3); border: 1px solid var(--bd);
+  transition: border-color .14s, background .14s, box-shadow .14s;
+}
+.search-wrap input::placeholder { opacity: .72; }
+.search-wrap input:hover { border-color: var(--bd-2); }
+.search-wrap input:focus { background: var(--bg-2); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, .22); outline: none; }
+.search-wrap:focus-within .search-ico { opacity: 1; color: var(--accent); }
+body.compact-top .search-wrap input { border-radius: 9px; }
+.count { color: var(--tx-3); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* Inline SVG icon inside a button / menu-item label */
+/* Inline icon: a flex child inside flex buttons (centered by the button's
+   align-items). In inline text contexts (menus, labels) it needs a nudge. */
+.bic { display: inline-flex; align-items: center; flex-shrink: 0; }
+.bic svg { width: 14px; height: 14px; display: block; }
+/* Inline nudge ONLY for icons sitting in plain text (menu items, checkbox
+   labels) — never for icons inside flex buttons, which the button centers. */
+.ctx-item > .bic, label > .bic { vertical-align: -0.24em; margin-right: 9px; opacity: .82; }
+.ctx-item > .bic { margin-right: 8px; }
+/* Small icon-only buttons: center the SVG, kill the old font-size sizing. */
+.pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more { display: inline-flex; align-items: center; justify-content: center; }
+.pl-del svg, .pl-eye svg, .src-btn svg, .fl-x svg, .dl-x svg { width: 13px; height: 13px; display: block; }
+/* A filter glyph in front of the sort dropdown */
+.sort-ico { display: inline-flex; align-items: center; color: var(--tx-3); }
+
+/* Search field + dropdowns read as glassy chips over a wallpaper (still solid
+   when there's no wallpaper). No live backdrop-filter — WebKitGTK software
+   rendering makes it expensive; a flat translucent fill is enough. */
+body.has-bg input[type="search"],
+body.has-bg input[type="text"],
+body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+body.bg-light.has-bg input[type="search"],
+body.bg-light.has-bg input[type="text"],
+body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
+/* Readability over a wallpaper: the translucent panels let the background bleed
+   through and wash out the dim grey text (SOURCES / PLAYLISTS labels, artist
+   names, counts, placeholders). Instead of per-glyph glows (muddy), lift the
+   secondary/tertiary text tones toward the scheme's high-contrast end while a
+   background is set — a clean, flat contrast boost. */
+body.has-bg { --tx-1: #ffffff; --tx-2: #eef0f5; --tx-3: #d3d7e0; }
+body.bg-light.has-bg { --tx-1: #000000; --tx-2: #16171c; --tx-3: #303138; }
+/* NB: intentionally NO blanket text-shadow on the panels — applied to every row
+   of a long list it repaints on each scroll frame and makes the whole UI lag on
+   software-rendered WebKitGTK. The brightened --tx-* tones above already carry
+   the contrast; only the big header title (few nodes) keeps a shadow, below. */
+/* The big header title sits over the busiest area — give it a touch more. */
+body.has-bg .vh-title,
+body.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(0,0,0,.6); }
+body.bg-light.has-bg .vh-title,
+body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
+
+/* overflow-x explicit: with only overflow-y set, overflow-x computes to auto —
+   any too-wide child let the whole results page pan sideways on phones. */
+.tracklist { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 12px 16px; }
+
+/* ─── Topbar navigation (Library / Recent / Share / Sources) ───
+   Moved out of the sidebar — the sidebar is playlists-only now. Same nav-item
+   look, laid out inline with uniform gaps; labels drop on narrow screens. */
+.top-nav { display: flex; align-items: center; gap: 6px; }
+/* Standalone full-width panel at the very top of the window — independent of
+   the sidebar / main / now-playing layout, same inset and radius as them. */
+.nav-bar {
+  flex-shrink: 0;
+  margin: 8px calc(8px + var(--safe-right, 0px)) 0 calc(8px + var(--safe-left, 0px));
+  padding: 8px 12px;
+  border-radius: var(--r);
+  background: var(--bg-1);
+}
+body.has-bg .nav-bar { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+.top-nav .nav-item { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 9px; margin: 0; width: auto; background: var(--bg-2); border: 1px solid transparent; }
+.top-nav .nav-item:hover { background: var(--bg-3); }
+.top-nav .nav-item.active { background: var(--bg-3); border-color: var(--bd-2); }
+body.has-bg .top-nav .nav-item { background: rgba(255, 255, 255, .07); }
+body.has-bg .top-nav .nav-item:hover, body.has-bg .top-nav .nav-item.active { background: rgba(255, 255, 255, .14); }
+.top-nav .nav-right { margin-left: auto; }
+/* Pinned tracks: pin glyph replaces the row number, subtle highlight. */
+.track.pinned { background: rgba(255, 255, 255, .03); }
+body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
+.idx-pin svg { width: 12px; height: 12px; color: var(--accent-2); }
+.badge-stream { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px; vertical-align: middle; line-height: 1.2; }
+@keyframes spinFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spinning svg, button.spinning svg { animation: spinFast 0.8s linear infinite; }
+.top-nav .ni-lbl { font-size: 12.5px; }
+.top-drop-wrap { position: relative; }
+.top-drop {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 70;
+  width: 300px; max-height: 60vh; overflow-y: auto;
+  background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 12px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .45);
+}
+body.has-bg .top-drop {
+  background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+
+/* ─── Mini-YouTube card grid (YouTube search results, Settings-free toggle) ─── */
+.tracklist.yt-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+  gap: 12px; align-content: start; padding: 10px 16px 18px;
+}
+.yt-grid .track.yt-card {
+  /* align-items MUST be reset: the base .track rule sets `center`, which in a
+     column flex means content-width children — the .yc-thumb has only
+     absolutely-positioned children, so it collapsed to WIDTH 0 and the cover
+     (correctly loaded underneath) was invisible. THE grid-thumbnail bug. */
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; position: relative;
+  padding: 8px; border-radius: 12px; background: var(--bg-1);
+  border: 1px solid transparent; cursor: pointer; transition: background .12s, transform .12s;
+  min-width: 0; /* let equal 1fr tracks stay equal — a long title can't force width */
+}
+.yt-grid .yt-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.yt-grid .yt-card.selected { border-color: var(--accent); }
+.yt-grid .yt-card.playing .yc-title { color: var(--accent-2); }
+.yt-grid .yt-card.owned { opacity: .75; }
+.yc-thumb {
+  /* A REAL height, never the height:0 + padding-bottom ratio hack: the old
+     Android WebView renders NOTHING over the padding zone — not the background
+     AND not the absolutely-positioned children (that's why the covers stayed
+     invisible even after they became real <img> tags, and why the duration
+     badge never showed). Old engines get a fixed ~16:9 fallback; anything that
+     understands aspect-ratio gets the exact ratio. */
+  position: relative; height: 118px; border-radius: 9px; overflow: hidden;
+  /* Faint music-note placeholder until the cover lands (inline
+     background-image overrides the image layer, keeping the color). */
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a4a5c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E") center / 34px no-repeat var(--bg-3);
+}
+.yc-thumb[style*="background-image"] { background-size: cover; }
+/* NO aspect-ratio here, not even behind @supports: WebKitGTK (desktop) and
+   old WebViews PARSE aspect-ratio (so @supports matches) but compute a
+   0-height for stretch-sized flex children → the cover AND the duration badge
+   vanish while fixed-size boxes (playlist thumbs) keep painting. The exact
+   16:9 height is pinned in JS per card (fixThumbHeights); this 118px is only
+   the pre-measure placeholder. */
+.yc-dur {
+  position: absolute; right: 6px; bottom: 6px; padding: 1px 5px; border-radius: 5px;
+  background: rgba(0, 0, 0, .82); color: #fff; font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.yc-own {
+  position: absolute; left: 6px; top: 6px; padding: 3px 4px; border-radius: 5px;
+  background: rgba(0, 0, 0, .72); color: #34d399; display: grid; place-items: center;
+}
+.yc-own svg { width: 13px; height: 13px; }
+.yc-play {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: auto; width: 44px; height: 44px; border-radius: 50%;
+  border: none; background: rgba(0, 0, 0, .68); color: #fff; display: grid; place-items: center;
+  opacity: 0; transform: scale(.9); transition: opacity .14s, transform .14s; cursor: pointer;
+}
+.yc-play svg { width: 18px; height: 18px; }
+.yc-thumb:hover .yc-play { opacity: 1; transform: scale(1); }
+.yc-play:hover { background: var(--accent); }
+.yc-meta { min-width: 0; padding: 0 2px 2px; }
+.yc-title {
+  font-size: 13px; font-weight: 700; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.yc-sub { font-size: 11.5px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.yc-more { position: absolute; top: 12px; right: 12px; opacity: 0; background: rgba(0,0,0,.6); border-radius: 6px; }
+.yt-grid .yt-card:hover .yc-more { opacity: 1; }
+.yt-grid .artist-card, .yt-grid .list-sep { grid-column: 1 / -1; }
+.yt-viewtog { display: inline-flex; gap: 4px; }
+.empty { color: var(--tx-3); text-align: center; padding: 60px 20px; }
+.empty-ico { font-size: 40px; margin-bottom: 14px; opacity: .5; display: flex; justify-content: center; }
+.empty-ico svg { width: 44px; height: 44px; }
+
+.track {
+  display: grid; grid-template-columns: 26px 40px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px; align-items: center;
+  padding: 6px 12px; border-radius: 8px; cursor: default; user-select: none;
+}
+.track:hover { background: var(--bg-2); }
+.track.selected { background: var(--bg-3); }
+/* Now-playing row: enclosed by an accent ring + soft glow (no eq bars). */
+.track.playing {
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 16px -8px var(--accent);
+}
+.track.playing .t { color: var(--accent-2); font-weight: 700; }
+body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
+.tk-idx { position: relative; display: grid; place-items: center; color: var(--tx-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tk-idx .idx-play { display: none; color: var(--tx-1); font-size: 10px; }
+.track:hover .idx-num { display: none; }
+.track:hover .idx-play { display: block; }
+/* Playing row: the position number stays, tinted accent + a dot marker. */
+.track.playing .idx-num { color: var(--accent-2); font-weight: 700; }
+.track.playing .tk-idx::after { content: "●"; position: absolute; left: -9px; color: var(--accent); font-size: 8px; }
+.album { font-size: 13px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.art { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-weight: 800; font-size: 16px; color: rgba(255,255,255,.92); overflow: hidden; }
+/* With a cover image, fill the box (YouTube thumbs are 320×180 — without this
+   they render at native size and only a corner shows). Mirrors .yc-thumb. */
+.art.has-cover { background-size: cover; background-position: center; background-repeat: no-repeat; color: transparent; font-size: 0; }
+.meta { min-width: 0; }
+.meta .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .s { font-size: 12px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track .dur { color: var(--tx-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.track .more { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 18px; opacity: 0; border-radius: 6px; width: 26px; height: 26px; }
+.track:hover .more { opacity: 1; }
+.track .more:hover { background: var(--bg-4); color: var(--tx-1); }
+
+/* ─── Player bar ─── */
+.player { background: var(--bg-1); margin: 0 8px 8px; border-radius: var(--r); display: flex; flex-direction: column; padding: 12px 20px; gap: 9px; }
+.player-main { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
+.now { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.np-art { width: 46px; height: 46px; border-radius: 8px; display: grid; place-items: center; background: var(--bg-3); font-size: 20px; font-weight: 800; color: rgba(255,255,255,.9); flex-shrink: 0; }
+.np-txt { min-width: 0; }
+.now-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-sub { font-size: 12px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.controls { display: flex; align-items: center; gap: 8px; justify-self: center; }
+.ctrl { position: relative; background: transparent; border: none; color: var(--tx-2); font-size: 17px; cursor: pointer; width: 38px; height: 38px; border-radius: 50%; transition: color .12s, background .12s, transform .1s; display: grid; place-items: center; }
+.ctrl svg { display: block; }
+.ctrl:hover { color: var(--tx-1); }
+.ctrl:active { transform: scale(.93); }
+.ctrl.play { background: var(--tx-1); color: #000; font-size: 15px; }
+.ctrl.play svg { margin-left: 1px; }
+.ctrl.play:hover { transform: scale(1.06); }
+.ctrl.active { color: var(--accent-2); }
+.rep-one {
+  position: absolute; right: 5px; bottom: 5px;
+  font-size: 8px; font-weight: 900; line-height: 1;
+  background: var(--accent); color: #fff;
+  border-radius: 50%; width: 11px; height: 11px;
+  display: grid; place-items: center;
+}
+.vol-ico { display: grid; place-items: center; color: var(--tx-2); }
+.volume { display: flex; align-items: center; gap: 8px; justify-self: end; color: var(--tx-2); }
+.volume input[type="range"] { width: 110px; accent-color: var(--accent); }
+.norm { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--tx-3); cursor: pointer; user-select: none; }
+.norm input { width: 14px; height: 14px; border-radius: 4px; }
+.norm input:checked::after { width: 7px; height: 4px; }
+
+.progress { display: flex; align-items: center; gap: 10px; }
+.time { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
+.seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
+
+/* ─── Context menu ─── */
+.ctx-menu { position: fixed; z-index: 130; min-width: 210px; background: var(--bg-3); border: 1px solid var(--bd-2); border-radius: 10px; padding: 6px; box-shadow: 0 12px 34px rgba(0,0,0,.5); max-height: 340px; overflow-y: auto; }
+.ctx-item { padding: 8px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-item:hover { background: var(--accent); color: #fff; }
+.ctx-sep { height: 1px; background: var(--bd); margin: 5px 6px; }
+.ctx-label { padding: 6px 12px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
+
+/* ─── Settings modal ─── */
+/* Above the mobile sidebar drawer (z-index 119) so a modal opened from a sidebar
+   button (Import…) sits ON TOP of it instead of behind it. */
+.modal-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 122; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
+#cookieModal { z-index: 124; }
+/* Only the body scrolls — the header stays put and the scrollbar is clipped
+   inside the rounded corners (no bar cutting across the header / top corner). */
+.modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--bd); background: inherit; flex-shrink: 0; }
+.modal-head h2 { font-size: 17px; }
+.modal-body { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+/* Settings: tabbed two-pane layout (nav sidebar + scrolling panes) */
+.modal.settings { width: min(760px, 95vw); }
+.modal.settings .modal-body { flex-direction: row; padding: 0; gap: 0; overflow: hidden; }
+.set-nav { flex: 0 0 178px; display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; border-right: 1px solid var(--bd); overflow-y: auto; background: rgba(255, 255, 255, .015); }
+body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
+.set-tab { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border: 0; border-radius: 9px; background: transparent; color: var(--tx-2); font-size: 13px; font-weight: 600; cursor: pointer; transition: background .13s, color .13s; }
+.set-tab .bic { color: var(--tx-3); transition: color .13s; display: inline-flex; }
+.set-tab:hover { background: rgba(255, 255, 255, .05); color: var(--tx-1); }
+.set-tab:hover .bic { color: var(--tx-2); }
+.set-tab.on { background: rgba(255, 255, 255, .06); color: var(--accent-2); box-shadow: inset 2px 0 0 var(--accent); }
+.set-tab.on .bic { color: var(--accent); }
+.set-panes { flex: 1 1 auto; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.set-pane { display: none; flex-direction: column; gap: 12px; }
+.set-pane.on { display: flex; }
+@media (max-width: 640px) {
+  /* Fill the whole viewport with inset:0 instead of width:100vw + grid
+     centering — a centered item that's even 1px wider than the viewport gets
+     its LEFT edge clipped and unreachable (the bug that cut "YOUTUBE"→"UTUBE").
+     inset:0 pins all four edges so there is no horizontal overflow at all. */
+  .modal.settings { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; height: auto; max-height: none; border-radius: 0; overflow: hidden; }
+  .modal.settings .modal-head { padding-top: calc(12px + var(--safe-top)); }
+  .modal.settings .modal-body { flex-direction: column; min-width: 0; overflow-x: hidden; }
+  .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
+  .set-tab { width: auto; white-space: nowrap; flex: 0 0 auto; }
+  .set-tab.on { box-shadow: inset 0 -2px 0 var(--accent); }
+  .set-panes { padding-bottom: calc(18px + var(--safe-bottom)); min-width: 0; overflow-x: hidden; }
+  .set-pane, .set-group { min-width: 0; max-width: 100%; }
+  /* Long rows (label + wide control) stack so nothing gets clipped on a phone. */
+  .set-row { flex-wrap: wrap; min-width: 0; }
+  .set-row label { min-width: 0; }
+  .text-in, .num-in, .sel.wide, .dir-pick { max-width: 100%; }
+  .text-in { width: 100%; }
+  /* Full-screen modals on mobile: give them safe-area breathing room. */
+  .modal-backdrop { padding: 0; }
+  .modal { max-height: 100dvh; }
+}
+/* Settings groups as cards */
+.set-group { padding: 13px 16px 10px; border: 1px solid var(--bd); border-radius: 12px; background: rgba(255, 255, 255, .025); }
+body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
+.set-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-bottom: 8px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 0; }
+.set-row label { font-size: 13px; color: var(--tx-1); }
+.set-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.set-row input[type="range"] { width: 150px; accent-color: var(--accent); }
+.text-in { width: 210px; }
+.num-in { width: 88px; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
+.num-in:focus { border-color: var(--accent); }
+body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+.set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
+.swatches { display: flex; gap: 8px; }
+.swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatch.on { border-color: var(--tx-1); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor; }
+
+/* ─── Toast ─── */
+.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 140; max-width: min(88vw, 460px); overflow-wrap: anywhere; word-break: break-word; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.mock-banner { background: rgba(245,158,11,.12); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 12px; margin: 10px 12px; font-size: 12px; }
+
+[hidden] { display: none !important; }
+
+/* ─── Custom background (image + blur + dim) & translucent panels ─── */
+body::before {
+  content: ""; position: fixed; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: -1; pointer-events: none;
+  background: var(--app-bg-image, none) center / cover no-repeat;
+  filter: blur(var(--app-bg-blur, 18px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
+  /* Promote to its own GPU layer so the (static) blur is cached as a texture and
+     NOT recomputed every time a panel above it repaints — big win for scroll /
+     hover smoothness over a wallpaper on software-rendered WebKitGTK. */
+  transform: translateZ(0); will-change: transform; backface-visibility: hidden;
+  display: none;
+}
+body.has-bg::before { display: block; }
+body.has-bg { background: #000; }
+/* Every surface — panels, drawers, menus AND modals — uses the same panel-alpha
+   tint, so the whole UI is uniformly see-through; the Panel opacity slider drives
+   all of them at once and the dim slider makes it darker behind. The wallpaper
+   layer is blurred ONCE (static) behind the panels, so those need no live blur.
+   Floating layers (modals / drawers / menus), however, sit over the sharp UI, so
+   they DO get a real backdrop-filter blur — otherwise the busy library shows
+   straight through and they're unusable. (Costs GPU/CPU on software-rendered
+   WebKitGTK, but the user explicitly wants the frosted-glass look.) */
+body.has-bg .sidebar,
+body.has-bg .player,
+body.has-bg .main,
+body.has-bg .dl-drawer,
+body.has-bg .np-drawer,
+body.has-bg .ctx-menu,
+body.has-bg .modal { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+/* Frosted glass on the WINDOW only: the blur lives on each floating panel itself
+   (modal / drawers / menus), so it frosts just what's directly behind that panel's
+   rectangle — the rest of the app stays sharp. The full-screen backdrop only dims
+   very slightly for focus; it must NOT blur, or the whole background goes soft. */
+body.has-bg .modal-backdrop { background: rgba(0, 0, 0, .18); }
+body.has-bg .modal,
+body.has-bg .dl-drawer,
+body.has-bg .np-drawer,
+body.has-bg .ctx-menu {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+/* Search result cards (videos + playlists) over a wallpaper: flat translucent
+   fill like the other panels — the solid navy blocks hid the background. */
+body.has-bg .yt-grid .track.yt-card,
+body.has-bg .pl-card { background: rgba(16, 16, 24, .45); border-color: rgba(255, 255, 255, .07); }
+body.has-bg .yt-grid .yt-card:hover,
+body.has-bg .pl-card:hover { background: rgba(255, 255, 255, .09); }
+body.has-bg .yc-thumb, body.has-bg .pc-thumb { background-color: rgba(255, 255, 255, .06); }
+/* Cover preload: slim percent bar shown while a search page loads its covers. */
+.yt-loading { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; align-items: center; padding: 46px 20px; }
+.yt-prog { width: min(420px, 80%); height: 6px; border-radius: 999px; background: rgba(255, 255, 255, .10); overflow: hidden; }
+.yt-prog-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .15s; }
+.yt-prog-txt { font-size: 12px; color: var(--tx-2); }
+/* Solid dark hover/selection colors look like black holes over a wallpaper —
+   switch to translucent light overlays instead. */
+body.has-bg .track:hover,
+body.has-bg .pl-row:hover,
+body.has-bg .src-row:hover,
+body.has-bg .nx-row:hover,
+body.has-bg .imp-hit:hover,
+body.has-bg .imp-item:hover,
+body.has-bg .ck-opt:hover,
+body.has-bg .ac-pl:hover,
+body.has-bg .now:hover,
+body.has-bg .icon-btn:hover,
+body.has-bg .ctrl:hover,
+body.has-bg .track .more:hover,
+body.has-bg .pl-row .pl-del:hover,
+body.has-bg .pl-row .pl-eye:hover,
+body.has-bg .src-btn:hover,
+body.has-bg .fl-x:hover,
+body.has-bg .dl-x:hover,
+body.has-bg .nav-item.active { background: rgba(255, 255, 255, .07); }
+body.has-bg .track.selected { background: rgba(255, 255, 255, .12); }
+body.has-bg .track.playing { background: rgba(255, 255, 255, .05); }
+body.has-bg .pl-row.active,
+body.has-bg .src-row.active,
+body.has-bg #npPin.active { background: rgba(255, 255, 255, .10); }
+
+/* ─── Light wallpaper scheme: dark text on light panels (auto or forced) ─── */
+body.bg-light.has-bg {
+  --tx-1: #171923; --tx-2: #3d4354; --tx-3: #6b7284;
+  --bd: rgba(0, 0, 0, .10); --bd-2: rgba(0, 0, 0, .18);
+  --bg-2: rgba(0, 0, 0, .05); --bg-3: rgba(0, 0, 0, .08); --bg-4: rgba(0, 0, 0, .14);
+}
+body.bg-light.has-bg .sidebar,
+body.bg-light.has-bg .player,
+body.bg-light.has-bg .main,
+body.bg-light.has-bg .dl-drawer,
+body.bg-light.has-bg .np-drawer,
+body.bg-light.has-bg .ctx-menu,
+body.bg-light.has-bg .modal { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
+body.bg-light.has-bg .modal-backdrop { background: rgba(255, 255, 255, .15); }
+body.bg-light.has-bg .modal-head { background: inherit; }
+body.bg-light.has-bg .track:hover,
+body.bg-light.has-bg .pl-row:hover,
+body.bg-light.has-bg .src-row:hover,
+body.bg-light.has-bg .nx-row:hover,
+body.bg-light.has-bg .imp-hit:hover,
+body.bg-light.has-bg .imp-item:hover,
+body.bg-light.has-bg .ck-opt:hover,
+body.bg-light.has-bg .ac-pl:hover,
+body.bg-light.has-bg .now:hover,
+body.bg-light.has-bg .icon-btn:hover,
+body.bg-light.has-bg .ctrl:hover,
+body.bg-light.has-bg .track .more:hover,
+body.bg-light.has-bg .pl-row .pl-del:hover,
+body.bg-light.has-bg .pl-row .pl-eye:hover,
+body.bg-light.has-bg .src-btn:hover,
+body.bg-light.has-bg .fl-x:hover,
+body.bg-light.has-bg .dl-x:hover,
+body.bg-light.has-bg .nav-item.active { background: rgba(0, 0, 0, .06); }
+body.bg-light.has-bg .track.selected { background: rgba(0, 0, 0, .10); }
+body.bg-light.has-bg .track.playing { background: rgba(0, 0, 0, .05); }
+body.bg-light.has-bg .pl-row.active,
+body.bg-light.has-bg .src-row.active { background: rgba(0, 0, 0, .09); }
+body.bg-light.has-bg input[type="text"],
+body.bg-light.has-bg input[type="search"],
+body.bg-light.has-bg select.sel,
+body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
+body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
+body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
+
+/* ─── Cookies consent ─── */
+.ck-title { font-size: 12px; color: var(--tx-2); padding: 8px 0 6px; font-weight: 600; }
+.ck-list { max-height: 200px; overflow-y: auto; }
+.ck-opt { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.ck-opt:hover { background: var(--bg-3); }
+.ck-opt input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
+/* ─── Now Playing panel (big art + up next) ─── */
+.np-drawer {
+  /* 8px inset like every other panel — it was 10px, leaving the drawer 2px
+     off-grid from the nav bar and the app panels. */
+  position: fixed; top: 8px; right: calc(8px + var(--safe-right, 0px)); bottom: 118px; z-index: 79;
+  /* Effective width: the user's chosen width, capped to roughly a third of
+     the viewport so that when the drawer pushes the layout aside (np-push)
+     the track list keeps a usable share of the window. The 260px floor keeps
+     the drawer itself readable on mid-size windows. */
+  width: var(--np-eff, min(var(--np-w, 330px), 92vw));
+  background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 7px;
+  box-shadow: -14px 0 44px rgba(0, 0, 0, .5);
+}
+.np-head { display: flex; align-items: center; justify-content: space-between; }
+.ov-art {
+  /* Real height (see .yc-thumb: the padding-bottom ratio hack paints nothing
+     on the old WebView). Fixed near-square fallback, exact square via
+     @supports on modern engines. */
+  width: 100%; height: 272px; border-radius: 12px; flex-shrink: 0;
+  background: var(--bg-3) center / cover no-repeat; overflow: hidden;
+}
+@supports (aspect-ratio: 1) { .ov-art { height: auto; aspect-ratio: 1; } }
+/* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
+   16:9, cover made them look off-center; contain shows the full art, centered. */
+.ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat !important; background-position: center !important; background-color: #000 !important; color: transparent; }
+.ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
+.ov-sub { font-size: 13px; color: var(--tx-2); }
+.ov-meta { font-size: 11px; color: var(--tx-3); }
+.np-next-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-top: 6px; }
+.np-next { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.nx-row { display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+.nx-row:hover { background: var(--bg-3); }
+.nx-row .art { width: 32px; height: 32px; font-size: 13px; flex-shrink: 0; }
+.nx-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.nx-meta .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-meta .s { font-size: 11px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-dur { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
+.nx-note { font-size: 12px; color: var(--tx-3); padding: 6px 4px; }
+/* Open drawer: compute the effective width once — chosen width capped at a
+   third of the viewport (260px floor so the drawer stays readable). */
+body.np-open { --np-eff: min(var(--np-w, 330px), max(34vw, 260px)); }
+/* Push mode — set by JS from the REAL available width (no fixed breakpoint:
+   media queries in CSS px lied under Windows display scaling). When there is
+   room for sidebar + a usable track list, the drawer becomes a true third
+   column and the WHOLE app shrinks around it; otherwise it floats over the
+   content like on phones. */
+body.np-push .app { margin-right: calc(var(--np-eff, 330px) + 8px); }
+/* The drawer starts at top:8px — the same row as the nav bar — so the nav bar
+   ALWAYS steps aside when the drawer is open, pushed or floating: a covered
+   nav bar is unclickable. */
+body.np-open .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
+body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
+#npPin.active { color: var(--accent-2); background: var(--bg-3); }
+.dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }
+.dlg-in { width: 100%; margin-top: 10px; }
+.modal.dlg { width: min(400px, 92vw); }
+.now { cursor: pointer; border-radius: 8px; padding: 2px 6px; margin: -2px -6px; transition: background .12s; }
+.now:hover { background: var(--bg-2); }
+/* Wide enough for the longest sort label ("Shortest first") — no clipping. */
+select.sel.sm-sel.sort-sel { flex: 0 0 auto; width: 144px; }
+/* Search-results filter dropdown ("All results" / "Artist matches"). */
+select#ytFilter.sm-sel { width: 138px; }
+.top-gear { font-size: 16px; width: 34px; height: 34px; flex-shrink: 0; }
+.side-filter { width: 100%; padding: 7px 10px; font-size: 12px; }
+
+/* ─── Playlist search hits (YouTube playlists modal) ─── */
+.imp-hits { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.imp-hit { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.imp-hit:hover { background: var(--bg-3); }
+.imp-hit.on { background: var(--bg-3); outline: 1px solid var(--accent); }
+.imp-more { align-self: center; margin: 6px 0 2px; }
+.ih-t { font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ih-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
+.imp-or { text-align: center; font-size: 11px; color: var(--tx-3); padding: 10px 0 2px; }
+
+/* ─── In-list section separator (e.g. "already in your library") ─── */
+.list-sep {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 12px 6px; padding-top: 10px;
+  border-top: 1px solid var(--bd);
+  font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--tx-3);
+}
+.list-sep svg { color: #34d399; }
+.track.owned { opacity: .72; }
+.track.owned:hover, .track.owned.selected, .track.owned.playing { opacity: 1; }
+.imp-hit { flex-wrap: wrap; }
+.ih-prev { width: 100%; font-size: 11px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 2px; }
+
+/* ─── SVG icon plumbing ─── */
+[data-ic], .row-ic { display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }
+.row-ic { width: 16px; color: var(--tx-3); flex-shrink: 0; }
+.pl-row.active .row-ic, .track.playing .row-ic { color: var(--accent-2); }
+.brand-ic { color: var(--accent); }
+.vh-icon svg { width: 34px; height: 34px; }
+.dl-ico svg { display: block; }
+.dl-row.done .dl-ico { color: #34d399; }
+.dl-row.error .dl-ico, .dl-row .dl-ico:has(+ .dl-name) { }
+button[data-ic] { display: inline-grid; place-items: center; }
+
+/* ─── Custom color pickers ─── */
+.color-row { display: flex; gap: 8px; }
+input[type="color"] {
+  -webkit-appearance: none; appearance: none;
+  width: 34px; height: 26px; padding: 0; border: 1px solid var(--bd-2);
+  border-radius: 6px; background: transparent; cursor: pointer;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+.set-sub { font-size: 10px; color: var(--tx-3); font-weight: 400; }
+
+/* Import chooser */
+.pick-opt { display: flex; align-items: center; gap: 13px; width: 100%; text-align: left; background: var(--bg-2); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 11px; padding: 14px 15px; cursor: pointer; transition: background .12s, border-color .12s; }
+.pick-opt + .pick-opt { margin-top: 10px; }
+.pick-opt:hover { background: var(--bg-3); border-color: var(--bd-2); }
+.pick-opt .bic { color: var(--accent-2); flex-shrink: 0; }
+.pick-txt { display: flex; flex-direction: column; gap: 3px; }
+.pick-txt b { font-size: 14px; }
+.pick-sub { font-size: 12px; color: var(--tx-3); }
+body.has-bg .pick-opt { background: rgba(255,255,255,.05); }
+body.has-bg .pick-opt:hover { background: rgba(255,255,255,.09); }
+
+/* External playlist import (Spotify link / pasted list) */
+#extInput { width: 100%; min-height: 118px; resize: vertical; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 10px 12px; font-size: 13px; font-family: inherit; line-height: 1.5; outline: none; }
+#extInput:focus { border-color: var(--accent); }
+body.has-bg #extInput { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
+#extModal .imp-row { display: flex; align-items: center; gap: 10px; }
+#extModal .imp-row input { flex: 1; }
+#extModal .imp-foot-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+#extModal .imp-foot-row .btn { margin-left: auto; }
+.ext-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
+.ext-bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .15s ease; }
+
+/* ─── Sidebar sections + Sources (added) ─── */
+.side-section { display: flex; flex-direction: column; gap: 8px; }
+.side-section.grow { flex: 1; min-height: 0; }
+.ss-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ss-body.grow { flex: 1; }
+.ss-toggle { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; }
+.ss-toggle:hover { color: var(--tx-1); }
+.ss-caret { display: inline-block; transition: transform .15s; font-size: 9px; }
+.side-section.collapsed .ss-caret { transform: rotate(-90deg); }
+.side-section.collapsed .ss-body { display: none; }
+.side-section.collapsed.grow { flex: 0 0 auto; }
+.ss-head { display: flex; align-items: center; justify-content: space-between; }
+.ss-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
+.src-list { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.src-empty { font-size: 12px; color: var(--tx-3); padding: 4px 2px; }
+.src-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; cursor: pointer; color: var(--tx-2); font-size: 13px; }
+.src-row:hover { background: var(--bg-2); color: var(--tx-1); }
+.src-row.active { background: var(--bg-3); color: var(--tx-1); }
+.src-ico { font-size: 14px; }
+.src-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.src-count { font-size: 11px; color: var(--tx-3); }
+.src-btn { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 13px; width: 22px; height: 22px; border-radius: 6px; opacity: 0; }
+.src-row:hover .src-btn { opacity: 1; }
+.src-btn:hover { background: var(--bg-4); color: var(--tx-1); }
+.pl-count { margin-left: auto; font-size: 11px; color: var(--tx-3); }
+.pl-follow { font-size: 10px; opacity: .8; }
+
+/* ─── Followed playlists (Settings) ─── */
+.fl-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.fl-name { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-row .fl-target { flex: 0 0 130px; padding: 6px 26px 6px 9px; font-size: 12px; }
+.fl-on input, .fl-dl input { width: 15px; height: 15px; }
+.fl-dl { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--tx-2); cursor: pointer; }
+.fl-x { border: none; background: transparent; color: var(--tx-3); cursor: pointer; width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0; }
+.fl-x:hover { background: var(--bg-4); color: var(--tx-1); }
+.pl-row.active { background: var(--bg-3); color: var(--tx-1); }
+
+/* ─── View header ─── */
+.view-head { display: flex; align-items: center; gap: 14px; row-gap: 8px; padding: 2px 24px 12px; flex-wrap: wrap; }
+.vh-actions { margin-left: auto; flex-shrink: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.vh-actions .btn-line.sm { font-size: 12px; padding: 8px 14px; width: auto; }
+.vh-icon { width: 76px; height: 76px; border-radius: 12px; display: grid; place-items: center; font-size: 34px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 24px rgba(0,0,0,.35); flex-shrink: 0; }
+.vh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; }
+.vh-sub { font-size: 12px; color: var(--tx-2); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+
+/* ─── List column header ─── */
+.list-head {
+  display: grid; grid-template-columns: 26px 40px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px;
+  padding: 4px 24px 8px; margin: 0 12px; border-bottom: 1px solid var(--bd);
+  font-size: 11px; letter-spacing: .06em; color: var(--tx-3); font-weight: 700;
+}
+.list-head .lh-idx { text-align: center; }
+.list-head .lh-dur { text-align: left; }
+
+/* ─── Sort control, moved out of the top bar ─── */
+/* It used to sit next to the search field, where it competed with the search
+   box for attention on narrow windows. Right-aligned just above the column
+   headers it reads as belonging to the list it sorts. */
+.list-tools[hidden] { display: none; }
+.list-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 24px 8px; margin: 0 12px; }
+.list-tools .sort-sel { max-width: 190px; }
+
+/* ─── Drag to reorder (playlists in their own order only) ─── */
+/* Rows get the grab affordance only when they are actually draggable, so the
+   cursor never promises a move the view cannot honour (sorted/filtered/pinned). */
+.track[draggable="true"] { cursor: grab; }
+.track[draggable="true"]:active { cursor: grabbing; }
+.track.dragging { opacity: .45; }
+/* The insertion line is drawn with an inset shadow rather than a border so the
+   row keeps its exact height and the list does not jump while dragging. */
+.track.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.track.drop-after  { box-shadow: inset 0 -2px 0 0 var(--accent); }
+@media (prefers-reduced-motion: reduce) { .track.dragging { opacity: .6; } }
+
+/* ─── Album art covers + density + settings additions ─── */
+.art.has-cover, .np-art.has-cover { background-size: cover !important; background-position: center; color: transparent; }
+.btn-line { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 8px 12px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 700; line-height: 1; transition: border-color .12s, color .12s, background .12s, transform .1s; }
+.btn-line:hover { border-color: var(--bd-2); color: var(--tx-1); background: rgba(255,255,255,.04); }
+.btn-line:active { transform: scale(.97); }
+body.bg-light.has-bg .btn-line:hover { background: rgba(0,0,0,.04); }
+.set-actions { padding-top: 14px; }
+.set-actions .btn-line { color: var(--tx-2); }
+
+/* Compact density */
+body.compact .track { padding: 3px 12px; }
+body.compact .art { width: 32px; height: 32px; font-size: 13px; }
+body.compact .list-head { padding-bottom: 5px; }
+
+/* Reduce motion */
+
+body.no-anim * { transition: none !important; }
+
+/* ─── Playlist import modal ─── */
+.imp-row { display: flex; gap: 8px; padding: 12px 0 4px; }
+.imp-row input { flex: 1; min-width: 0; }
+.imp-list { display: flex; flex-direction: column; gap: 2px; max-height: 44vh; overflow-y: auto; margin-top: 8px; }
+.imp-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.imp-item:hover { background: var(--bg-3); }
+.imp-item input { accent-color: var(--accent); flex-shrink: 0; }
+.imp-item img { width: 57px; height: 32px; object-fit: cover; border-radius: 4px; background: var(--bg-4); flex-shrink: 0; }
+.imp-meta { min-width: 0; display: flex; flex-direction: column; }
+.imp-meta .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.imp-meta .s { font-size: 11px; color: var(--tx-2); }
+.imp-foot { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--bd); }
+.imp-foot-row { display: flex; align-items: center; gap: 8px; }
+.imp-count { margin-left: auto; font-size: 12px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
+.imp-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; flex-shrink: 0; }
+.imp-foot select, select.sel {
+  flex: 1; min-width: 0;
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-3) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a6a9b8' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  border: 1px solid var(--bd); color: var(--tx-1);
+  border-radius: 8px; padding: 9px 32px 9px 11px; font-size: 13px; outline: none; cursor: pointer;
+}
+.imp-foot select:focus, select.sel:focus { border-color: var(--accent); }
+select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
+.dir-pick { display: flex; gap: 6px; align-items: center; }
+.dir-pick .text-in { width: 180px; }
+.dir-pick .btn-line.sm { flex-shrink: 0; }
+
+/* ─── First-run setup wizard ─── */
+.modal.setup { width: min(460px, 92vw); }
+.setup-p { font-size: 14px; line-height: 1.55; padding: 12px 0 4px; }
+.setup-hint { font-size: 12px; color: var(--tx-3); line-height: 1.5; padding-bottom: 4px; }
+.setup-status { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--bd); font-size: 12px; word-break: break-all; }
+.setup-status.ok { border-color: rgba(52, 211, 153, .4); color: #34d399; }
+.setup-status.bad { border-color: rgba(245, 158, 11, .4); color: #f59e0b; }
+.setup-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.setup-row .grow { flex: 1; min-width: 0; }
+.setup-chk { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--tx-1); padding: 7px 0; cursor: pointer; user-select: none; }
+.setup-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 0 6px; }
+select.sel.sm-sel.wide { width: 158px; }
+
+/* ─── Downloads: edge badge + opt-in side drawer ─── */
+.dl-toggle {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-3); border: 1px solid var(--bd-2); color: var(--tx-1);
+  border-radius: 999px; padding: 6px 12px; font-size: 11px; font-weight: 700;
+  cursor: pointer; margin-right: 6px; flex-shrink: 0;
+  transition: border-color .12s;
+}
+.dl-toggle:hover { border-color: var(--accent); }
+.dl-toggle.busy::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent-2); animation: dlpulse 1.2s ease-in-out infinite;
+}
+@keyframes dlpulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+body.no-anim .dl-toggle.busy::before { animation: none; }
+/* Save CPU when the window isn't focused: freeze cosmetic animations. */
+body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
+.dl-drawer {
+  position: fixed; top: 10px; right: 10px; bottom: 118px; z-index: 79;
+  width: min(400px, 92vw);
+  background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
+  padding: 14px 16px; display: flex; flex-direction: column;
+  box-shadow: -14px 0 44px rgba(0, 0, 0, .5);
+}
+.dl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
+.dl-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.dl-more { font-size: 11px; color: var(--tx-3); padding: 3px 28px; }
+.dl-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-2); min-width: 0; }
+.dl-list { display: flex; flex-direction: column; gap: 3px; flex: 1; min-height: 0; overflow-y: auto; }
+.dl-row { display: flex; align-items: center; gap: 10px; padding: 3px 2px; font-size: 12px; }
+.dl-ico { width: 16px; text-align: center; flex-shrink: 0; }
+.dl-row.done .dl-ico { color: #34d399; }
+.dl-row.error .dl-ico { color: #f59e0b; }
+.dl-row.canceled { opacity: .55; }
+/* Background-task rows share the download look; clickable ones open a result. */
+.task-row.active .dl-ico { color: var(--accent-2); }
+.task-row.clickable { cursor: pointer; border-radius: 7px; }
+.task-row.clickable:hover { background: var(--bg-3); }
+.task-row.error .dl-pct { color: #f87171; }
+.dl-cover { width: 30px; height: 30px; border-radius: 6px; flex-shrink: 0; background: var(--bg-3) center / cover no-repeat; display: grid; place-items: center; color: var(--tx-3); }
+.dl-cover.has-cover { color: transparent; font-size: 0; }
+.dl-cover svg { width: 15px; height: 15px; }
+.dl-row.done .dl-cover { color: #34d399; }
+.dl-row.error .dl-cover { color: #f59e0b; }
+.dl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tx-1); }
+.dl-err { display: block; font-size: 10.5px; color: #f59e0b; white-space: normal; line-height: 1.3; margin-top: 2px; }
+.dl-row.error .dl-name { white-space: normal; }
+.dl-prog { flex: 0 0 140px; height: 5px; border-radius: 3px; background: var(--bg-3); overflow: hidden; }
+.dl-prog i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 3px; transition: width .25s; }
+.dl-pct { flex: 0 0 62px; text-align: right; color: var(--tx-3); font-variant-numeric: tabular-nums; }
+.dl-x { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 13px; width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0; }
+.dl-x:hover { background: var(--bg-4); color: var(--tx-1); }
+.imp-dl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx-2); cursor: pointer; user-select: none; white-space: nowrap; }
+.imp-dl input { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; }
+.imp-foot-row:last-child .btn { margin-left: auto; min-width: 130px; }
+.imp-foot select { flex: 1; min-width: 0; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 8px 10px; font-size: 13px; outline: none; }
+.btn-line.sm { width: auto; padding: 7px 12px; flex-shrink: 0; }
+
+/* Placeholders follow the theme (they stayed browser-gray on light wallpapers) */
+input::placeholder { color: var(--tx-3); opacity: 1; }
+
+/* Destructive context-menu entries */
+.ctx-item.ctx-danger:hover { background: #c0392b; color: #fff; }
+
+/* ─── Playlist result cards + include filters ─── */
+.yt-inc { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--tx-2); cursor: pointer; padding: 4px 8px; border: 1px solid var(--bd); border-radius: var(--r-pill, 999px); }
+.yt-inc input { accent-color: var(--accent); }
+.pl-card-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 6px; }
+.pl-card-row { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px; }
+.pl-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: var(--bg-1); border: 1px solid transparent; cursor: pointer; transition: background .12s, transform .12s; }
+.pl-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.pc-thumb { position: relative; width: 64px; height: 48px; flex-shrink: 0; border-radius: 8px; background: var(--bg-3) center / cover no-repeat; display: grid; place-items: center; }
+.pc-badge { position: absolute; right: 3px; bottom: 3px; background: rgba(0,0,0,.72); border-radius: 5px; padding: 1px 3px; display: grid; place-items: center; }
+.pc-badge svg { width: 12px; height: 12px; color: #fff; }
+.pc-meta { min-width: 0; }
+.pc-title { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-sub { font-size: 11.5px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+/* ─── Playlist detail modal ─── */
+.modal.pl-detail { width: min(560px, 94vw); max-height: 86vh; }
+.pl-detail .modal-body { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.pd-head { display: flex; gap: 14px; align-items: center; }
+.pd-cover { width: 96px; height: 72px; border-radius: 10px; background: var(--bg-3) center / cover no-repeat; flex-shrink: 0; }
+.pd-headmeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pd-actions { display: flex; gap: 8px; align-items: center; }
+.pd-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.pd-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; cursor: pointer; }
+.pd-row:hover { background: var(--bg-3); }
+.pd-thumb { width: 44px; height: 32px; border-radius: 6px; background: var(--bg-3) center / cover no-repeat; flex-shrink: 0; }
+.pd-meta { min-width: 0; }
+.pd-t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-s { font-size: 11.5px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-more { display: block; padding: 10px 6px; font-size: 12.5px; color: var(--accent-2); text-decoration: none; }
+.pd-more:hover { text-decoration: underline; }
+
+/* ─── Small screens / Android: single column, sidebar as an overlay ─── */
+.side-toggle { display: none; font-size: 16px; }
+/* Edge-to-edge safe areas. Android WebView doesn't always expose env() insets,
+   so MainActivity also writes --android-inset-* CSS vars; take whichever is
+   bigger. --safe-top etc. are the single source used across the layout. */
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--android-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--android-inset-left, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--android-inset-right, 0px));
+}
+.topbar { padding-top: calc(var(--topbar-pad, 13px) + var(--safe-top)); }
+.app { padding-left: calc(8px + var(--safe-left)); padding-right: calc(8px + var(--safe-right)); }
+.player { margin-bottom: calc(8px + var(--safe-bottom)); }
+.side-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 118; background: rgba(0,0,0,.5); }
+
+/* Share over WiFi modal */
+.modal.share { width: min(460px, 94vw); }
+.share .modal-body { display: flex; flex-direction: column; gap: 12px; }
+/* Breathing room: buttons/fields were glued to the text above them. */
+.share .set-group { display: flex; flex-direction: column; gap: 10px; }
+.share .set-group .set-title { margin-bottom: 0; }
+.share .set-group .set-hint { margin: 0; }
+.share .btn, .share .btn-line { align-self: flex-start; margin-top: 4px; }
+.share .setup-chk { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.share .set-row { padding: 2px 0; }
+.share-err { color: #f87171; }
+@media (max-width: 640px) {
+  /* Phone: each label sits ABOVE its full-width field — nothing crammed
+     side by side, nothing overlapping. Buttons go full-width too. */
+  .share .set-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .share .text-in, .share .num-in { width: 100%; }
+  .share .btn, .share .btn-line { align-self: stretch; text-align: center; }
+}
+.share-code-row { display: flex; align-items: center; gap: 12px; }
+.share-addr { font-family: var(--font-mono, monospace); font-size: 15px; color: var(--tx-1); margin: 4px 0; }
+.share-code { font-family: var(--font-mono, monospace); font-size: 30px; font-weight: 800; letter-spacing: .12em; color: var(--accent-2); }
+
+/* Blocked tracks: greyed + struck when revealed (Settings → show blocked). */
+.track.blocked { opacity: .5; }
+.track.blocked .meta .t { text-decoration: line-through; }
+@media (max-width: 700px) {
+  .side-toggle { display: inline-grid; place-items: center; }
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  /* Topbar nav goes icon-only on phones — same buttons, same gaps. */
+  .top-nav .ni-lbl { display: none; }
+  .top-nav .nav-item { padding: 7px 9px; }
+  /* Phone: the Sources dropdown becomes a fixed full-width sheet under the
+     nav bar instead of an anchored popover that could overflow the screen. */
+  .top-drop { position: fixed; left: 8px; right: 8px; top: 110px; width: auto; max-height: 70vh; }
+  /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
+     modal opened underneath never bleeds through beside it. */
+  body.side-open .sidebar {
+    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(118px + var(--safe-bottom));
+    width: min(300px, 84vw); z-index: 119;
+    border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
+  }
+  #sideResize { display: none; }
+  .track, .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+  .track .album, .list-head .lh-album { display: none; }
+  .count { display: none; }
+  /* Phone: the burger reappears beside the field, so centring would squeeze it.
+     Let the search take whatever width is left instead. */
+  .search-wrap { max-width: none; margin-inline: 0; flex: 1 1 auto; }
+  .list-tools { padding-inline: 12px; margin-inline: 6px; }
+  /* minmax(0,...) lets the side cells shrink below their content so the track
+     title ellipsises instead of the "now playing" cell growing and overlapping
+     the centred transport controls (the shuffle-over-artwork bug). */
+  .player-main { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
+  /* Phones use hardware volume — drop the slider + icon so the transport
+     controls (and the download toggle when active) have room and stop
+     overlapping. The download toggle stays for access to downloads. */
+  .volume input#volume, .volume .vol-ico { display: none; }
+  .volume { gap: 4px; }
+  .controls { gap: 4px; }
+  /* Download rows: the fixed 140px progress bar left the title ~1 char wide.
+     Put the bar on its own full-width line below title + %, so nothing overlaps. */
+  .dl-row { flex-wrap: wrap; row-gap: 6px; }
+  .dl-prog { order: 10; flex: 1 1 100%; }
+  /* Phones: the drawer is a temporary overlay — nothing reserves space. */
+  body.np-push .app { margin-right: 0; }
+  body.np-open .nav-bar { margin-right: calc(8px + var(--safe-right, 0px)); }
+  .np-drawer { width: min(var(--np-w, 330px), 96vw); }
+  /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
+  .tracklist.yt-grid { grid-template-columns: 1fr 1fr; }
+  /* Pre-measure placeholder matched to the 2-up card width (card ≈
+     (100vw − paddings − gap) / 2, thumb = card − 2×8px padding, ×9/16).
+     The exact height is then pinned per card by fixThumbHeights() — never
+     aspect-ratio (see .yc-thumb base rule). */
+  .yc-thumb { height: calc((50vw - 46px) * 0.5625); }
+  .pl-card-grid { grid-template-columns: 1fr; }
+  /* The results toolbar (view toggle, Videos/Playlists, Prev/Next) had
+     flex-shrink:0 and clipped off the right edge — full line + wrap instead. */
+  .vh-actions { flex-basis: 100%; margin-left: 0; }
+  /* One-line ellipsis left "Searching “x” — page 1… (you can ke…": let the
+     header subtitle wrap (2 lines max worth of useful text) on phones. */
+  .vh-sub { white-space: normal; max-width: none; }
+  /* Channel header card: the action buttons have a fixed min content width, so
+     in a flex row they crushed .ac-meta to 0px — the name vanished and the
+     un-clipped "YouTube channel" line overflowed straight under the buttons.
+     Stack instead: avatar + name on the first row, buttons on their own row.
+     Margins, not flex gap (old WebViews don't do gap in flexbox). */
+  .artist-card { flex-wrap: wrap; gap: 0; }
+  .ac-avatar { width: 48px; height: 48px; }
+  .ac-meta { flex: 1 1 0; margin-left: 12px; }
+  .ac-name { font-size: 17px; }
+  .ac-actions { flex: 1 1 100%; justify-content: flex-start; gap: 0; margin-top: 6px; }
+  .ac-actions .btn-line { margin: 6px 8px 0 0; }
+  .dl-head { flex-wrap: wrap; row-gap: 6px; }
+}

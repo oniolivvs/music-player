@@ -1,0 +1,20 @@
+PackageIdentifier: oniolivvs.MusicPlayer
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: oniolivvs
+PublisherUrl: https://github.com/oniolivvs
+PackageName: Music Player
+PackageUrl: https://github.com/oniolivvs/music-player
+License: Proprietary
+ShortDescription: Local-first music player with YouTube search, streaming and downloads.
+Description: >-
+  A native local-first music player: scan local folders, search and stream from
+  YouTube (yt-dlp), download tracks as mp3, and manage playlists with custom
+  covers. Includes MPRIS and Discord Rich Presence.
+Tags:
+  - music
+  - player
+  - youtube
+  - audio
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

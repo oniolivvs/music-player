@@ -1,0 +1,18 @@
+# winget installer manifest (template).
+# Replace __VERSION__, __URL__ and __SHA256__ (see winget/README.md), then submit
+# the three files to https://github.com/microsoft/winget-pkgs — or let the
+# winget-releaser action do it on release (see winget/README.md).
+PackageIdentifier: oniolivvs.MusicPlayer
+PackageVersion: __VERSION__
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: __URL__
+    InstallerSha256: __SHA256__
+ManifestType: installer
+ManifestVersion: 1.6.0

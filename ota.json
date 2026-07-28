@@ -1,0 +1,20 @@
+{
+  "version": "0.22.61",
+  "entry": "main.js",
+  "modules": [
+    "main.js",
+    "playlists.js",
+    "settings.js",
+    "store.js"
+  ],
+  "css": "style.css",
+  "html": "index.html",
+  "notes": "Fixed: Added scroll-anchoring compensation (deltaTop) in _virtSlice to prevent viewport jumps when scrolling UP through virtual list slices.",
+  "platforms": [
+    "linux",
+    "windows",
+    "macos",
+    "android"
+  ],
+  "min_native": "0.22.35"
+}

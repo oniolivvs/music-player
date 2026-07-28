@@ -1,0 +1,14 @@
+{
+  "name": "music-player",
+  "version": "0.14.15",
+  "private": true,
+  "description": "Native local-first music player (Tauri + Rust).",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

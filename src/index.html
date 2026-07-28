@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Music Player</title>
+  <link rel="stylesheet" href="style.css" id="embCss">
+</head>
+<body>
+  <!-- Standalone navigation bar: its own full-width panel ABOVE the whole
+       sidebar / main / now-playing layout — independent of all of them. -->
+  <nav class="top-nav nav-bar" id="topNav">
+    <button id="navLibrary" class="nav-item active" title="Library"><span class="ni-ico" data-ic="disc"></span><span class="ni-lbl">Library</span></button>
+    <button id="navHistory" class="nav-item" title="Recently played"><span class="ni-ico" data-ic="clock"></span><span class="ni-lbl">Recent</span></button>
+    <button id="navShare" class="nav-item" title="Share over WiFi"><span class="ni-ico" data-ic="globe"></span><span class="ni-lbl">Share</span></button>
+    <div class="top-drop-wrap">
+      <button id="navSources" class="nav-item" title="Music sources (folders)"><span class="ni-ico" data-ic="folder"></span><span class="ni-lbl">Sources</span></button>
+      <div id="srcDrop" class="top-drop" hidden>
+        <div class="ss-head" id="secSources">
+          <span class="ss-title">Sources</span>
+          <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs" data-ic="refresh"></button>
+        </div>
+        <button id="pickBtn" class="btn btn-block"><span data-ic="folder"></span> Add folder…</button>
+        <button id="manualBtn" class="btn-line"><span data-ic="pencil"></span> Enter a path manually</button>
+        <div class="src-list" id="sourcesList"></div>
+      </div>
+    </div>
+    <button id="settingsBtn" class="nav-item nav-right" title="Settings"><span class="ni-ico" data-ic="gear"></span><span class="ni-lbl">Settings</span></button>
+  </nav>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-ic" data-ic="headphones"></span> <span>Music Player</span></div>
+
+      <input id="sideFilter" type="search" placeholder="Filter playlists…" autocomplete="off" class="side-filter">
+
+      <div class="side-section grow" id="secPlaylists">
+        <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
+        <div class="ss-body grow">
+          <button id="importBtn" class="btn-line"><span data-ic="dl"></span> Import…</button>
+          <div class="playlists-list" id="playlistsList"></div>
+        </div>
+      </div>
+    </aside>
+
+    <div id="sideBackdrop" class="side-backdrop" hidden></div>
+    <div id="sideResize" class="rs-handle" title="Drag to resize the sidebar — double-click to reset"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="sideToggle" class="icon-btn side-toggle" title="Menu">☰</button>
+        <div class="search-wrap">
+          <span class="search-ico" data-ic="search"></span>
+          <input id="search" type="search" placeholder="Search library — Enter to search YouTube (videos + playlists)" autocomplete="off">
+        </div>
+        <span id="count" class="count"></span>
+      </header>
+
+      <div id="viewHead" class="view-head"></div>
+
+      <div class="list-tools" id="listTools">
+        <span class="sort-ico" data-ic="filter" title="Sort"></span>
+        <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
+          <option value="default">Sort: default</option>
+          <option value="title">Title A→Z</option>
+          <option value="title-desc">Title Z→A</option>
+          <option value="artist">Artist</option>
+          <option value="album">Album</option>
+          <option value="dur">Shortest first</option>
+          <option value="dur-desc">Longest first</option>
+        </select>
+      </div>
+
+      <div class="list-head" id="listHead">
+        <span class="lh-idx">#</span><span></span><span>TITLE</span>
+        <span class="lh-album">ALBUM</span><span class="lh-dur" data-ic="clock"></span><span></span>
+      </div>
+
+      <section id="trackList" class="tracklist">
+        <div class="empty"><div class="empty-ico" data-ic="music"></div>Add a folder as a source to start.</div>
+      </section>
+    </main>
+  </div>
+
+  <aside id="npPanel" class="np-drawer" hidden>
+    <div id="npResize" class="rs-handle" title="Drag to resize — double-click to reset"></div>
+    <div class="np-head">
+      <span class="dl-title">Now playing</span>
+      <span class="dl-btns">
+        <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)" data-ic="pin"></button>
+        <button id="npClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </span>
+    </div>
+    <div class="ov-art" id="ovArt" data-ic="music"></div>
+    <div class="ov-title" id="ovTitle">Nothing playing</div>
+    <div class="ov-sub" id="ovSub"></div>
+    <div class="ov-meta" id="ovMeta"></div>
+    <div class="np-next-head">Up next</div>
+    <div id="upNextList" class="np-next"></div>
+  </aside>
+
+  <aside id="dlBar" class="dl-drawer" hidden>
+    <div class="dl-head">
+      <span id="dlTitle" class="dl-title">Downloads</span>
+      <span class="dl-btns">
+        <button id="dlRetry" class="btn-line sm" hidden>Retry</button>
+        <button id="dlRetryBlocked" class="btn-line sm" hidden title="Retry the skipped/blocked tracks too (clears them from the never-retry list)">Retry blocked</button>
+        <button id="dlAction" class="btn-line sm">Stop all</button>
+        <button id="dlClose" class="icon-btn" title="Hide (downloads keep running)" data-ic="x"></button>
+      </span>
+    </div>
+    <div id="dlList" class="dl-list"></div>
+  </aside>
+
+  <footer class="player">
+    <div class="player-main">
+      <div class="now">
+        <div class="np-art" id="npArt" data-ic="music"></div>
+        <div class="np-txt">
+          <div class="now-title" id="nowTitle">Nothing playing</div>
+          <div class="now-sub" id="nowSub"></div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="shuffleBtn" class="ctrl" title="Shuffle">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></svg>
+        </button>
+        <button id="prevBtn" class="ctrl" title="Previous">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg>
+        </button>
+        <button id="playBtn" class="ctrl play" title="Play/Pause">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button id="nextBtn" class="ctrl" title="Next">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg>
+        </button>
+        <button id="repeatBtn" class="ctrl" title="Repeat"></button>
+      </div>
+      <div class="volume">
+        <button id="dlToggle" class="dl-toggle" hidden title="Downloads"><span data-ic="dl"></span> <span id="dlBadge"></span></button>
+        <span class="vol-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
+        <input id="volume" type="range" min="0" max="100" value="80">
+      </div>
+    </div>
+    <div class="progress">
+      <span id="curTime" class="time">0:00</span>
+      <input id="seek" class="seekbar" type="range" min="0" max="1" value="0" step="1">
+      <span id="totTime" class="time">0:00</span>
+    </div>
+  </footer>
+
+  <div id="shareModal" class="modal-backdrop" hidden>
+    <div class="modal share">
+      <div class="modal-head">
+        <h2>Share over WiFi</h2>
+        <button id="shareClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="set-hint">Play your music on another device on the same WiFi — no account, nothing leaves your network. One device <b>hosts</b> its library, the other <b>connects</b> with the code.</div>
+
+        <div class="set-group"><div class="set-title">Host — share this device's library</div>
+          <div id="shareHostIdle">
+            <div class="set-hint">Start a local server so another device can browse, stream and download your library + playlists.</div>
+            <button id="shareHostStart" class="btn">Start sharing</button>
+            <div id="shareHostErr" class="set-hint share-err" hidden></div>
+          </div>
+          <div id="shareHostOn" hidden>
+            <div class="share-code-row">
+              <div><div class="set-sub">On the other device, choose “Connect” and enter:</div>
+                <div class="share-addr" id="shareAddr">—</div>
+                <div class="share-code" id="shareCode">000000</div></div>
+            </div>
+            <div id="shareHostInfo" class="set-hint"></div>
+            <button id="shareHostStop" class="btn-line sm">Stop sharing</button>
+          </div>
+        </div>
+
+        <div class="set-group"><div class="set-title">Connect — receive from another device</div>
+          <div class="set-row"><label>Host address <span class="set-sub">(as shown on the host)</span></label>
+            <input type="text" id="shareHostIp" class="text-in" placeholder="192.168.1.23:38291 — or just the IP" autocomplete="off"></div>
+          <div class="set-row"><label>Port</label><input type="number" id="shareHostPort" class="num-in" value="0" min="0" max="65535"></div>
+          <div class="set-row"><label>Code</label><input type="text" id="shareConnCode" class="text-in" placeholder="000000" inputmode="numeric" maxlength="6"></div>
+          <label class="setup-chk"><input type="checkbox" id="shareSaveLocal"> Save streamed tracks locally as I play them</label>
+          <button id="shareConnect" class="btn">Connect</button>
+          <div id="shareConnStatus" class="set-hint"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="plDetailModal" class="modal-backdrop" hidden>
+    <div class="modal pl-detail">
+      <div class="modal-head">
+        <h2 id="plDetailTitle">Playlist</h2>
+        <button id="plDetailClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="pd-head">
+          <div id="plDetailCover" class="pd-cover"></div>
+          <div class="pd-headmeta">
+            <div id="plDetailSub" class="set-hint"></div>
+            <div class="pd-actions">
+              <button id="plDetailImport" class="btn">Import playlist</button>
+              <a id="plDetailLink" class="btn-line sm" target="_blank" rel="noopener">Open on YouTube ↗</a>
+            </div>
+          </div>
+        </div>
+        <div id="plDetailList" class="pd-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ctxMenu" class="ctx-menu" hidden></div>
+
+  <div id="settingsModal" class="modal-backdrop" hidden>
+    <div class="modal settings">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button id="settingsClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div id="settingsBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="cookieModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head"><h2>Use browser cookies?</h2></div>
+      <div class="modal-body">
+        <p class="dlg-msg">yt-dlp will read the YouTube cookies of the account logged in that browser and act as that account.
+Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
+        <div id="ckList" class="ck-list"></div>
+        <div class="setup-actions">
+          <button id="ckCancel" class="btn-line">Cancel</button>
+          <button id="ckOk" class="btn" disabled>Accept (5)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dlgModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head"><h2 id="dlgTitle">…</h2></div>
+      <div class="modal-body">
+        <p id="dlgMsg" class="dlg-msg" hidden></p>
+        <input type="text" id="dlgInput" class="text-in dlg-in" hidden autocomplete="off">
+        <div class="setup-actions">
+          <button id="dlgCancel" class="btn-line">Cancel</button>
+          <button id="dlgOk" class="btn">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dupModal" class="modal-backdrop" hidden>
+    <div class="modal dlg" style="max-width:560px;">
+      <div class="modal-head">
+        <h2 id="dupTitle">Clean Duplicates</h2>
+        <button id="dupClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <p id="dupSummary" class="dlg-msg"></p>
+        <div id="dupList" class="dup-list" style="max-height:220px; overflow-y:auto; margin:12px 0; padding:8px; background:var(--bg-2); border-radius:6px; font-size:13px;"></div>
+        <div style="margin:12px 0;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" id="dupDelFiles">
+            <span>Also delete duplicate MP3 files from disk</span>
+          </label>
+        </div>
+        <div class="setup-actions">
+          <button id="dupCancel" class="btn-line">Cancel</button>
+          <button id="dupConfirm" class="btn">Remove Duplicates</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="setupModal" class="modal-backdrop" hidden>
+    <div class="modal setup">
+      <div class="modal-head"><h2 id="setupTitle">Welcome</h2></div>
+      <div class="modal-body">
+        <div class="setup-step" data-step="0">
+          <p class="setup-p">First launch! Do you want to configure the app now (yt-dlp binary, browser cookies, download folder), or start with the defaults?</p>
+          <p class="setup-hint">Everything stays editable later in <b>Settings</b>.</p>
+          <div class="setup-actions">
+            <button id="suDefaults" class="btn-line">Use defaults</button>
+            <button id="suConfigure" class="btn">Configure now</button>
+          </div>
+        </div>
+        <div class="setup-step" data-step="1" hidden>
+          <p class="setup-p"><b>1/3 — yt-dlp</b> powers YouTube search, streaming and downloads.</p>
+          <div id="suYtStatus" class="setup-status">Detecting…</div>
+          <div class="setup-row">
+            <button id="suYtPick" class="btn-line sm">Pick the binary…</button>
+            <button id="suYtRetry" class="btn-line sm">Re-detect</button>
+          </div>
+          <div class="setup-actions"><button class="btn su-next">Next</button></div>
+        </div>
+        <div class="setup-step" data-step="2" hidden>
+          <p class="setup-p"><b>2/3 — Browser cookies</b> (optional): lets yt-dlp act as your logged-in browser for age/member-restricted tracks.</p>
+          <p class="setup-hint">A logged-in YouTube session often makes YouTube <b>block</b> extraction ("format not available"). Keep <b>None</b> unless you specifically need restricted content — the app falls back to no-cookies automatically if a call fails.</p>
+          <div class="setup-row">
+            <label class="imp-lbl" for="suCookies">Browser</label>
+            <select id="suCookies" class="sel">
+              <option value="">None (recommended to start)</option>
+              <option value="firefox">Firefox</option>
+              <option value="chrome">Chrome</option>
+              <option value="chromium">Chromium</option>
+              <option value="brave">Brave</option>
+              <option value="edge">Edge</option>
+              <option value="opera">Opera</option>
+              <option value="vivaldi">Vivaldi</option>
+            </select>
+          </div>
+          <div class="setup-actions"><button class="btn su-next">Next</button></div>
+        </div>
+        <div class="setup-step" data-step="3" hidden>
+          <p class="setup-p"><b>3/3 — Downloads & preferences</b></p>
+          <div class="setup-row">
+            <label class="imp-lbl">Folder</label>
+            <input type="text" id="suDlDir" class="text-in grow" placeholder="~/Music/MusicPlayer">
+            <button id="suDlPick" class="btn-line sm" data-ic="folder"></button>
+          </div>
+          <label class="setup-chk"><input type="checkbox" id="suPrefLocal" checked> Play the local file when a track is downloaded</label>
+          <label class="setup-chk"><input type="checkbox" id="suAutoSave"> Tick “Save locally” by default when importing a playlist</label>
+          <label class="setup-chk"><input type="checkbox" id="suNotify" checked> Desktop notification on track change</label>
+          <div class="setup-actions"><button id="suFinish" class="btn">Finish</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="importModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>YouTube playlists</h2>
+        <button id="importClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="imp-row">
+          <input id="impQuery" type="text" placeholder="Search playlists by name or author…" autocomplete="off">
+          <button id="impSearch" class="btn">Search</button>
+        </div>
+        <div id="impHits" class="imp-hits"></div>
+        <div class="imp-or">— or import directly from a URL —</div>
+        <div class="imp-row">
+          <input id="impUrl" type="text" placeholder="Playlist URL (YouTube, YouTube Music…)" autocomplete="off">
+          <button id="impFetch" class="btn-line sm">Fetch</button>
+        </div>
+        <div id="impStatus" class="set-hint"></div>
+        <div id="impList" class="imp-list"></div>
+        <div id="impFoot" class="imp-foot" hidden>
+          <div class="imp-foot-row">
+            <button id="impAll" class="btn-line sm">Select all</button>
+            <button id="impNone" class="btn-line sm">Clear</button>
+            <span id="impCount" class="imp-count"></span>
+          </div>
+          <div class="imp-foot-row">
+            <label class="imp-lbl" for="impDest">Into</label>
+            <select id="impDest"></select>
+          </div>
+          <div class="imp-foot-row">
+            <label class="imp-dl" title="Watch this playlist and auto-add its future tracks"><input type="checkbox" id="impFollow"> <span class="bic" data-ic="repeat"></span> Follow</label>
+            <label class="imp-dl" title="Also download the selected tracks as local mp3 files"><input type="checkbox" id="impDl"> Save locally (mp3)</label>
+            <button id="impGo" class="btn">Import</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pickModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head">
+        <h2>Import a playlist</h2>
+        <button id="pickClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <button class="pick-opt" id="pickYt"><span class="bic" data-ic="globe"></span><span class="pick-txt"><b>From YouTube</b><span class="pick-sub">Search, or paste a YouTube / YT Music playlist link</span></span></button>
+        <button class="pick-opt" id="pickSp"><span class="bic" data-ic="link"></span><span class="pick-txt"><b>From Spotify or another app</b><span class="pick-sub">Paste a Spotify link, or a list of songs</span></span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="extModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Import a playlist</h2>
+        <button id="extClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="set-hint">Paste a <b>Spotify playlist / album link</b>, or a list of songs (one <b>Artist – Title</b> per line) exported from any app. Each track is matched on YouTube and added to a new playlist.</div>
+        <textarea id="extInput" placeholder="https://open.spotify.com/playlist/…&#10;— or —&#10;Daft Punk - Get Lucky&#10;Tame Impala - The Less I Know The Better"></textarea>
+        <div class="imp-row">
+          <label class="imp-lbl" for="extName">Name</label>
+          <input id="extName" type="text" placeholder="Playlist name (auto from Spotify)" autocomplete="off">
+        </div>
+        <div class="imp-foot-row">
+          <label class="imp-dl" title="Also download every matched track as a local mp3"><input type="checkbox" id="extDl"> Save locally (mp3)</label>
+          <button id="extCancel" class="btn-line sm" hidden>Cancel</button>
+          <button id="extGo" class="btn">Import</button>
+        </div>
+        <div id="extBar" class="ext-bar" hidden><div id="extBarFill"></div></div>
+        <div id="extStatus" class="set-hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OTA bootstrap: prefer a hot-updated frontend fetched from the repo
+       (Settings → Update, CodePush-style — no reinstall), otherwise load the
+       embedded build. Any failure falls back to embedded; a watchdog rolls back
+       an OTA build that fails to come up. The embedded copy right above in this
+       <body> is the always-safe fallback, so a fresh install with no OTA folder
+       behaves exactly like a normal build. -->
+  <script>
+  (function () {
+    function embedded() {
+      var s = document.createElement("script");
+      s.type = "module"; s.src = "main.js";
+      document.body.appendChild(s);
+    }
+    function runOta(T) {
+      T.core.invoke("ota_bundle").then(function (b) {
+        if (!b || !b.entry || !b.modules || !b.modules[b.entry]) { embedded(); return; }
+        try {
+          // Ship DOM changes too: swap in the OTA markup, dropping its scripts
+          // (innerHTML never executes them anyway) so this bootstrap stays sole.
+          if (b.html) {
+            var doc = new DOMParser().parseFromString(b.html, "text/html");
+            doc.body.querySelectorAll("script").forEach(function (x) { x.remove(); });
+            document.body.innerHTML = doc.body.innerHTML;
+          }
+          if (b.css) {
+            var st = document.createElement("style"); st.id = "otaCss"; st.textContent = b.css;
+            document.head.appendChild(st);
+            var em = document.getElementById("embCss"); if (em) em.remove();
+          }
+          // Blob-URL ES modules can't resolve "./x.js" relative imports. Import
+          // maps would fix that but older Android WebViews (< Chrome 89) don't
+          // support them — the OTA would silently fail and the watchdog roll it
+          // back. So instead: build the blobs dependency-first and rewrite each
+          // "./dep.js" import to the dep's own blob URL. Works on every engine.
+          var names = Object.keys(b.modules), urls = {}, pending = names.slice(), guard = 0;
+          while (pending.length && guard++ < 50) {
+            for (var i = pending.length - 1; i >= 0; i--) {
+              var n = pending[i], code = b.modules[n], ok = true;
+              for (var j = 0; j < names.length; j++) {
+                var dep = names[j];
+                if (dep === n) continue;
+                if (code.indexOf('"./' + dep + '"') >= 0 || code.indexOf("'./" + dep + "'") >= 0) {
+                  if (!urls[dep]) { ok = false; break; }
+                  code = code.split('"./' + dep + '"').join('"' + urls[dep] + '"')
+                             .split("'./" + dep + "'").join("'" + urls[dep] + "'");
+                }
+              }
+              if (ok) {
+                urls[n] = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+                pending.splice(i, 1);
+              }
+            }
+          }
+          if (!urls[b.entry]) { embedded(); return; } // circular/unresolved → safe fallback
+          window.__MP_OTA__ = b.version || "?";
+          // Watchdog: main.js sets __MP_BOOTED__ once it loads. If a bad OTA
+          // build never boots, wipe it and reload into the embedded build.
+          setTimeout(function () {
+            if (!window.__MP_BOOTED__) {
+              try { T.core.invoke("ota_rollback"); } catch (e) {}
+              location.reload();
+            }
+          }, 7000);
+          var s = document.createElement("script"); s.type = "module"; s.src = urls[b.entry];
+          document.body.appendChild(s);
+        } catch (e) { embedded(); }
+      }).catch(function () { embedded(); });
+    }
+    var n = 0;
+    (function wait() {
+      var T = window.__TAURI__;
+      if (T && T.core && T.core.invoke) { runOta(T); }
+      else if (n++ < 60) { setTimeout(wait, 25); }
+      else { embedded(); } // plain browser / no IPC → embedded build
+    })();
+  })();
+  </script>
+</body>
+</html>

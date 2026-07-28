@@ -1,0 +1,85 @@
+[package]
+name = "music-player"
+version = "0.22.52"
+edition = "2021"
+description = "Native local-first music player core"
+default-run = "music-player"
+
+# Tauri 2 mobile (Android) loads the app as a shared library; desktop keeps the
+# plain binary. Both entry points call music_player_lib::run() (src/lib.rs).
+[lib]
+name = "music_player_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+# Open URLs/files via the OS default handler — the ONLY reliable way to open an
+# external browser from the Android WebView (window.open does nothing there).
+tauri-plugin-opener = "2"
+discord-rich-presence = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Native audio: decode (mp3/flac/wav/vorbis/…) + output to the system device.
+# symphonia-aac + isomp4 let us decode YouTube m4a streams (see src/youtube.rs);
+# 0.21+ is required for DecoderBuilder::with_byte_len, which the isomp4 demuxer
+# needs to probe YouTube's moov-after-mdat files over HTTP.
+rodio = { version = "0.21", features = ["symphonia-aac", "symphonia-isomp4"] }
+# Blocking HTTP client for the range-request streaming source (src/stream.rs).
+ureq = { version = "2", features = ["json"] }
+# Tag reading (title/artist/album/duration). NOTE: lofty's module paths are
+# version-sensitive — if cargo build complains, align this version + the imports
+# at the top of src/library.rs (documented there).
+lofty = "0.21"
+walkdir = "2"
+base64 = "0.22"
+# LAN device sharing (src/share.rs): a tiny sync HTTP server (host) + the ureq
+# client already present. Pure-Rust, cross-compiles to Android.
+tiny_http = "0.12"
+local-ip-address = "0.6"
+# Google Drive cloud sync (src/gdrive.rs): PKCE OAuth needs SHA-256.
+sha2 = "0.10"
+getrandom = "0.3"
+# Native YouTube backend (Innertube client, NewPipe-style): powers search /
+# playlists / channels / streaming / downloads WITHOUT the yt-dlp binary —
+# mandatory on Android (yt-dlp's glibc build can't run on bionic), automatic
+# fallback on desktop. rustls+webpki so no OpenSSL/system CA is needed on
+# Android. src/ytnative.rs wraps it behind the same shapes as youtube.rs.
+rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# Only for building rustypipe's HTTP client with an IPv4-pinned source on Android
+# (googlevideo binds stream URLs to the resolving IP; Android's IPv6 privacy
+# addresses rotate → 403). Matches the reqwest version rustypipe pulls (0.12).
+reqwest = { version = "0.12", default-features = false }
+
+# MPRIS/SMTC media controls (src/mpris.rs). Linux: the pure-Rust zbus backend
+# (no libdbus). Windows/other: souvlaki's default (SMTC) backend.
+[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
+souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
+
+# Android-only deps:
+# - rquickjs-sys (rustypipe's QuickJS for YouTube's JS cipher) ships no
+#   aarch64-linux-android bindings → force bindgen (CI provides libclang + NDK).
+# - jni + ndk-context: cpal's AAudio backend reads the Android context from the
+#   global ndk_context, which nothing in the Tauri stack populates (→ "no output
+#   device", no sound). MainActivity.onCreate calls a JNI fn (src/lib.rs) that
+#   registers the Activity's JavaVM + context into ndk_context so audio opens.
+[target.'cfg(target_os = "android")'.dependencies]
+rquickjs-sys = { version = "0.9", features = ["bindgen"] }
+jni = "0.21"
+ndk-context = "0.1"
+
+# Desktop-only plugins (no-op or unsupported on mobile).
+# "Launch at login": Linux .desktop in ~/.config/autostart, Windows run-key,
+# macOS LaunchAgent — Settings → System via plugin:autostart|{enable,…}.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-autostart = "2"
+
+
+
+[profile.release]
+opt-level = 3
+lto = true

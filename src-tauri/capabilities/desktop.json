@@ -1,0 +1,11 @@
+{
+  "identifier": "desktop",
+  "description": "Desktop-only permissions — the autostart plugin is not compiled on mobile, so these must live in a platform-scoped capability or the Android build fails.",
+  "windows": ["main"],
+  "platforms": ["linux", "macOS", "windows"],
+  "permissions": [
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}
