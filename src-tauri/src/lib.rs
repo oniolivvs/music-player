@@ -616,7 +616,13 @@ fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new(&path).spawn().map_err(|e| format!("cannot start installer: {e}"))?;
+        // /S runs the NSIS installer with no wizard at all. It is only safe to
+        // pass because the bundle is built with installMode "currentUser":
+        // nothing is written outside the user's own directories, so Windows
+        // never raises a UAC prompt that a silent run could not answer. Switch
+        // the bundle to perMachine and this must go back to an interactive run,
+        // or the update dies waiting on an elevation dialog nobody can see.
+        std::process::Command::new(&path).arg("/S").spawn().map_err(|e| format!("cannot start installer: {e}"))?;
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(800));
             app.exit(0);

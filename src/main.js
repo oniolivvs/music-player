@@ -4035,9 +4035,10 @@ function openSettings() {
       <div class="set-row"><label>When a new version is available</label>
         <select id="setUpdMode" class="sel sm-sel wide">
           <option value="auto" ${s.updateMode === "auto" ? "selected" : ""}>Automatic</option>
-          <option value="ask" ${s.updateMode === "ask" ? "selected" : ""}>Notify me</option>
+          <option value="ask" ${s.updateMode === "ask" ? "selected" : ""}>Notify me for instant updates</option>
           <option value="off" ${s.updateMode === "off" ? "selected" : ""}>Don't check</option>
         </select></div>
+      <div class="set-hint">Versions that need a reinstall are always hands-off unless checking is off: the installer downloads in the background and starts on its own${IS_ANDROID ? ", then Android shows its own install prompt" : ""}. Only instant updates follow the setting above, because applying one reloads the app. Checks happen at startup and when this panel opens — never mid-playback.</div>
       <div class="set-row"><label>Version <b id="setCurVer">…</b></label>
         <span class="dir-pick">
           <button id="setUpdCheck" class="btn-line sm">Check now</button>
@@ -4339,6 +4340,13 @@ async function checkUpdate(manual = false) {
   // the desktop installer only appears once it's ready.
   const atBoot = !_updChecked; _updChecked = true;
   const autoMode = S().updateMode === "auto" && !manual;
+  // Native (non-OTA) updates are hands-off in every mode except "off". There is
+  // nothing to decide: the installer downloads in the background and only
+  // surfaces once it is ready, and checkUpdate runs at startup or when the
+  // settings panel opens — never on a timer — so it cannot interrupt playback
+  // mid-session. "Notify me" therefore only governs the OTA path below, which
+  // reloads the running app and does have to ask.
+  const autoNative = S().updateMode !== "off" && !manual;
   // Prefer an over-the-air frontend update: it applies instantly, no reinstall,
   // on every platform. Only fall back to the APK/installer path (native code
   // changes) when no OTA is offered.
@@ -4373,10 +4381,11 @@ async function checkUpdate(manual = false) {
       _releaseInfo = rel;
       if (rel.version && cur && verCmp(rel.version, cur) > 0) {
         availableVersion = rel.version;
-        // Auto mode: Android downloads the APK and pops the system installer,
-        // desktop installer builds download and launch the setup — same
-        // hands-off behavior the source-tree path has always had.
-        if (autoMode) { renderUpdateBtn(); runUpdate(); return; }
+        // Hands-off in every mode but "off": desktop downloads the setup and
+        // launches it, Android downloads the APK and hands it to the system
+        // installer. Android still shows its own install prompt — that one is
+        // enforced by the OS and cannot be skipped from here.
+        if (autoNative) { renderUpdateBtn(); runUpdate(); return; }
         if (manual) flash(`Update available for ${rel.platform}: v${cur} → v${rel.version}`);
       } else {
         availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
