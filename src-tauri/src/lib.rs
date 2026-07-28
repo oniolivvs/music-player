@@ -390,6 +390,24 @@ struct ReleaseInfo {
     platform: String,
 }
 
+/// Windows ships two installers in one release: the NSIS `*-setup.exe` and an
+/// `.msi`. They take different silent switches, so the choice cannot be left to
+/// whichever the API happens to list first — today the .exe wins only because
+/// '-' sorts before '_' in the asset names. Prefer the NSIS build explicitly;
+/// `run_installer` reads the extension back to pick the matching switch.
+fn pick_platform_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    if cfg!(target_os = "windows") {
+        if let Some(a) = assets.iter().find(|a| {
+            a["name"].as_str().map(|n| n.to_lowercase().ends_with("-setup.exe")).unwrap_or(false)
+        }) {
+            return Some(a);
+        }
+    }
+    assets
+        .iter()
+        .find(|a| a["name"].as_str().map(platform_asset_match).unwrap_or(false))
+}
+
 fn platform_asset_match(name: &str) -> bool {
     let n = name.to_lowercase();
     if cfg!(target_os = "android") {
@@ -616,13 +634,25 @@ fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // /S runs the NSIS installer with no wizard at all. It is only safe to
-        // pass because the bundle is built with installMode "currentUser":
-        // nothing is written outside the user's own directories, so Windows
-        // never raises a UAC prompt that a silent run could not answer. Switch
-        // the bundle to perMachine and this must go back to an interactive run,
-        // or the update dies waiting on an elevation dialog nobody can see.
-        std::process::Command::new(&path).arg("/S").spawn().map_err(|e| format!("cannot start installer: {e}"))?;
+        // Silent switches are per-installer-kind, so read the extension rather
+        // than assuming: /S is NSIS and means nothing to msiexec, which would
+        // sit on a visible dialog forever after the app has already exited.
+        //
+        // Running silently at all is only safe because the bundle sets
+        // installMode "currentUser": nothing lands outside the user's own
+        // directories, so Windows raises no UAC prompt an unattended run could
+        // not answer. Switch the bundle to perMachine and both branches must go
+        // back to an interactive run.
+        let mut cmd = if path.to_lowercase().ends_with(".msi") {
+            let mut c = std::process::Command::new("msiexec");
+            c.arg("/i").arg(&path).arg("/qn").arg("/norestart");
+            c
+        } else {
+            let mut c = std::process::Command::new(&path);
+            c.arg("/S");
+            c
+        };
+        cmd.spawn().map_err(|e| format!("cannot start installer: {e}"))?;
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(800));
             app.exit(0);
@@ -655,9 +685,7 @@ async fn latest_release() -> Result<ReleaseInfo, String> {
             continue;
         }
         let assets = r["assets"].as_array().cloned().unwrap_or_default();
-        if let Some(a) = assets.iter().find(|a| {
-            a["name"].as_str().map(platform_asset_match).unwrap_or(false)
-        }) {
+        if let Some(a) = pick_platform_asset(&assets) {
             return Ok(ReleaseInfo {
                 version: r["tag_name"].as_str().unwrap_or("").trim_start_matches('v').to_string(),
                 asset_url: a["browser_download_url"].as_str().unwrap_or("").to_string(),
