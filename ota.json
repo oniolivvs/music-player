@@ -1,5 +1,5 @@
 {
-  "version": "0.22.61",
+  "version": "0.22.62",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixed: Added scroll-anchoring compensation (deltaTop) in _virtSlice to prevent viewport jumps when scrolling UP through virtual list slices.",
+  "notes": "Fixed: the track list no longer scrolls back on its own. #trackList carried two wheel smoothers at once — the second one lerped toward a target it never re-checked, undoing any scrollbar drag frame by frame, and it ignored the smooth-scroll setting entirely. Removed. Also dropped the deltaTop compensation in _virtSlice, which added up to VIRT_BUF rows of unrequested travel on every re-slice, and disabled browser scroll anchoring on the list. Playlists now show only tracks that exist on disk; entries with no local file are hidden, never removed, and the header states how many.",
   "platforms": [
     "linux",
     "windows",
