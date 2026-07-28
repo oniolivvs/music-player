@@ -79,3 +79,30 @@ jobs:
             > On Windows, install them and add to PATH.
           releaseDraft: false
           prerelease: false
+
+  # Opens the winget-pkgs PR once the release is published: reads the tag,
+  # computes the installer SHA256, fills the manifests in winget/ and submits.
+  # Needs WINGET_TOKEN — a PAT with `public_repo` on YOUR fork of
+  # microsoft/winget-pkgs. GITHUB_TOKEN cannot be used: it is scoped to this
+  # repository and the PR is opened against Microsoft's.
+  # Without the secret the job simply reports and exits, so a missing token
+  # never fails a release.
+  winget:
+    needs: build
+    runs-on: windows-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: No token — skip
+        if: env.WINGET_TOKEN == ''
+        run: |
+          echo "WINGET_TOKEN is not set, so no winget-pkgs PR was opened." >> $env:GITHUB_STEP_SUMMARY
+          echo "Add it under Settings > Secrets and variables > Actions to enable this." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Submit to winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        uses: vedantmgoyal2009/winget-releaser@v2
+        with:
+          identifier: oniolivvs.MusicPlayer
+          installers-regex: '-setup\.exe$'
+          token: ${{ env.WINGET_TOKEN }}
