@@ -271,7 +271,12 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 
 /* overflow-x explicit: with only overflow-y set, overflow-x computes to auto —
    any too-wide child let the whole results page pan sideways on phones. */
-.tracklist { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 12px 16px; }
+/* overflow-anchor: the virtualized list swaps its rendered window on scroll.
+   Browser scroll anchoring reacts to that DOM swap by shifting scrollTop to
+   keep its anchor element put — which fought the spacers and threw the view
+   back. The spacers already hold the full height, so every row keeps its
+   document position across a re-slice: no anchoring is needed, and any is harmful. */
+.tracklist { flex: 1; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; padding: 4px 12px 16px; }
 
 /* ─── Topbar navigation (Library / Recent / Share / Sources) ───
    Moved out of the sidebar — the sidebar is playlists-only now. Same nav-item

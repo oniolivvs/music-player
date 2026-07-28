@@ -734,19 +734,21 @@ function _virtSlice() {
   const end = Math.min(view.length, vpEnd + VIRT_BUF);
   if (start === v.start && end === v.end) return;
 
-  const prevStart = v.start >= 0 ? v.start : start;
-  const deltaTop = (start - prevStart) * v.rowH;
-
   v.start = start; v.end = end;
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
 
+  // The two spacers always sum with the rendered rows to view.length * rowH, so
+  // row N sits at N * rowH no matter which window is mounted. Re-slicing moves
+  // nothing, and scrollTop must therefore be left ALONE here. An earlier
+  // revision added a `scrollTop += (start - prevStart) * rowH` compensation to
+  // undo the jump caused by the browser's own scroll anchoring; that treated the
+  // symptom and introduced its own — up to VIRT_BUF rows of unrequested travel,
+  // which a scrollbar drag then fought, snapping the view back on every small
+  // move. Anchoring is now off (overflow-anchor: none on .tracklist) and no
+  // compensation belongs here.
   padTop.style.height = `${start * v.rowH}px`;
   padBot.style.height = `${Math.max(0, view.length - end) * v.rowH}px`;
   rowsCont.innerHTML = view.slice(start, end).map((t, k) => _rowHtml(t, start + k, nowPath)).join("");
-
-  if (prevStart !== start && deltaTop !== 0) {
-    host.scrollTop += deltaTop;
-  }
 
   _sm.target = host.scrollTop;
   hydrateCovers();
@@ -777,7 +779,12 @@ function renderTracks(list, presorted = false) {
   if (!$("#search").value.trim()) {
     if (active.type === "playlist") {
       const pl = PL.getPlaylists().find(p => p.id === active.id);
-      const idx = pl ? _computeOrderMap(pl.paths) : null;
+      // Hidden not-downloaded entries filter this view just as the search box
+      // does, so reordering is off here for the same reason: _computeOrderMap
+      // would still resolve every row, but a drop between two visible rows
+      // lands the track on the far side of entries the user cannot see.
+      const complete = pl && view.length === pl.paths.length;
+      const idx = complete ? _computeOrderMap(pl.paths) : null;
       if (idx) _plSrc = { kind: "playlist", id: active.id, idx };
     } else if (active.type === "library") {
       const idx = _computeOrderMap(library.map(t => t.path));
@@ -1276,9 +1283,17 @@ function openPlaylist(id) {
   const byPath = new Map(library.map(t => [t.path, t]));
   selected.clear();
   const nOnline = pl.paths.filter(isOnline).length;
+  // Rows are limited to tracks that actually exist on disk. A path is hidden
+  // only while it has no local file: downloading it (or its twin landing in the
+  // library) makes it appear on the next render, with no edit to the playlist.
+  // Nothing is removed — pl.paths is untouched, and "Save locally" still reaches
+  // the hidden entries — so the subtitle states the count instead of letting
+  // songs seem to vanish.
+  const shownPaths = pl.paths.filter(p => !isStreamTrack(p));
+  const nHidden = pl.paths.length - shownPaths.length;
   const fw = followFor(id);
   setViewHead({
-    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? ` · ↻ followed` : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} not downloaded (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
@@ -1292,7 +1307,7 @@ function openPlaylist(id) {
   $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
-  renderTracks(pl.paths.map(p => byPath.get(p) || ensureOnlineTrack(p)).filter(Boolean));
+  renderTracks(shownPaths.map(p => byPath.get(p) || ensureOnlineTrack(p)).filter(Boolean));
 }
 
 // Add a YouTube video OR playlist by URL straight into this playlist. yt_playlist
