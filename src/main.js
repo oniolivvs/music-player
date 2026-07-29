@@ -291,7 +291,8 @@ const TRIM_TOL = 14;        // per-channel spread tolerated inside a flat band
 const TRIM_MAX = 0.42;      // never eat more than this fraction of a dimension
 const SEAM_MIN = 10;        // absolute floor for "this is a real edge, not noise"
 const SEAM_RATIO = 3.5;     // ...and it must stand this far above the padding's own texture
-const SEAM_ASYM = 0.34;     // left and right depths may differ by this much
+const SEAM_ASYM = 0.34;     // flat-band fallback: how far the two sides may differ
+const SEAM_QUIET = 0.35;    // padding must be at most this textured vs the picture
 
 function contentBox(img, W, H) {
   const full = { x: 0, y: 0, w: W, h: H, W, H };
@@ -310,28 +311,29 @@ function contentBox(img, W, H) {
     const flatRow = (y, ref) => { for (let x = 0; x < sw; x++) if (!near(at(x, y), ref)) return false; return true; };
     const maxX = Math.floor(sw * TRIM_MAX), maxY = Math.floor(sh * TRIM_MAX);
 
-    // ── Pass 1: solid bars ──────────────────────────────────────────────
-    let l = 0, r = sw - 1, t = 0, b = sh - 1;
-    const refL = at(0, sh >> 1), refR = at(sw - 1, sh >> 1);
-    while (l < maxX && flatCol(l, refL)) l++;
-    while (r > sw - 1 - maxX && flatCol(r, refR)) r--;
-    const refT = at(sw >> 1, 0), refB = at(sw >> 1, sh - 1);
-    while (t < maxY && flatRow(t, refT)) t++;
-    while (b > sh - 1 - maxY && flatRow(b, refB)) b--;
+    // The seam scan runs FIRST and wins. The flat-band walk looks like the
+    // exact test but on a blurred backdrop it is not: it compares every column
+    // against a single reference pixel taken from the very edge, so padding
+    // that drifts vertically stops it after one column on one side while the
+    // other side — flatter by luck — is eaten for thirty. Measured on a real
+    // cover it claimed 8px of padding on the left and 264px on the right, for
+    // a sleeve that actually had 280px on each. It is kept only as a fallback
+    // for genuinely solid bars, and only when its two sides agree.
+    // Each axis is judged ALONE. Sharing one verdict meant a bogus horizontal
+    // band could discard a perfectly good vertical crop and vice versa: several
+    // covers whose side bars scored 112 against a threshold of 10 came back
+    // untouched, because the row scan had found some spurious pair and the
+    // shared sanity check threw the whole result away.
+    const axis = (found, n) => (found && found[1] - found[0] >= n * 0.3 && found[0] > 0 && n - 1 - found[1] > 0)
+      ? found : [0, n - 1];
+    const [l, r] = axis(
+      seams(x => colDiff(at, x, sh), sw, maxX)
+      || flatBand(x => flatCol(x, at(0, sh >> 1)), x => flatCol(x, at(sw - 1, sh >> 1)), sw, maxX), sw);
+    const [t, b] = axis(
+      seams(y => rowDiff(at, y, sw), sh, maxY)
+      || flatBand(y => flatRow(y, at(sw >> 1, 0)), y => flatRow(y, at(sw >> 1, sh - 1)), sh, maxY), sh);
 
-    // ── Pass 2: a seam against a blurred backdrop ───────────────────────
-    if (l === 0 && r === sw - 1) {
-      const seam = seams(x => colDiff(at, x, sh), sw, maxX);
-      if (seam) { l = seam[0]; r = seam[1]; }
-    }
-    if (t === 0 && b === sh - 1) {
-      const seam = seams(y => rowDiff(at, y, sw), sh, maxY);
-      if (seam) { t = seam[0]; b = seam[1]; }
-    }
-
-    if (r - l < sw * 0.3 || b - t < sh * 0.3) return full;   // that is not padding
-    // Padding on one side only is an off-centre picture, not a frame.
-    const kx = l > 0 && (sw - 1 - r) > 0, ky = t > 0 && (sh - 1 - b) > 0;
+    const kx = l > 0, ky = t > 0;
     if (!kx && !ky) return full;
     const sx = W / sw, sy = H / sh;
     return {
@@ -342,6 +344,21 @@ function contentBox(img, W, H) {
       W, H,
     };
   } catch { return full; }   // tainted canvas, no context — show it whole
+}
+
+/**
+ * Walk in from both edges while the slice stays uniform — the exact test for a
+ * solid bar. Returns null unless BOTH sides give way by comparable amounts:
+ * one-sided uniformity is a picture with a quiet edge, not a frame.
+ */
+function flatBand(flatLo, flatHi, n, max) {
+  let lo = 0, hi = n - 1;
+  while (lo < max && flatLo(lo)) lo++;
+  while (hi > n - 1 - max && flatHi(hi)) hi--;
+  if (lo === 0 || hi === n - 1) return null;
+  const dl = lo, dr = n - 1 - hi;
+  if (Math.abs(dl - dr) > Math.max(2, (dl + dr) * SEAM_ASYM)) return null;
+  return [lo, hi];
 }
 
 /** Mean absolute channel difference between column x and x+1. */
@@ -374,22 +391,49 @@ function seams(diff, n, max) {
   if (max < 2) return null;
   const g = new Array(n - 1);
   for (let i = 0; i < n - 1; i++) g[i] = diff(i);
-  // Baseline = the median texture of the OUTER strips, i.e. the padding itself.
-  // Comparing against a global average would let the busy artwork in the middle
-  // raise the bar until its own edge no longer clears it.
-  const outer = [...g.slice(0, max), ...g.slice(n - 1 - max)].sort((a, b) => a - b);
-  const base = outer[outer.length >> 1] || 0;
+  // Baseline = the texture of the padding itself, taken from the OUTERMOST
+  // slices only and as a low percentile. A median over the whole trimmable band
+  // was contaminated: on a real cover that band reached well past the frame into
+  // the artwork, the baseline rose to ~17, the threshold to ~60, and the genuine
+  // seam scoring 17 was rejected while a line 19 columns deeper inside the
+  // picture passed. The 20th percentile of the outer eighth is padding or
+  // nothing.
+  const edge = Math.max(2, max >> 2);
+  const outer = [...g.slice(0, edge), ...g.slice(n - 1 - edge)].sort((a, b) => a - b);
+  const base = outer[Math.floor(outer.length * 0.2)] || 0;
   const need = Math.max(SEAM_MIN, base * SEAM_RATIO);
 
-  let lo = -1, hi = -1;
-  for (let i = 0; i < max; i++) if (g[i] >= need) { lo = i + 1; break; }
-  for (let i = n - 2; i >= n - 1 - max; i--) if (g[i] >= need) { hi = i; break; }
-  if (lo < 0 || hi < 0 || hi <= lo) return null;
-  // Padding added to centre an image is symmetric. Anything lopsided is a
-  // picture that simply has a quiet edge, and cropping it would be vandalism.
-  const dl = lo, dr = n - 1 - hi;
-  if (Math.abs(dl - dr) > Math.max(2, (dl + dr) * SEAM_ASYM)) return null;
-  return [lo, hi];
+  const mean = (from, to) => {
+    let s = 0, c = 0;
+    for (let i = Math.max(0, from); i <= Math.min(n - 2, to); i++) { s += g[i]; c++; }
+    return c ? s / c : 0;
+  };
+
+  // Search OUTWARD-IN and stop at the first depth that satisfies everything.
+  // Ranking candidates by seam strength and preferring shallow ones afterwards
+  // was the wrong shape: it let a bold line drawn symmetrically inside the art
+  // win outright, and the correction had to guess how much stronger a deeper
+  // seam was allowed to be. The outermost credible frame is simply the answer —
+  // a frame, by definition, has nothing but padding outside it.
+  //
+  // Three conditions, all necessary:
+  //   • both edges are real seams (min(), so a bold side cannot carry a weak one);
+  //   • they sit at the SAME depth — padding added to centre an image is
+  //     symmetric, an off-centre picture is not;
+  //   • what lies outside is markedly quieter than what lies inside, because
+  //     padding is a flat colour or a blur and the artwork is not.
+  for (let dp = 1; dp <= max; dp++) {
+    const a = g[dp - 1];
+    // ±1 on the mirrored side absorbs the rounding of an odd-width source.
+    const b = Math.max(g[n - 1 - dp] ?? 0, g[n - 2 - dp] ?? 0, g[n - dp] ?? 0);
+    if (a < need || b < need) continue;
+    const hi = n - 1 - dp;
+    if (hi <= dp) return null;
+    const outside = (mean(0, dp - 2) + mean(n - dp, n - 2)) / 2;
+    const inside = mean(dp, n - 2 - dp);
+    if (outside <= inside * SEAM_QUIET) return [dp, hi];
+  }
+  return null;
 }
 
 function setArtPlaceholder(el, t) {
