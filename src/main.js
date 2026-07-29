@@ -389,20 +389,20 @@ function recordHistory(t, path) {
   if (history2.length > lim) history2.length = lim;
   saveHistory();
 }
-// ─── Compteur d'écoutes ───
-// L'historique ne peut pas servir de base : il déduplique par morceau, donc il
-// ne sait dire que "quand", jamais "combien de fois". On tient donc un compteur
-// à part : { path: { n, secs, first, last, title, artist, album } }.
+// ─── Play counter ───
+// The history cannot serve as a base: it deduplicates by track, so it only
+// ever knows *when*, never *how many times*. Hence a separate counter:
+// { path: { n, secs, first, last, title, artist, album } }.
 //
-// Une écoute n'est comptée qu'après PLAY_THRESHOLD_S secondes réellement
-// jouées. Sans ce seuil, parcourir sa bibliothèque en enchaînant les suivants
-// gonflerait les compteurs de morceaux jamais écoutés — et le classement
-// finirait par mesurer le zapping plutôt que les goûts.
+// A play only counts after PLAY_THRESHOLD_S seconds actually heard. Without
+// that threshold, flicking through a library with Next would inflate counters
+// for tracks nobody listened to, and the ranking would end up measuring
+// skipping rather than taste.
 const PLAY_THRESHOLD_S = 30;
 let plays = {};
-// Le morceau en cours, validé seulement à sa sortie. On s'appuie sur wallPos(),
-// qui donne le temps RÉELLEMENT joué — les pauses en sont déjà déduites, ce
-// qu'un simple minuteur ne saurait pas faire sans se réarmer à chaque reprise.
+// The current track, committed only on its way out. Backed by wallPos(), which
+// gives the time ACTUALLY played — pauses are already excluded from it, which
+// a plain timer could only reproduce by re-arming itself on every resume.
 let _curPlay = null;
 
 async function loadPlays() {
@@ -412,9 +412,9 @@ async function loadPlays() {
 }
 function savePlays() { storeSave("plays", JSON.stringify(plays)); }
 
-// Valide le morceau qui vient de se terminer, s'il a été assez écouté.
-// À appeler AVANT wallStart() du suivant : après, l'horloge est repartie de
-// zéro et le temps joué est perdu.
+// Commits the track that just ended, if it was heard long enough.
+// Call it BEFORE the next wallStart(): after that the clock has restarted from
+// zero and the played time is gone.
 function commitPlay() {
   const p = _curPlay;
   _curPlay = null;
@@ -425,8 +425,8 @@ function commitPlay() {
   e.n++;
   e.secs += Math.round(played);
   e.last = Date.now();
-  // Métadonnées recopiées : un morceau retiré de la bibliothèque doit rester
-  // lisible dans les statistiques, sinon le classement se troue avec le temps.
+  // Metadata is copied in: a track removed from the library must stay readable
+  // in the stats, otherwise the ranking grows holes over time.
   e.title = p.t.title || e.title || "";
   e.artist = p.t.artist || e.artist || "";
   e.album = p.t.album || e.album || "";
@@ -434,24 +434,24 @@ function commitPlay() {
   savePlays();
 }
 
-// Ouvre le suivi d'un morceau. Le seuil s'adapte aux titres courts : sinon un
-// interlude de 40 s ne pourrait jamais atteindre 30 s de lecture utile après
-// la moindre avance, et n'existerait jamais dans les statistiques.
+// Opens tracking for a track. The threshold adapts to short titles: otherwise a
+// 40s interlude could never reach 30s of useful playback after the slightest
+// skip, and would never exist in the stats at all.
 function armPlayCount(t, path) {
-  // Pas de commitPlay() ici : à ce stade wallStart(0) a déjà remis l'horloge à
-  // zéro et le temps du morceau précédent est perdu. La validation se fait
-  // explicitement AVANT, sur chaque chemin de changement de piste.
+  // No commitPlay() here: by this point wallStart(0) has already reset the clock
+  // and the previous track's time is gone. The commit happens explicitly BEFORE,
+  // on every track-change path.
   if (!t || !path) return;
   const dur = Number(t.duration_secs) || 0;
   const need = dur && dur < PLAY_THRESHOLD_S * 2 ? Math.max(5, dur / 2) : PLAY_THRESHOLD_S;
   _curPlay = { path, t, need };
 }
 
-// ─── Statistiques d'écoute ───
-// Tout est dérivé de `plays`. Les entrées sans écoute validée n'y figurent
-// pas : « les moins écoutés » se lit donc parmi ce qui a DÉJÀ été écouté au
-// moins une fois, et la bibliothèque jamais lancée est comptée à part — mêler
-// les deux donnerait un classement dominé par des morceaux jamais ouverts.
+// ─── Listening stats ───
+// Everything derives from `plays`. Entries with no committed play are absent,
+// so "least played" reads among what has ALREADY been played at least once,
+// and never-played library tracks are counted separately — mixing the two would
+// give a ranking dominated by tracks nobody ever opened.
 function statsAgg() {
   const rows = Object.entries(plays).map(([path, e]) => ({ path, ...e }));
   const total = rows.reduce((a, r) => a + (r.n || 0), 0);
@@ -517,8 +517,8 @@ function showStats() {
   host.classList.remove("yt-grid");
 
   if (!s.total) {
-    // Message explicite plutôt qu'un tableau vide : le comptage vient d'être
-    // introduit, personne ne peut deviner qu'il faut d'abord écouter.
+    // An explicit message rather than an empty grid: counting was just
+    // introduced, nobody can guess they have to listen first.
     host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.disc}</div>
       No plays counted yet.<br>
       A play counts after ${PLAY_THRESHOLD_S}s actually heard — pauses do not count,
@@ -1119,10 +1119,10 @@ function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected
 // its downloaded twin for an online path), plus the videoId if any.
 function localFileFor(p) { return isOnline(p) ? libraryLocalFor(ytId(p)) : p; }
 function isStreamTrack(p) { return isOnline(p) && !localFileFor(p); }
-// Ce qui reste RÉELLEMENT téléchargeable : en ligne, sans fichier local déjà
-// présent, et pas déjà connu comme indisponible (dlBlock). Compter les `yt:`
-// bruts annonçait « 20 mp3 » là où la moitié était déjà sur le disque ou
-// définitivement introuvable — un compteur qui ment à chaque lancement.
+// What is ACTUALLY still downloadable: online, with no local file already
+// present, and not already known unavailable (dlBlock). Counting raw `yt:`
+// paths advertised "20 mp3" where half were already on disk or permanently
+// gone — a counter that lied on every launch.
 function downloadablePaths(paths) {
   return paths.filter(p => isStreamTrack(p) && !dlBlock[ytId(p)]);
 }
@@ -1503,9 +1503,9 @@ function openPlaylist(id) {
   const byPath = new Map(library.map(t => [t.path, t]));
   selected.clear();
   const nDl = downloadablePaths(pl.paths).length;
-  // Déjà tentés et définitivement introuvables : annoncés à part, parce qu'un
-  // bouton qui reste à "3 mp3" après trois échecs donne l'impression que
-  // l'app ne fait rien.
+  // Already attempted and permanently gone: reported separately, because a
+  // button stuck at "3 mp3" after three failures reads as the app doing
+  // nothing.
   // Only tracks the source refuses outright are hidden — the ones that cannot
   // be downloaded AND cannot be streamed, so they would only ever be a dead row
   // that fails on every play. An earlier revision hid every track without a
@@ -1522,9 +1522,9 @@ function openPlaylist(id) {
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
-      // Visible seulement en suivi : vérifier CETTE playlist tout de suite, sans
-      // attendre le balayage périodique ni passer par les réglages, qui vérifient
-      // tous les suivis à la fois.
+      // Only shown while following: check THIS playlist right now, without
+      // waiting for the periodic sweep or going through Settings, which checks
+      // every follow at once.
       (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
       (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
@@ -1567,17 +1567,17 @@ async function addByUrl(plId) {
     renderPlaylists();
     if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
     flash(n ? `Added ${n} track${n === 1 ? "" : "s"}` : "Already in the playlist");
-    // Proposé dans la foulée : ajouter par URL puis devoir rouvrir la playlist
-    // et cliquer "Save locally" pour la même intention est une étape de trop.
-    // Seuls les titres réellement téléchargeables sont proposés — pas ceux qui
-    // ont déjà un fichier local, ni ceux déjà connus indisponibles.
+    // Offered right away: adding by URL then having to reopen the playlist and
+    // click "Save locally" for the same intent is one step too many.
+    // Only genuinely downloadable tracks are offered — not the ones that
+    // already have a local file, nor those already known unavailable.
     if (n) await offerDownloadNew(tracks.map(t => t.path), "playlist");
   } catch (e) { flash(`Could not add: ${e}`); }
 }
 
-// Propose d'enregistrer localement ce qui vient d'être ajouté. Jamais
-// automatique : un import de 200 titres lancerait autant de téléchargements
-// sans que personne l'ait demandé, et la limite de stockage est vite atteinte.
+// Offers to save what was just added. Never automatic: an import of 200 tracks
+// would fire that many downloads nobody asked for, and the storage cap is
+// reached fast.
 async function offerDownloadNew(paths, where) {
   const todo = downloadablePaths(paths);
   if (!todo.length) return;
@@ -1961,14 +1961,14 @@ async function downloadArtistAll() {
   downloadTracks(tracks.map(t => t.path));
 }
 let _searchSeq = 0;
-// Compteur séparé pour les recherches d'arrière-plan (Ctrl+Entrée). Sans lui,
-// lancer une recherche en fond annulerait celle affichée, et inversement —
-// alors que tout l'intérêt est justement de les mener en parallèle.
+// Separate counter for background searches (Ctrl+Enter). Without it, starting a
+// background search would cancel the displayed one and vice versa — while the
+// whole point is to run them in parallel.
 let _bgSearchSeq = 0;
-// bg = recherche d'arrière-plan (Ctrl+Entrée) : elle ne prend PAS la vue.
-// Le résultat se dépose dans le panneau Activité, cliquable quand on veut le
-// consulter — plusieurs recherches peuvent ainsi mûrir en parallèle pendant
-// qu'on continue d'écouter.
+// bg = background search (Ctrl+Enter): it does NOT take over the view. The
+// result parks in the Activity drawer, clickable whenever you want it — several
+// searches can therefore ripen in parallel while you keep listening.
+
 async function searchOnline(q, page = 0, bg = false) {
   if (!q) return;
   if (!IS_NATIVE) { flash("YouTube search needs the native app"); return; }
@@ -2010,10 +2010,10 @@ async function searchOnline(q, page = 0, bg = false) {
       renderOnlineResults();
       taskEnd(tid, { detail: `${onlineResults.length} results`, ttl: 5000 });
     } else {
-      // Les résultats sont CAPTURÉS dans la fermeture, pas relus depuis la
-      // globale : deux recherches parquées en même temps se seraient écrasées,
-      // et cliquer sur la plus ancienne aurait affiché celles de la plus
-      // récente. C'est justement ce que Ctrl+Entrée rend courant.
+      // Results are CAPTURED in the closure, not reread from the global: two
+      // searches parked at once used to overwrite each other, and clicking the
+      // older one showed the newer one's results. Ctrl+Enter makes exactly that
+      // situation common.
       const mine = onlineResults.slice();
       const minePage = ytPage;
       taskEnd(tid, {
@@ -2539,12 +2539,12 @@ function taskRow(id, t) {
     </div>`;
 }
 
-// yt-dlp rend des pavés du genre :
+// yt-dlp returns walls of text like:
 //   "ERROR: [youtube] Jk3RAtzZilU: This video is only available to Music
 //    Premium members | unplayable! This video is only available to Music Prem"
-// — l'identifiant, la répétition et la troncature noient la seule information
-// utile. On ramène à une étiquette courte ; le message brut reste dans le
-// title= de la ligne pour qui veut le détail.
+// — the id, the repetition and the truncation bury the one useful word. This
+// reduces it to a short label; the raw message stays in the row's title
+// attribute for anyone wanting the detail.
 const DL_ERR_LABELS = [
   [/music premium/i,                                   "Premium only"],
   [/private video/i,                                   "Private"],
@@ -2563,8 +2563,8 @@ const DL_ERR_LABELS = [
 function dlErrLabel(raw) {
   if (!raw) return "";
   for (const [re, label] of DL_ERR_LABELS) if (re.test(raw)) return label;
-  // Inconnu : on nettoie le préfixe et l'id, et on coupe court plutôt que
-  // d'étaler 140 caractères de trace dans une ligne de liste.
+  // Unknown: strip the prefix and the id, then clip rather than spreading 140
+  // characters of trace across a list row.
   const cleaned = String(raw)
     .replace(/^ERROR:\s*/i, "")
     .replace(/^\[[^\]]+\]\s*/, "")
@@ -2600,11 +2600,11 @@ function dlRender() {
   // Discreet badge at the edge — the panel only opens when the user clicks it.
   tog.hidden = false;
   tog.classList.toggle("busy", busy);
-  // Code couleur de l'état global, lisible sans ouvrir le panneau :
-  //   violet  en cours       jaune  terminé avec des annulations
-  //   rouge   des échecs     vert   tout est passé
-  // Le clignotement ne concerne que "en cours" : une pastille qui clignote
-  // encore une fois le lot fini attire l'oeil pour rien.
+  // Colour code for the overall state, readable without opening the drawer:
+  //   purple  running        amber  finished with cancellations
+  //   red     some failed    green  everything went through
+  // Only "running" pulses: a dot still blinking once the batch is over pulls
+  // the eye for nothing.
   const tone = busy ? "run" : n.error ? "err" : n.canceled ? "warn" : "ok";
   for (const t of ["run", "err", "warn", "ok"]) tog.classList.toggle("tone-" + t, t === tone);
   $("#dlBadge").textContent = dlQueue.length
@@ -2639,8 +2639,8 @@ function dlRender() {
   const active = dlQueue.filter(d => d.status === "active");
   const queued = dlQueue.filter(d => d.status === "queued");
   const finished = dlQueue.filter(d => !["queued", "active"].includes(d.status));
-  // Séparé en sections : une liste où réussites, échecs et attente se suivent
-  // sans rupture oblige à lire chaque ligne pour savoir où en est le lot.
+  // Split into sections: a list where successes, failures and pending runs
+  // together forces you to read every row to know where the batch stands.
   const done = finished.filter(d => d.status === "done");
   const failed = finished.filter(d => d.status === "error");
   const canceled = finished.filter(d => d.status === "canceled");
@@ -2657,7 +2657,7 @@ function dlRender() {
     ...queued.slice(0, 12).map(dlRow),
     queued.length > 12 ? `<div class="dl-more">… ${queued.length - 12} more waiting</div>` : "",
 
-    // Les échecs remontent avant les réussites : c'est ce sur quoi on peut agir.
+    // Failures come before successes: those are the actionable ones.
     head("Failed", failed.length, "err"),
     ...failed.slice(-8).reverse().map(dlRow),
     failed.length > 8 ? `<div class="dl-more">… ${failed.length - 8} more failed</div>` : "",
@@ -2793,9 +2793,9 @@ async function downloadPlaylist(id) {
       : "All tracks of this playlist are already local");
     return;
   }
-  // Le décompte annoncé est celui qui sera réellement tenté : promettre des
-  // mp3 déjà présents ou déjà connus introuvables use la confiance dans le
-  // chiffre affiché.
+  // The advertised count is the one that will actually be attempted: promising
+  // mp3s that are already present or already known gone wears out any trust in
+  // the number shown.
   if (!await askConfirm(`Save “${pl.name}” locally?`, `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3.${dead ? ` ${dead} already known unavailable ${dead === 1 ? "is" : "are"} skipped.` : ""}`, "Download")) return;
   downloadTracks(online);
 }
@@ -2996,12 +2996,12 @@ async function dlPump() {
   }
   await saveOnline();
 
-  // Rattrapage des liens AVANT de redessiner. Chaque téléchargement réussi fait
-  // déjà son PL.replacePath, mais un fichier peut n'entrer dans la bibliothèque
-  // qu'au rescan ci-dessus — la playlist garde alors son chemin `yt:`, le titre
-  // reste considéré comme non téléchargé, et disparaît de la vue filtrée alors
-  // qu'il vient d'arriver sur le disque. C'est ce qui donnait "seuls les titres
-  // d'avant le téléchargement s'affichent".
+  // Re-link BEFORE redrawing. Every successful download already does its own
+  // PL.replacePath, but a file may only enter the library at the rescan above —
+  // the playlist then keeps its `yt:` path, the track still counts as not
+  // downloaded, and vanishes from the filtered view just as it landed on disk.
+  // That was the cause of "only the tracks from before the download show up".
+
   let relinked = 0;
   for (const d of dlQueue) {
     if (d.status !== "done" || !d.id || !d.path) continue;
@@ -3019,11 +3019,11 @@ async function dlPump() {
   await offerPurgeUnavailable();
 }
 
-// Un refus définitif de la source (retirée, privée, bloquée) veut presque
-// toujours dire que le morceau n'est plus écoutable DU TOUT, même en ligne :
-// le garder en playlist ne laisse qu'une ligne morte qui échouera à chaque
-// lecture. On propose donc de l'enlever — on ne le fait jamais d'office, la
-// vidéo peut réapparaître et c'est à l'utilisateur de trancher.
+// A final refusal from the source (removed, private, blocked) almost always
+// means the track is not playable AT ALL any more, not even online: keeping it
+// in a playlist leaves only a dead row that fails on every play. So removal is
+// offered — never done on its own, the video may come back and it is the
+// user's call.
 async function offerPurgeUnavailable() {
   const dead = dlQueue.filter(d => d.permanent && d.id);
   if (!dead.length) return;
@@ -3033,7 +3033,7 @@ async function offerPurgeUnavailable() {
     paths.add("yt:" + d.id);
     if (d.path) paths.add(d.path);
   }
-  // Rien à retirer si ces morceaux ont finalement un fichier local.
+  // Nothing to remove if those tracks turn out to have a local file.
   const removable = [...paths].filter(p => isStreamTrack(p));
   if (!removable.length) return;
 
@@ -3052,8 +3052,8 @@ async function offerPurgeUnavailable() {
   library = library.filter(t => !rm.has(t.path));
   await saveLibrary();
 
-  // La file est purgée aussi : sans ça la même question reviendrait au lot
-  // suivant pour des morceaux qui ne sont plus nulle part.
+  // The queue is purged too: otherwise the same question would come back on the
+  // next batch for tracks that are nowhere any more.
   for (let i = dlQueue.length - 1; i >= 0; i--) if (dlQueue[i].permanent) dlQueue.splice(i, 1);
   saveDlQueue();
   renderPlaylists(); refreshView(); dlRender();
@@ -3103,10 +3103,10 @@ async function refreshActiveViewAction() {
       showLibrary();
     } else if (active.type === "playlist") {
       await loadOnline();
-      // Redemande les titres à la SOURCE quand la playlist en a une. Sans ça,
-      // "Refresh" ne faisait que relire le cache local : une vidéo renommée en
-      // amont, ou importée avant que ses métadonnées soient connues, gardait à
-      // vie son libellé "YouTube Track (dQw4w9WgXcQ)".
+      // Re-fetches titles from the SOURCE when the playlist has one. Without it
+      // "Refresh" only reread the local cache: a video renamed upstream, or
+      // imported before its metadata was known, kept its "YouTube Track
+      // (dQw4w9WgXcQ)" label forever.
       const pl = PL.getPlaylists().find(p => p.id === active.id);
       if (pl?.sourceUrl && IS_NATIVE) {
         try {
@@ -3117,8 +3117,8 @@ async function refreshActiveViewAction() {
             const prev = onlineIndex.get(t.path);
             if (prev && prev.title === t.title && prev.artist === t.artist) continue;
             onlineIndex.set(t.path, t);
-            // Le fichier téléchargé porte le même videoId : on remet aussi son
-            // titre à jour, sinon la version locale garde l'ancien libellé.
+            // The downloaded file carries the same videoId: its tags are
+            // refreshed too, or the local copy keeps the stale label.
             const local = libraryLocalFor(ytId(t.path));
             if (local) {
               const lt = library.find(x => x.path === local);
@@ -3342,12 +3342,12 @@ async function checkDuplicatesFlow(type, plId = "") {
         const pl = PL.getPlaylists().find(p => p.id === plId);
         if (pl) {
           pl.paths = pl.paths.filter(p => !dupPaths.has(p));
-          // playlists.js exporte `persist`, pas `_persist` (privé au module).
+          // playlists.js exports `persist`, not `_persist` (module-private).
           // L'ancien `PL._persist?.()` visait un undefined et l'optional
-          // chaining avalait l'appel sans erreur : la playlist était nettoyée
-          // en mémoire mais jamais écrite, donc les doublons revenaient au
-          // redémarrage. Pas d'optional chaining ici — si la fonction
-          // disparaît un jour, ça doit casser bruyamment, pas se taire.
+          // chaining swallowed the call silently: the playlist was cleaned in
+          // memory but never written, so duplicates came back on restart. No
+          // optional chaining here — if the function ever disappears, this must
+          // break loudly rather than go quiet.
           PL.persist();
         }
       } else {
@@ -4666,9 +4666,9 @@ async function checkFollow(f, manual = false) {
 async function checkFollows(manual = false, respectDue = false) {
   if (!IS_NATIVE || _followsBusy) return;
   _followsBusy = true;
-  // Visible dans le panneau Activité comme les recherches et les imports : une
-  // vérification qui interroge YouTube pendant plusieurs minutes ne doit pas
-  // être invisible, sinon l'app a l'air figée et on la relance par-dessus.
+  // Visible in the Activity drawer like searches and imports: a check that
+  // queries YouTube for several minutes must not be invisible, or the app looks
+  // frozen and gets relaunched on top of itself.
   const tid = taskStart("Checking follows", { detail: "starting…", pct: 0 });
   try {
     const ivMs = FOLLOW_IVALS[S().followInterval] ?? FOLLOW_IVALS["6h"];
@@ -4684,7 +4684,7 @@ async function checkFollows(manual = false, respectDue = false) {
     saveFollows();
     taskEnd(tid, {
       detail: !ran ? "nothing to check" : total ? `${total} new track${total === 1 ? "" : "s"}` : "up to date",
-      // Cliquable seulement s'il y a du neuf à aller voir.
+      // Clickable only when there is something new to go and see.
       onClick: total ? () => { renderPlaylists(); refreshView(); } : null,
     });
     if (manual) flash(!ran ? "No followed playlists to check" : total ? `${total} new track${total === 1 ? "" : "s"} added` : "Follows are up to date");
@@ -5187,10 +5187,10 @@ async function init() {
     setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” in ${scope} · ${hits.length} match${hits.length === 1 ? "" : "es"} — Enter searches YouTube` });
     renderTracks(hits);
   });
-  // Entrée : recherche normale, qui prend la vue.
-  // Ctrl/Cmd+Entrée : recherche en arrière-plan — la vue ne bouge pas, le
-  // résultat se dépose dans le panneau Activité et s'ouvre au clic. Plusieurs
-  // peuvent mûrir en parallèle pendant qu'on continue d'écouter.
+  // Enter: normal search, takes over the view.
+  // Ctrl/Cmd+Enter: background search — the view stays put, the result parks in
+  // the Activity drawer and opens on click. Several can ripen in parallel while
+  // you keep listening.
   $("#search").addEventListener("keydown", e => {
     if (e.key !== "Enter") return;
     const q = e.target.value.trim();

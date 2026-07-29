@@ -302,14 +302,14 @@ body.has-bg .top-nav .nav-item:hover, body.has-bg .top-nav .nav-item.active { ba
 .track.pinned { background: rgba(255, 255, 255, .03); }
 body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
 .idx-pin svg { width: 12px; height: 12px; color: var(--accent-2); }
-/* Pastille "en ligne" : une icone, pas du texte. Le libelle "☁ Stream"
-   s'allongeait dans chaque ligne et poussait les titres longs a l'ellipse
-   alors que l'information tient en un glyphe. Le SVG est mis a l'echelle du
-   texte voisin et aligne sur sa ligne de base. */
+/* "Online" pill: an icon, not text. The old "☁ Stream" label stretched every
+   row and pushed long titles into an ellipsis, when the information fits in a
+   single glyph. The SVG is scaled to the neighbouring text and sits on its
+   baseline. */
 .badge-stream { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px; vertical-align: -4px; flex: 0 0 auto; }
 .badge-stream svg { width: 12px; height: 12px; display: block; }
-/* Indisponible a la source : meme emplacement, code couleur d'alerte, pour
-   qu'un morceau mort se distingue d'un simple morceau non telecharge. */
+/* Unavailable at the source: same slot, alert colour, so a dead track reads
+   differently from one that simply has not been downloaded yet. */
 .badge-stream[title*="Unavailable"] { background: rgba(239, 68, 68, 0.16); color: #f87171; border-color: rgba(248, 113, 113, 0.32); }
 @keyframes spinFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .spinning svg, button.spinning svg { animation: spinFast 0.8s linear infinite; }
@@ -938,9 +938,9 @@ select.sel.sm-sel.wide { width: 158px; }
   transition: border-color .12s;
 }
 .dl-toggle:hover { border-color: var(--accent); }
-/* La pastille est TOUJOURS visible : elle porte l'etat du lot, pas seulement
-   son activite. Seul "en cours" clignote — une pastille qui pulse encore une
-   fois le lot termine attire l'oeil pour rien. */
+/* The dot is ALWAYS visible: it carries the batch state, not just activity.
+   Only "running" pulses — a dot still blinking once the batch is over pulls
+   the eye for nothing. */
 .dl-toggle::before {
   content: ""; width: 7px; height: 7px; border-radius: 50%;
   background: var(--tx-3); flex-shrink: 0;
@@ -951,7 +951,7 @@ select.sel.sm-sel.wide { width: 158px; }
 .dl-toggle.tone-ok::before   { background: #34d399; }  /* vert   : tout est passe */
 .dl-toggle.busy::before { animation: dlpulse 1.2s ease-in-out infinite; }
 
-/* ─── Statistiques d'ecoute ─── */
+/* ─── Listening stats ─── */
 .st-wrap { padding: 4px 2px 24px; }
 .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .st-wide { grid-column: 1 / -1; }
@@ -965,8 +965,8 @@ select.sel.sm-sel.wide { width: 158px; }
 .st-row[data-path]:hover { background: var(--bg-3); }
 .st-rank { font-size: 11px; color: var(--tx-3); text-align: right; font-variant-numeric: tabular-nums; }
 .st-name { min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* L'artiste sur la meme ligne que le titre : deux lignes par entree feraient
-   defiler un classement de 15 sur deux ecrans. */
+/* Artist on the same line as the title: two lines per entry would spread a
+   top-15 across two screens. */
 .st-sub { color: var(--tx-3); font-size: 11.5px; margin-left: 6px; }
 .st-bar { height: 5px; border-radius: 999px; background: var(--bg-3); overflow: hidden; }
 .st-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
@@ -975,15 +975,15 @@ select.sel.sm-sel.wide { width: 158px; }
 .st-time { font-size: 11px; color: var(--tx-3); text-align: right; font-variant-numeric: tabular-nums; }
 .st-empty { font-size: 12px; color: var(--tx-3); padding: 6px 2px; }
 .st-note { font-size: 11.5px; color: var(--tx-3); padding: 14px 4px 0; line-height: 1.5; }
-/* Sous 700px les colonnes chiffrees se marchent dessus : on sacrifie la barre,
-   qui n'est qu'un rappel visuel du nombre affiche juste a cote. */
+/* Under 700px the numeric columns collide: the bar is dropped, being only a
+   visual echo of the number printed right beside it. */
 @media (max-width: 700px) {
   .st-row { grid-template-columns: 20px minmax(0, 1fr) 46px 56px; }
   .st-bar { display: none; }
 }
 
-/* En-tetes de section du panneau, memes couleurs que la pastille pour que
-   l'etat global et le detail se lisent avec le meme code. */
+/* Drawer section headings, same colours as the dot so the overall state and
+   the detail read with one code. */
 .dl-head {
   display: flex; align-items: center; gap: 6px;
   font-size: 10.5px; font-weight: 700; text-transform: uppercase;
