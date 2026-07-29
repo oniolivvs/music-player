@@ -1795,21 +1795,32 @@ async function downloadArtistAll() {
   downloadTracks(tracks.map(t => t.path));
 }
 let _searchSeq = 0;
-async function searchOnline(q, page = 0) {
+// Compteur séparé pour les recherches d'arrière-plan (Ctrl+Entrée). Sans lui,
+// lancer une recherche en fond annulerait celle affichée, et inversement —
+// alors que tout l'intérêt est justement de les mener en parallèle.
+let _bgSearchSeq = 0;
+// bg = recherche d'arrière-plan (Ctrl+Entrée) : elle ne prend PAS la vue.
+// Le résultat se dépose dans le panneau Activité, cliquable quand on veut le
+// consulter — plusieurs recherches peuvent ainsi mûrir en parallèle pendant
+// qu'on continue d'écouter.
+async function searchOnline(q, page = 0, bg = false) {
   if (!q) return;
   if (!IS_NATIVE) { flash("YouTube search needs the native app"); return; }
-  const seq = ++_searchSeq; // newest search wins; stale responses are dropped
-  onlineQuery = q;
+  const seq = bg ? ++_bgSearchSeq : ++_searchSeq;
+  const stale = () => (bg ? seq !== _bgSearchSeq : seq !== _searchSeq);
   ytPage = Math.max(0, page);
-  if (ytPage === 0) { ytArtist = null; ytArtistMode = "videos"; ytArtistPls = []; }
-  active = { type: "online", id: q };
-  markActive();
-  selected.clear();
-  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}… (you can keep browsing)` });
-  showListChrome(false);
-  $("#trackList").classList.remove("yt-grid");
-  $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube… Feel free to browse — the result lands in the Activity badge.</div>`;
-  const tid = taskStart(`Search “${q}”`, { detail: `page ${ytPage + 1}` });
+  if (!bg) {
+    onlineQuery = q;
+    if (ytPage === 0) { ytArtist = null; ytArtistMode = "videos"; ytArtistPls = []; }
+    active = { type: "online", id: q };
+    markActive();
+    selected.clear();
+    setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}… (you can keep browsing)` });
+    showListChrome(false);
+    $("#trackList").classList.remove("yt-grid");
+    $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube… Feel free to browse — the result lands in the Activity badge.</div>`;
+  }
+  const tid = taskStart(`Search “${q}”`, { detail: bg ? "in the background" : `page ${ytPage + 1}` });
   try {
     const limit = Number(S().searchLimit) || 20;
     const wantVideos = S().ytIncludeVideos !== false;
@@ -1822,7 +1833,7 @@ async function searchOnline(q, page = 0) {
       ? invoke("yt_search_playlists", { query: q, limit: Math.min(12, limit), offset: ytPage * Math.min(12, limit) }).catch(() => [])
       : Promise.resolve([]);
     const res = wantVideos ? await invoke("yt_search", { query: q, limit, offset: ytPage * limit }) : [];
-    if (seq !== _searchSeq) { taskDrop(tid); return; } // superseded by a newer search
+    if (stale()) { taskDrop(tid); return; } // superseded by a newer search
     ytHasMore = Array.isArray(res) && res.length >= limit;
     onlineResults = (res || []).map(onlineFromResult);
     onlinePlaylists = []; // filled in below when plP resolves
@@ -1833,20 +1844,32 @@ async function searchOnline(q, page = 0) {
       renderOnlineResults();
       taskEnd(tid, { detail: `${onlineResults.length} results`, ttl: 5000 });
     } else {
+      // Les résultats sont CAPTURÉS dans la fermeture, pas relus depuis la
+      // globale : deux recherches parquées en même temps se seraient écrasées,
+      // et cliquer sur la plus ancienne aurait affiché celles de la plus
+      // récente. C'est justement ce que Ctrl+Entrée rend courant.
+      const mine = onlineResults.slice();
+      const minePage = ytPage;
       taskEnd(tid, {
-        detail: `${onlineResults.length} results — click to view`,
-        onClick: () => { onlineQuery = q; active = { type: "online", id: q }; renderOnlineResults(); },
+        detail: `${mine.length} results — click to view`,
+        onClick: () => {
+          onlineQuery = q; ytPage = minePage; onlineResults = mine;
+          onlinePlaylists = []; ytArtist = null; ytArtistMode = "videos"; ytArtistPls = [];
+          active = { type: "online", id: q };
+          markActive();
+          renderOnlineResults();
+        },
       });
       flash(`Search “${q}” ready — see the Activity badge`);
     }
     // Playlists arrive independently → merge them in without blocking the videos.
     plP.then(pls => {
-      if (seq !== _searchSeq) return;
+      if (stale()) return;
       onlinePlaylists = Array.isArray(pls) ? pls : [];
       if (onlinePlaylists.length && active.type === "online" && onlineQuery === q) renderOnlineResults();
     });
   } catch (e) {
-    if (seq !== _searchSeq) { taskDrop(tid); return; }
+    if (stale()) { taskDrop(tid); return; }
     taskEnd(tid, { status: "error", detail: String(e) });
     if (active.type === "online" && active.id === q) {
       setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
@@ -2413,6 +2436,41 @@ function taskRow(id, t) {
     </div>`;
 }
 
+// yt-dlp rend des pavés du genre :
+//   "ERROR: [youtube] Jk3RAtzZilU: This video is only available to Music
+//    Premium members | unplayable! This video is only available to Music Prem"
+// — l'identifiant, la répétition et la troncature noient la seule information
+// utile. On ramène à une étiquette courte ; le message brut reste dans le
+// title= de la ligne pour qui veut le détail.
+const DL_ERR_LABELS = [
+  [/music premium/i,                                   "Premium only"],
+  [/private video/i,                                   "Private"],
+  [/(has been removed|video unavailable|not available)/i, "Unavailable"],
+  [/(age.?restrict|confirm your age)/i,                "Age-restricted"],
+  [/(not available in your country|geo|blocked in)/i,  "Blocked in your region"],
+  [/copyright/i,                                       "Copyright claim"],
+  [/(sign in to confirm you.?re not a bot|captcha)/i,  "Bot check"],
+  [/(429|too many requests|rate.?limit)/i,             "Rate-limited"],
+  [/members.?only|join this channel/i,                 "Members only"],
+  [/live (stream|event)/i,                             "Live stream"],
+  [/storage cap/i,                                     "Storage cap"],
+  [/(network|timed out|connection|dns)/i,              "Network error"],
+  [/(permission denied|access is denied|eacces)/i,     "Permission denied"],
+];
+function dlErrLabel(raw) {
+  if (!raw) return "";
+  for (const [re, label] of DL_ERR_LABELS) if (re.test(raw)) return label;
+  // Inconnu : on nettoie le préfixe et l'id, et on coupe court plutôt que
+  // d'étaler 140 caractères de trace dans une ligne de liste.
+  const cleaned = String(raw)
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/^\[[^\]]+\]\s*/, "")
+    .replace(/^[A-Za-z0-9_-]{11}:\s*/, "")
+    .split("|")[0]
+    .trim();
+  return cleaned.length > 48 ? cleaned.slice(0, 45) + "…" : cleaned;
+}
+
 function dlRow(d) {
   const badge = d.permanent ? IC.slash : DL_ICON[d.status];
   const cover = d.thumbnail
@@ -2421,7 +2479,7 @@ function dlRow(d) {
   return `
     <div class="dl-row ${d.status}" data-path="${esc(d.path)}" data-id="${esc(d.id)}" title="${esc(d.err || d.title)}">
       ${cover}
-      <span class="dl-name">${esc(d.title)}${d.status === "error" && d.err ? `<span class="dl-err">${esc(d.err.slice(0, 140))}</span>` : ""}</span>
+      <span class="dl-name">${esc(d.title)}${d.status === "error" && d.err ? `<span class="dl-err">${esc(dlErrLabel(d.err))}</span>` : ""}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
       <span class="dl-pct">${d.status === "active" ? (d.pct || 0) + "%" : d.status}</span>
       ${d.status === "queued" || d.status === "active" ? `<button class="dl-x" data-dlx="${esc(d.path)}" title="Cancel">${IC.x}</button>` : ""}
@@ -2439,6 +2497,13 @@ function dlRender() {
   // Discreet badge at the edge — the panel only opens when the user clicks it.
   tog.hidden = false;
   tog.classList.toggle("busy", busy);
+  // Code couleur de l'état global, lisible sans ouvrir le panneau :
+  //   violet  en cours       jaune  terminé avec des annulations
+  //   rouge   des échecs     vert   tout est passé
+  // Le clignotement ne concerne que "en cours" : une pastille qui clignote
+  // encore une fois le lot fini attire l'oeil pour rien.
+  const tone = busy ? "run" : n.error ? "err" : n.canceled ? "warn" : "ok";
+  for (const t of ["run", "err", "warn", "ok"]) tog.classList.toggle("tone-" + t, t === tone);
   $("#dlBadge").textContent = dlQueue.length
     ? `${n.done}/${dlQueue.length}${busy ? "" : " ✓"}`
     : (tRun ? `${tRun}⋯` : "✓");
@@ -2471,13 +2536,35 @@ function dlRender() {
   const active = dlQueue.filter(d => d.status === "active");
   const queued = dlQueue.filter(d => d.status === "queued");
   const finished = dlQueue.filter(d => !["queued", "active"].includes(d.status));
+  // Séparé en sections : une liste où réussites, échecs et attente se suivent
+  // sans rupture oblige à lire chaque ligne pour savoir où en est le lot.
+  const done = finished.filter(d => d.status === "done");
+  const failed = finished.filter(d => d.status === "error");
+  const canceled = finished.filter(d => d.status === "canceled");
+  const head = (label, count, kind) =>
+    count ? `<div class="dl-head ${kind}">${label} <span class="dl-count">${count}</span></div>` : "";
+
   const parts = [
     ...[...bgTasks.entries()].map(([id, t]) => taskRow(id, t)),
+
+    head("In progress", active.length, "run"),
     ...active.map(dlRow),
+
+    head("Waiting", queued.length, "wait"),
     ...queued.slice(0, 12).map(dlRow),
-    queued.length > 12 ? `<div class="dl-more">… ${queued.length - 12} more queued</div>` : "",
-    ...finished.slice(-8).reverse().map(dlRow),
-    finished.length > 8 ? `<div class="dl-more">… ${finished.length - 8} more finished</div>` : "",
+    queued.length > 12 ? `<div class="dl-more">… ${queued.length - 12} more waiting</div>` : "",
+
+    // Les échecs remontent avant les réussites : c'est ce sur quoi on peut agir.
+    head("Failed", failed.length, "err"),
+    ...failed.slice(-8).reverse().map(dlRow),
+    failed.length > 8 ? `<div class="dl-more">… ${failed.length - 8} more failed</div>` : "",
+
+    head("Canceled", canceled.length, "warn"),
+    ...canceled.slice(-4).reverse().map(dlRow),
+
+    head("Saved", done.length, "ok"),
+    ...done.slice(-8).reverse().map(dlRow),
+    done.length > 8 ? `<div class="dl-more">… ${done.length - 8} more saved</div>` : "",
   ];
   $("#dlList").innerHTML = parts.join("");
   proxyCovers($("#dlList"));
@@ -4470,18 +4557,31 @@ async function checkFollow(f, manual = false) {
 async function checkFollows(manual = false, respectDue = false) {
   if (!IS_NATIVE || _followsBusy) return;
   _followsBusy = true;
+  // Visible dans le panneau Activité comme les recherches et les imports : une
+  // vérification qui interroge YouTube pendant plusieurs minutes ne doit pas
+  // être invisible, sinon l'app a l'air figée et on la relance par-dessus.
+  const tid = taskStart("Checking follows", { detail: "starting…", pct: 0 });
   try {
     const ivMs = FOLLOW_IVALS[S().followInterval] ?? FOLLOW_IVALS["6h"];
+    const due = [...follows].filter(f => f.enabled !== false
+      && !(respectDue && (ivMs === 0 || Date.now() - (f.lastChecked || 0) < ivMs)));
     let total = 0, ran = 0;
-    for (const f of [...follows]) {
-      if (f.enabled === false) continue;
-      if (respectDue && (ivMs === 0 || Date.now() - (f.lastChecked || 0) < ivMs)) continue;
+    for (const f of due) {
+      taskUpdate(tid, { detail: `${f.title || "playlist"} (${ran + 1}/${due.length})`, pct: Math.round((ran / due.length) * 100) });
       total += await checkFollow(f, manual);
       ran++;
       await sleep(1500); // pacing between yt-dlp calls
     }
     saveFollows();
+    taskEnd(tid, {
+      detail: !ran ? "nothing to check" : total ? `${total} new track${total === 1 ? "" : "s"}` : "up to date",
+      // Cliquable seulement s'il y a du neuf à aller voir.
+      onClick: total ? () => { renderPlaylists(); refreshView(); } : null,
+    });
     if (manual) flash(!ran ? "No followed playlists to check" : total ? `${total} new track${total === 1 ? "" : "s"} added` : "Follows are up to date");
+  } catch (e) {
+    taskEnd(tid, { status: "error", detail: String(e).slice(0, 80) });
+    if (manual) flash(`Follow check failed: ${e}`);
   } finally { _followsBusy = false; }
 }
 
@@ -4977,7 +5077,22 @@ async function init() {
     setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” in ${scope} · ${hits.length} match${hits.length === 1 ? "" : "es"} — Enter searches YouTube` });
     renderTracks(hits);
   });
-  $("#search").addEventListener("keydown", e => { if (e.key === "Enter") searchOnline(e.target.value.trim()); });
+  // Entrée : recherche normale, qui prend la vue.
+  // Ctrl/Cmd+Entrée : recherche en arrière-plan — la vue ne bouge pas, le
+  // résultat se dépose dans le panneau Activité et s'ouvre au clic. Plusieurs
+  // peuvent mûrir en parallèle pendant qu'on continue d'écouter.
+  $("#search").addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    const q = e.target.value.trim();
+    if (!q) return;
+    if (e.ctrlKey || e.metaKey) {
+      searchOnline(q, 0, true);
+      e.target.value = "";
+      flash(`Searching “${q}” in the background — result lands in Activity`);
+    } else {
+      searchOnline(q);
+    }
+  });
 
   $("#importBtn").addEventListener("click", openImportPick);
   $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);

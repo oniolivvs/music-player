@@ -950,10 +950,35 @@ select.sel.sm-sel.wide { width: 158px; }
   transition: border-color .12s;
 }
 .dl-toggle:hover { border-color: var(--accent); }
-.dl-toggle.busy::before {
+/* La pastille est TOUJOURS visible : elle porte l'etat du lot, pas seulement
+   son activite. Seul "en cours" clignote — une pastille qui pulse encore une
+   fois le lot termine attire l'oeil pour rien. */
+.dl-toggle::before {
   content: ""; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent-2); animation: dlpulse 1.2s ease-in-out infinite;
+  background: var(--tx-3); flex-shrink: 0;
 }
+.dl-toggle.tone-run::before  { background: #a78bfa; }  /* violet : en cours */
+.dl-toggle.tone-err::before  { background: #f87171; }  /* rouge  : des echecs */
+.dl-toggle.tone-warn::before { background: #fbbf24; }  /* jaune  : annulations */
+.dl-toggle.tone-ok::before   { background: #34d399; }  /* vert   : tout est passe */
+.dl-toggle.busy::before { animation: dlpulse 1.2s ease-in-out infinite; }
+
+/* En-tetes de section du panneau, memes couleurs que la pastille pour que
+   l'etat global et le detail se lisent avec le meme code. */
+.dl-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--tx-3);
+  padding: 10px 4px 4px; border-bottom: 1px solid var(--bd-2); margin-bottom: 4px;
+}
+.dl-head .dl-count {
+  font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 999px;
+  background: var(--bg-3); color: var(--tx-2);
+}
+.dl-head.run  { color: #a78bfa; }
+.dl-head.err  { color: #f87171; }
+.dl-head.warn { color: #fbbf24; }
+.dl-head.ok   { color: #34d399; }
 @keyframes dlpulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 body.no-anim .dl-toggle.busy::before { animation: none; }
 /* Save CPU when the window isn't focused: freeze cosmetic animations. */
