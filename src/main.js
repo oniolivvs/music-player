@@ -1609,7 +1609,9 @@ function openPlaylist(id) {
       // Only shown while following: check THIS playlist right now, without
       // waiting for the periodic sweep or going through Settings, which checks
       // every follow at once.
-      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
+      // A spinning magnifier meant nothing. The refresh arrow is the icon whose
+      // rotation reads as "working", and it only spins while the check runs.
+      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.refresh)} Check now</button>` : "") +
       (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
@@ -3914,11 +3916,40 @@ const NARROW_AT = 560;   // below this the Album column stops being readable
 const TIGHT_AT  = 420;   // below this even the duration column has to go
 function updateNarrowClasses() {
   const host = $("#trackList") || $(".main");
-  if (!host) return;
-  const w = host.clientWidth;
-  if (!w) return;        // hidden view — keep whatever is already set
-  document.body.classList.toggle("main-narrow", w < NARROW_AT);
-  document.body.classList.toggle("main-tight", w < TIGHT_AT);
+  if (host) {
+    const w = host.clientWidth;
+    if (w) {             // 0 = hidden view; keep whatever is already set
+      document.body.classList.toggle("main-narrow", w < NARROW_AT);
+      document.body.classList.toggle("main-tight", w < TIGHT_AT);
+    }
+  }
+  updateSideClasses();
+  applyIconOnly();
+}
+
+// Sidebar rows lost the wrong thing when the sidebar was dragged narrow: the
+// playlist NAME is the only flexible item in the row, so it absorbed every
+// pixel of the shortfall and disappeared entirely, leaving a cover, a track
+// count and two badges identifying nothing. The name is the content; the
+// decorations are what should give way, in that order.
+const SIDE_NARROW_AT = 205;   // drop the track count
+const SIDE_TIGHT_AT  = 158;   // drop the storage summary too
+function updateSideClasses() {
+  const side = document.querySelector(".sidebar");
+  if (!side) return;
+  const w = side.clientWidth;
+  if (!w) return;
+  document.body.classList.toggle("side-narrow", w < SIDE_NARROW_AT);
+  document.body.classList.toggle("side-tight", w < SIDE_TIGHT_AT);
+}
+
+// "auto" drops the labels exactly when the track list has gone narrow, so the
+// whole interface changes density at one point instead of each row picking its
+// own moment. Tooltips carry the meaning in every mode.
+function applyIconOnly() {
+  const mode = S().iconOnly || "auto";
+  const on = mode === "always" || (mode === "auto" && document.body.classList.contains("main-narrow"));
+  document.body.classList.toggle("icon-only", on);
 }
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
@@ -4249,6 +4280,8 @@ async function applyTheme() {
   root.setProperty("--side-w", `${s.sideW ?? 268}px`);
   root.setProperty("--np-w", `${s.npW ?? 330}px`);
   document.body.classList.toggle("compact-top", !!s.compactTopbar);
+  document.body.classList.toggle("pl-no-names", !!s.hidePlNames);
+  applyIconOnly();
   // Custom slider-thumb image (the "pink dot"). Resolved to a data URL for local
   // paths, like the wallpaper, and applied as a CSS var used by every range thumb.
   applyThumbImage(s);
@@ -4439,6 +4472,14 @@ function openSettings() {
       <div class="set-row"><label>“YouTube playlists” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
       <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
       <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
+      <div class="set-row"><label>Button labels</label>
+        <select id="setIconOnly" class="sel sm-sel wide">
+          <option value="auto"${s.iconOnly === "auto" ? " selected" : ""}>Adaptive — drop labels when the row is tight</option>
+          <option value="always"${s.iconOnly === "always" ? " selected" : ""}>Icons only</option>
+          <option value="never"${s.iconOnly === "never" ? " selected" : ""}>Always show labels</option>
+        </select></div>
+      <div class="set-row"><label>Playlist names in the sidebar</label><input type="checkbox" id="setPlNames" ${s.hidePlNames ? "" : "checked"}></div>
+      <div class="set-hint">Adaptive keeps the labels while they fit and falls back to icons when the panel gets narrow — each button keeps its tooltip either way.</div>
       <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the dock button in the “Now playing” panel docks it as a side column.</div>
     </div>
     <div class="set-group"><div class="set-title">Performance</div>
@@ -4718,6 +4759,9 @@ function openSettings() {
   $("#setRpcDelay").addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
   $("#setRpcPause").addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
   $("#setCompactTop").addEventListener("change", e => { SETTINGS.setSetting("compactTopbar", e.target.checked); document.body.classList.toggle("compact-top", e.target.checked); });
+  $("#setIconOnly")?.addEventListener("change", e => { SETTINGS.setSetting("iconOnly", e.target.value); applyIconOnly(); });
+  // Checked = names visible, so the stored flag is the inverse of the box.
+  $("#setPlNames")?.addEventListener("change", e => { SETTINGS.setSetting("hidePlNames", !e.target.checked); document.body.classList.toggle("pl-no-names", !e.target.checked); });
   $("#setTopPad").addEventListener("input", e => { SETTINGS.setSetting("topbarPad", Number(e.target.value)); document.documentElement.style.setProperty("--topbar-pad", `${e.target.value}px`); });
   $("#setThumbSize").addEventListener("input", e => { SETTINGS.setSetting("thumbSize", Number(e.target.value)); document.documentElement.style.setProperty("--thumb-size", `${e.target.value}px`); });
   $("#setThumbImg").addEventListener("change", e => { SETTINGS.setSetting("sliderImage", e.target.value.trim()); applyThumbImage(S()); });
@@ -5279,11 +5323,12 @@ async function init() {
   // catches every cause at once — window resize, sidebar collapse, the drawer
   // docking — without each of them having to remember to call it.
   (() => {
-    const host = document.querySelector("#trackList");
-    if (!host) return;
     updateNarrowClasses();
-    if (typeof ResizeObserver === "function") new ResizeObserver(updateNarrowClasses).observe(host);
-    else window.addEventListener("resize", updateNarrowClasses);
+    const targets = [document.querySelector("#trackList"), document.querySelector(".sidebar")].filter(Boolean);
+    if (typeof ResizeObserver === "function" && targets.length) {
+      const ro = new ResizeObserver(updateNarrowClasses);
+      targets.forEach(t => ro.observe(t));
+    } else window.addEventListener("resize", updateNarrowClasses);
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();

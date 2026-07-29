@@ -42,6 +42,8 @@ const DEFAULTS = {
   rpcDelay: 0,           // Discord RPC: seconds to wait before showing a new track (debounces fast skips)
   rpcPauseClear: 0,      // Discord RPC: seconds after pausing before the presence is removed (0 = immediately)
   compactTopbar: false,  // slimmer top bar
+  iconOnly: "auto",      // action buttons: "auto" (labels drop when the row is tight) | "always" | "never"
+  hidePlNames: false,    // sidebar playlists show only the cover + counts
   topbarPad: 13,         // top bar vertical padding (px) — customizable height
   sliderImage: "",       // custom image for the slider thumb (the "pink dot"); empty = accent color
   thumbSize: 12,         // slider thumb diameter (px)

@@ -105,6 +105,25 @@ body.rs-dragging .rs-handle { background: var(--vio-glow); box-shadow: inset 0 0
 .pl-row:hover .pl-del { opacity: 1; }
 .pl-row .pl-del:hover { background: var(--bg-4); color: var(--tx-1); }
 .pl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ─── Sidebar rows shed decoration, never the name ───
+   The name was the row's only flexible item, so dragging the sidebar narrow made
+   it absorb the entire shortfall and vanish — leaving a cover, a count and two
+   badges that identified nothing. Widths are measured in JS (updateSideClasses):
+   the sidebar is user-resizable, so its width has no relation to the viewport a
+   media query would ask about. */
+body.side-narrow .pl-count { display: none; }
+body.side-tight .pl-row .net-pill { display: none; }
+/* Deliberate icon-only playlists (Settings → Interface). Different from the
+   rules above: this is a choice, not a reaction to width, so the count and the
+   storage badges stay — they are the only thing left to read. */
+body.pl-no-names .pl-row[data-pl] .pl-name { display: none; }
+body.pl-no-names .pl-row[data-pl] .pl-count { margin-left: auto; }
+
+/* ─── Icon-only action buttons (Settings → Interface → Button labels) ───
+   font-size: 0 collapses the label without needing a wrapper element around
+   every button's text; the SVGs carry explicit width/height attributes, so they
+   are unaffected. Tooltips already exist on all of these. */
+body.icon-only .vh-actions .btn-line.sm { font-size: 0; gap: 0; padding: 8px 11px; }
 .pl-cover { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--tx-3); background: var(--bg-3); background-size: cover; background-position: center; overflow: hidden; }
 .pl-cover svg { width: 15px; height: 15px; }
 .pl-cover.has-cover { color: transparent; }
