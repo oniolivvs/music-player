@@ -233,18 +233,40 @@ function fitArtRatio(el, url) {
   if (FIT_EXEMPT.some(c => el.classList.contains(c))) return;
   el.dataset.artUrl = url;
   if (_artRatio.has(url)) return applyArtBox(el, url, _artRatio.get(url));
-  const probe = new Image();
-  probe.onload = () => {
-    const { naturalWidth: W, naturalHeight: H } = probe;
+
+  const settle = (img, allowRead) => {
+    const { naturalWidth: W, naturalHeight: H } = img;
     if (!W || !H) return;
     // A square sleeve padded to 16:9 at download time carries its bars as
     // PIXELS. No amount of box-fitting removes those — they have to be found.
-    const box = contentBox(probe, W, H);
+    const box = allowRead ? contentBox(img, W, H) : { x: 0, y: 0, w: W, h: H, W, H };
     const raw = box.w / box.h;
     box.r = Math.min(Math.max(raw, RATIO_MIN), RATIO_MAX);
     _artRatio.set(url, box);
     applyArtBox(el, url, box);
   };
+
+  // Reading pixels back from a canvas fed by a cross-origin image throws a
+  // SecurityError — the canvas is tainted. Every YouTube cover is exactly that,
+  // so the padding scan silently returned "nothing to trim" for the entire
+  // class of images it was written for, and only ever worked on covers embedded
+  // in local files. i.ytimg.com does send Access-Control-Allow-Origin, so
+  // asking for the image in CORS mode makes it readable; measured on all four
+  // thumbnail variants, tainted without the attribute and readable with it.
+  const remote = /^https?:/i.test(url);
+  const probe = new Image();
+  if (remote) probe.crossOrigin = "anonymous";
+  probe.onload = () => settle(probe, true);
+  if (remote) {
+    // A host that refuses the CORS request fails the load outright. Fall back to
+    // a plain fetch: the pixels stay unreadable, but the image's own ratio is
+    // still worth having, and it must not be left with the stylesheet's square.
+    probe.onerror = () => {
+      const plain = new Image();
+      plain.onload = () => settle(plain, false);
+      plain.src = url;
+    };
+  }
   probe.src = url;
 }
 
