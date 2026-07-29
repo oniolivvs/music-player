@@ -196,38 +196,56 @@ function setArtImg(el, url) {
     netThumb(url).then(d => {
       if (el.dataset.proxied !== url) return;
       el.style.backgroundImage = `url("${d}")`;
-      if (el.classList.contains("ov-art")) fitArtRatio(el, d);
+      fitArtRatio(el, d);
     }).catch(() => {});
   } else {
     el.style.backgroundImage = `url("${url}")`;
   }
-  if (el.classList.contains("ov-art") && !(IS_ANDROID && /^https?:\/\//.test(url))) fitArtRatio(el, url);
+  if (!(IS_ANDROID && /^https?:\/\//.test(url))) fitArtRatio(el, url);
 }
 
-// The big Now-playing artwork was locked to a square. YouTube thumbnails are
-// 16:9, and `background-size: contain` on a square box paints the difference as
-// black: about 140px of dead space on a 320px-wide drawer, top and bottom.
-// Album art from files is usually square and was fine, which is why the square
-// looked right until a video played. Measure the image and let the box take its
-// real shape instead of guessing one for both.
-const _artRatio = new Map(); // url -> ratio
+// ─── Covers keep their own shape ───
+// A cover box used to be a shape the layout picked — square for Now playing, 4:3
+// for the playlist thumbs, 76×76 for the header icon — and the image was bent
+// into it. `contain` paid for the mismatch in bars, `cover` paid for it by
+// cropping. Neither is right when the app already knows what shape the image is.
+//
+// So: measure the image, give the box that exact ratio, and then use `cover`.
+// Once the two agree, `cover` and `contain` show the same pixels, but `cover`
+// cannot produce a hairline of background from sub-pixel rounding — which is
+// what the thin dark edges around 16:9 artwork were.
+//
+// The ratio is clamped so one pathological asset cannot stretch a panel into a
+// strip. Only when the clamp actually bites does the element fall back to
+// `contain`: there the image genuinely does not fit, and showing all of it
+// matters more than avoiding bars. FIT_EXEMPT keeps uniform grids uniform — a
+// results grid of ragged card heights is worse than a consistent 16:9 crop.
+const _artRatio = new Map();                       // url -> clamped ratio
+const _artExact = new Map();                       // url -> was the clamp a no-op?
+const RATIO_MIN = 0.8, RATIO_MAX = 1.9;
+const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "dl-cover", "pl-cover", "vh-icon"];
+
 function fitArtRatio(el, url) {
   // Without aspect-ratio support the CSS falls back to a fixed height; there is
   // nothing to drive there, and forcing height:auto would collapse the box.
   if (!window.CSS?.supports?.("aspect-ratio: 1")) return;
+  if (FIT_EXEMPT.some(c => el.classList.contains(c))) return;
   el.dataset.artUrl = url;
-  const apply = r => { if (el.dataset.artUrl === url) el.style.aspectRatio = String(r); };
-  const known = _artRatio.get(url);
-  if (known) return apply(known);
+  const apply = (r, exact) => {
+    if (el.dataset.artUrl !== url) return;         // a newer cover won the race
+    el.style.aspectRatio = String(r);
+    el.style.backgroundSize = exact ? "cover" : "contain";
+  };
+  if (_artRatio.has(url)) return apply(_artRatio.get(url), _artExact.get(url));
   const probe = new Image();
   probe.onload = () => {
     const { naturalWidth: w, naturalHeight: h } = probe;
     if (!w || !h) return;
-    // Clamp: a pathological asset must not stretch the drawer into a strip or
-    // push Up next off the bottom.
-    const r = Math.min(Math.max(w / h, 0.8), 1.9);
-    _artRatio.set(url, r);
-    apply(r);
+    const raw = w / h;
+    const r = Math.min(Math.max(raw, RATIO_MIN), RATIO_MAX);
+    const exact = Math.abs(r - raw) < 0.001;
+    _artRatio.set(url, r); _artExact.set(url, exact);
+    apply(r, exact);
   };
   probe.src = url;
 }
@@ -236,9 +254,9 @@ function setArtPlaceholder(el, t) {
   el.classList.remove("has-cover"); el.style.backgroundImage = "";
   el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
   el.dataset.album = albumKey(t);
-  // Back to the square default until we know the next cover's shape, otherwise
+  // Back to the stylesheet's default shape until we know the next cover's, or
   // the previous track's ratio lingers over the placeholder.
-  if (el.classList.contains("ov-art")) { delete el.dataset.artUrl; el.style.aspectRatio = ""; }
+  delete el.dataset.artUrl; el.style.aspectRatio = ""; el.style.backgroundSize = "";
 }
 function artCell(t) {
   // Background on a fixed-size box — the ONE recipe confirmed to render on the
@@ -3984,7 +4002,7 @@ function renderNpPanel() {
     $("#ovMeta").innerHTML = `${esc(t.album)}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · <span class="ov-st ${streamed ? "on" : "loc"}">${streamed ? "streaming" : "local file"}</span>`;
   } else {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
-    delete art.dataset.artUrl; art.style.aspectRatio = "";   // back to the square placeholder
+    delete art.dataset.artUrl; art.style.aspectRatio = ""; art.style.backgroundSize = "";  // square placeholder
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
   // Up next — same list for sequential AND shuffle (pre-computed order).
