@@ -520,10 +520,10 @@ function showStats() {
     // Message explicite plutôt qu'un tableau vide : le comptage vient d'être
     // introduit, personne ne peut deviner qu'il faut d'abord écouter.
     host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.disc}</div>
-      Aucune écoute comptée pour l'instant.<br>
-      Une écoute est validée après ${PLAY_THRESHOLD_S} s de lecture réelle — les pauses ne comptent pas,
-      et parcourir la bibliothèque en enchaînant les suivants ne gonfle rien.<br>
-      Le comptage démarre maintenant : l'historique passé ne contenait pas cette information.</div>`;
+      No plays counted yet.<br>
+      A play counts after ${PLAY_THRESHOLD_S}s actually heard — pauses do not count,
+      and flicking through the library with Next inflates nothing.<br>
+      Counting starts now: the past history never held this information.</div>`;
     return;
   }
 
@@ -536,22 +536,22 @@ function showStats() {
         <div class="st-card"><div class="st-h">Least played artists</div>${statRows(leastArtist, "name", 10)}</div>
         <div class="st-card st-wide"><div class="st-h">Top albums</div>${statRows(byAlbum, "name", 12)}</div>
       </div>
-      <div class="st-note">Une écoute compte après ${PLAY_THRESHOLD_S} s réellement jouées (ou la moitié de la durée pour les titres courts). Les pauses sont déduites.</div>
+      <div class="st-note">A play counts after ${PLAY_THRESHOLD_S}s actually heard — half the duration for short tracks. Pauses are excluded.</div>
     </div>`;
 
   // Un clic sur un morceau le lance, comme partout ailleurs dans l'app.
   host.querySelectorAll(".st-row[data-path]").forEach(el => el.addEventListener("click", () => {
     const p = el.dataset.path;
     const t = trackByPath(p);
-    if (!t) { flash("Ce morceau n'est plus dans la bibliothèque"); return; }
+    if (!t) { flash("That track is no longer in your library"); return; }
     view = [t]; queue = [p]; curIndex = -1;
     hardPlay(0);
   }));
 
   $("#stReset")?.addEventListener("click", async () => {
-    if (!await askConfirm("Reset listening stats?", "Les compteurs repartent de zéro. Les morceaux et playlists ne sont pas touchés.", "Reset")) return;
+    if (!await askConfirm("Reset listening stats?", "Counters go back to zero. Your tracks and playlists are untouched.", "Reset")) return;
     plays = {}; savePlays(); showStats();
-    flash("Statistiques remises à zéro");
+    flash("Listening stats reset");
   });
 }
 
@@ -1506,18 +1506,18 @@ function openPlaylist(id) {
   // Déjà tentés et définitivement introuvables : annoncés à part, parce qu'un
   // bouton qui reste à "3 mp3" après trois échecs donne l'impression que
   // l'app ne fait rien.
-  const nDead = pl.paths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
-  // Rows are limited to tracks that actually exist on disk. A path is hidden
-  // only while it has no local file: downloading it (or its twin landing in the
-  // library) makes it appear on the next render, with no edit to the playlist.
-  // Nothing is removed — pl.paths is untouched, and "Save locally" still reaches
-  // the hidden entries — so the subtitle states the count instead of letting
-  // songs seem to vanish.
-  const shownPaths = pl.paths.filter(p => !isStreamTrack(p));
+  // Only tracks the source refuses outright are hidden — the ones that cannot
+  // be downloaded AND cannot be streamed, so they would only ever be a dead row
+  // that fails on every play. An earlier revision hid every track without a
+  // local file, which emptied a playlist the moment it was imported without
+  // "Save locally": those tracks stream perfectly well and must stay visible.
+  // Nothing is removed either — pl.paths is untouched and the subtitle states
+  // the count, rather than letting songs seem to vanish.
+  const shownPaths = pl.paths.filter(p => !(isStreamTrack(p) && dlBlock[ytId(p)]));
   const nHidden = pl.paths.length - shownPaths.length;
   const fw = followFor(id);
   setViewHead({
-    icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} not downloaded (hidden)` : ""}${nDead ? ` · ${nDead} unavailable` : ""}${fw ? ` · ↻ followed` : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} unavailable (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
@@ -1583,7 +1583,7 @@ async function offerDownloadNew(paths, where) {
   if (!todo.length) return;
   const ok = await askConfirm(
     `Save ${todo.length} new track${todo.length === 1 ? "" : "s"} locally?`,
-    `${todo.length === 1 ? "Ce titre sera téléchargé" : "Ces titres seront téléchargés"} en mp3 et ${todo.length === 1 ? "jouera" : "joueront"} hors ligne. Sinon ${todo.length === 1 ? "il reste écouté" : "ils restent écoutés"} en streaming.`,
+    `${todo.length === 1 ? "It will be saved" : "They will be saved"} as mp3 and ${todo.length === 1 ? "plays" : "play"} offline. Otherwise ${todo.length === 1 ? "it keeps streaming" : "they keep streaming"}.`,
     "Download"
   );
   if (ok) downloadTracks(todo);
@@ -3038,10 +3038,10 @@ async function offerPurgeUnavailable() {
   if (!removable.length) return;
 
   const titles = dead.slice(0, 5).map(d => `• ${d.title || d.id}`).join("\n");
-  const more = dead.length > 5 ? `\n… et ${dead.length - 5} autre${dead.length - 5 === 1 ? "" : "s"}` : "";
+  const more = dead.length > 5 ? `\n… and ${dead.length - 5} more` : "";
   const okToPurge = await askConfirm(
     `${dead.length} track${dead.length === 1 ? "" : "s"} unavailable at the source`,
-    `${titles}${more}\n\nCes morceaux ne sont téléchargeables ni lisibles en ligne. Les retirer des playlists et de la bibliothèque ?`,
+    `${titles}${more}\n\nThese cannot be downloaded and cannot be streamed either. Remove them from your playlists and library?`,
     "Remove"
   );
   if (!okToPurge) return;
