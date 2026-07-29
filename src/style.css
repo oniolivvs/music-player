@@ -725,8 +725,12 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
   background: var(--bg-3) center / cover no-repeat; overflow: hidden;
 }
 @supports (aspect-ratio: 1) { .ov-art { height: auto; aspect-ratio: 1; } }
-/* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
-   16:9, cover made them look off-center; contain shows the full art, centered. */
+/* Big artwork: contain (not crop) on black — cover cropped the art off-centre.
+   The square above is only the starting shape: fitArtRatio() measures the real
+   image and writes an inline aspect-ratio, because a 16:9 YouTube thumbnail in a
+   square box turned ~140px of a 320px-wide drawer into black bars. `contain`
+   stays because the measured ratio is clamped, so an extreme asset letterboxes
+   slightly rather than crops. */
 .ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat !important; background-position: center !important; background-color: #000 !important; color: transparent; }
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
@@ -766,6 +770,13 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 /* Open drawer: compute the effective width once — chosen width capped at a
    third of the viewport (260px floor so the drawer stays readable). */
 body.np-open { --np-eff: min(var(--np-w, 330px), max(34vw, 260px)); }
+/* Narrow windows: below ~560px the 260px floor leaves a strip of app too thin
+   to read — in a 405px window the drawer covered everything but a 64px sliver,
+   which reads as a broken layout rather than an overlay. Take the whole width
+   instead and be honestly a sheet. */
+@media (max-width: 560px) {
+  body.np-open { --np-eff: calc(100vw - 16px - var(--safe-right, 0px) - var(--safe-left, 0px)); }
+}
 /* Push mode — set by JS from the REAL available width (no fixed breakpoint:
    media queries in CSS px lied under Windows display scaling). When there is
    room for sidebar + a usable track list, the drawer becomes a true third

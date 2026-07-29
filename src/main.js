@@ -191,12 +191,55 @@ function setArtImg(el, url) {
   // Android WebView won't load network images → proxy them to a data: URL.
   if (IS_ANDROID && /^https?:\/\//.test(url)) {
     el.dataset.proxied = url;
-    netThumb(url).then(d => { if (el.dataset.proxied === url) el.style.backgroundImage = `url("${d}")`; }).catch(() => {});
+    // Probe the data: URL, not the https one — the WebView that refuses to
+    // paint a network image will not decode it for measurement either.
+    netThumb(url).then(d => {
+      if (el.dataset.proxied !== url) return;
+      el.style.backgroundImage = `url("${d}")`;
+      if (el.classList.contains("ov-art")) fitArtRatio(el, d);
+    }).catch(() => {});
   } else {
     el.style.backgroundImage = `url("${url}")`;
   }
+  if (el.classList.contains("ov-art") && !(IS_ANDROID && /^https?:\/\//.test(url))) fitArtRatio(el, url);
 }
-function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
+
+// The big Now-playing artwork was locked to a square. YouTube thumbnails are
+// 16:9, and `background-size: contain` on a square box paints the difference as
+// black: about 140px of dead space on a 320px-wide drawer, top and bottom.
+// Album art from files is usually square and was fine, which is why the square
+// looked right until a video played. Measure the image and let the box take its
+// real shape instead of guessing one for both.
+const _artRatio = new Map(); // url -> ratio
+function fitArtRatio(el, url) {
+  // Without aspect-ratio support the CSS falls back to a fixed height; there is
+  // nothing to drive there, and forcing height:auto would collapse the box.
+  if (!window.CSS?.supports?.("aspect-ratio: 1")) return;
+  el.dataset.artUrl = url;
+  const apply = r => { if (el.dataset.artUrl === url) el.style.aspectRatio = String(r); };
+  const known = _artRatio.get(url);
+  if (known) return apply(known);
+  const probe = new Image();
+  probe.onload = () => {
+    const { naturalWidth: w, naturalHeight: h } = probe;
+    if (!w || !h) return;
+    // Clamp: a pathological asset must not stretch the drawer into a strip or
+    // push Up next off the bottom.
+    const r = Math.min(Math.max(w / h, 0.8), 1.9);
+    _artRatio.set(url, r);
+    apply(r);
+  };
+  probe.src = url;
+}
+
+function setArtPlaceholder(el, t) {
+  el.classList.remove("has-cover"); el.style.backgroundImage = "";
+  el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
+  el.dataset.album = albumKey(t);
+  // Back to the square default until we know the next cover's shape, otherwise
+  // the previous track's ratio lingers over the placeholder.
+  if (el.classList.contains("ov-art")) { delete el.dataset.artUrl; el.style.aspectRatio = ""; }
+}
 function artCell(t) {
   // Background on a fixed-size box — the ONE recipe confirmed to render on the
   // user's old WebView (playlist covers). <img> inside these boxes did not.
@@ -3892,6 +3935,7 @@ function renderNpPanel() {
     $("#ovMeta").innerHTML = `${esc(t.album)}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · <span class="ov-st ${streamed ? "on" : "loc"}">${streamed ? "streaming" : "local file"}</span>`;
   } else {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
+    delete art.dataset.artUrl; art.style.aspectRatio = "";   // back to the square placeholder
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
   // Up next — same list for sequential AND shuffle (pre-computed order).
