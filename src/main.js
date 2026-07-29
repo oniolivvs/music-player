@@ -210,19 +210,21 @@ function setArtImg(el, url) {
 // into it. `contain` paid for the mismatch in bars, `cover` paid for it by
 // cropping. Neither is right when the app already knows what shape the image is.
 //
-// So: measure the image, give the box that exact ratio, and then use `cover`.
-// Once the two agree, `cover` and `contain` show the same pixels, but `cover`
-// cannot produce a hairline of background from sub-pixel rounding — which is
-// what the thin dark edges around 16:9 artwork were.
+// So: measure the image, give the box that exact ratio, and fill it with
+// `cover`. Once the two agree there is nothing to crop and nothing to pad —
+// which is the point, because a frame around the artwork has no correct colour.
+// `contain` would leave one whatever value it drew, and sub-pixel rounding put a
+// hairline there even when the ratio matched.
 //
-// The ratio is clamped so one pathological asset cannot stretch a panel into a
-// strip. Only when the clamp actually bites does the element fall back to
-// `contain`: there the image genuinely does not fit, and showing all of it
-// matters more than avoiding bars. FIT_EXEMPT keeps uniform grids uniform — a
-// results grid of ragged card heights is worse than a consistent 16:9 crop.
+// The clamp is wide enough that essentially every real cover falls inside it and
+// is shown whole; it exists only so one pathological asset cannot stretch a
+// panel into a strip. Outside it the image is cropped rather than framed —
+// losing a sliver of an extreme picture beats putting a border on every normal
+// one. FIT_EXEMPT keeps uniform grids uniform: a results grid of ragged card
+// heights is worse than a consistent 16:9 crop.
 const _artRatio = new Map();                       // url -> clamped ratio
 const _artExact = new Map();                       // url -> was the clamp a no-op?
-const RATIO_MIN = 0.8, RATIO_MAX = 1.9;
+const RATIO_MIN = 0.55, RATIO_MAX = 2.4;
 const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "dl-cover", "pl-cover", "vh-icon"];
 
 function fitArtRatio(el, url) {
@@ -231,21 +233,19 @@ function fitArtRatio(el, url) {
   if (!window.CSS?.supports?.("aspect-ratio: 1")) return;
   if (FIT_EXEMPT.some(c => el.classList.contains(c))) return;
   el.dataset.artUrl = url;
-  const apply = (r, exact) => {
-    if (el.dataset.artUrl !== url) return;         // a newer cover won the race
-    el.style.aspectRatio = String(r);
-    el.style.backgroundSize = exact ? "cover" : "contain";
-  };
-  if (_artRatio.has(url)) return apply(_artRatio.get(url), _artExact.get(url));
+  // background-size is never touched here: the stylesheet pins `cover` for the
+  // artwork, and writing `contain` for clamped images would reintroduce exactly
+  // the frame this is meant to remove.
+  const apply = r => { if (el.dataset.artUrl === url) el.style.aspectRatio = String(r); };
+  if (_artRatio.has(url)) return apply(_artRatio.get(url));
   const probe = new Image();
   probe.onload = () => {
     const { naturalWidth: w, naturalHeight: h } = probe;
     if (!w || !h) return;
     const raw = w / h;
     const r = Math.min(Math.max(raw, RATIO_MIN), RATIO_MAX);
-    const exact = Math.abs(r - raw) < 0.001;
-    _artRatio.set(url, r); _artExact.set(url, exact);
-    apply(r, exact);
+    _artRatio.set(url, r); _artExact.set(url, Math.abs(r - raw) < 0.001);
+    apply(r);
   };
   probe.src = url;
 }

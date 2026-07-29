@@ -753,12 +753,14 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
    square box turned ~140px of a 320px-wide drawer into black bars. `contain`
    stays because the measured ratio is clamped, so an extreme asset letterboxes
    slightly rather than crops. */
-/* No `!important` on background-size any more: fitArtRatio writes `cover`
-   inline once the box has been given the image's own ratio, and an !important
-   declaration would have silently beaten it — leaving the hairline of black that
-   sub-pixel rounding produces under `contain`. The other three stay pinned; the
-   black only ever shows when the ratio had to be clamped. */
-.ov-art.has-cover { background-size: contain; background-repeat: no-repeat !important; background-position: center !important; background-color: #000 !important; color: transparent; }
+/* The artwork fills its box, always. `contain` is gone and so is the black
+   plate behind it: between them they were the only things that could draw a
+   frame around a cover, whether as letterbox bars, as a hairline from sub-pixel
+   rounding, or as the panel showing through a translucent theme. The box is
+   given the image's measured ratio by fitArtRatio, so in the ordinary case
+   `cover` has nothing to crop — and where the ratio has to be clamped, losing a
+   sliver of an extreme image beats framing every normal one. */
+.ov-art.has-cover { background-size: cover !important; background-repeat: no-repeat !important; background-position: center !important; background-color: transparent !important; color: transparent; }
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
