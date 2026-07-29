@@ -268,17 +268,31 @@ function applyArtBox(el, url, box) {
 }
 
 /**
- * Find the artwork inside an image that was padded to another aspect ratio.
- * Walks in from each edge while the row/column is flat and still matches the
- * colour the edge started with — that is what a pillarbox is, whether it is
- * black, white or the dark red of a blurred backdrop.
+ * Find the artwork inside a cover that was padded out to another aspect ratio.
  *
- * Bails to the full image on anything doubtful: a tainted canvas, a missing 2D
- * context, or a trim so aggressive it would be cropping the art rather than its
- * padding. Never throws — a cover that cannot be analysed must still be shown.
+ * Two kinds of padding exist and they need different tests.
+ *
+ * Flat bars — black, white, a solid colour — are found by walking in from an
+ * edge while the column stays uniform. That test is exact, and it is tried
+ * first.
+ *
+ * A BLURRED ENLARGEMENT of the art is the common case and defeats it entirely:
+ * a blur is a smooth gradient, so no column is ever uniform and the walk stops
+ * on the first pixel. What separates that padding from the artwork is not
+ * flatness but DETAIL. A blur has almost no horizontal structure; the edge of
+ * the inset artwork is a hard vertical seam. So the second pass measures the
+ * horizontal difference between neighbouring columns and looks for that seam,
+ * requiring it on both sides and at roughly the same depth — real padding is
+ * symmetric, an off-centre photograph is not.
+ *
+ * Never throws: a cover that cannot be analysed still has to be displayed.
  */
 const TRIM_TOL = 14;        // per-channel spread tolerated inside a flat band
 const TRIM_MAX = 0.42;      // never eat more than this fraction of a dimension
+const SEAM_MIN = 10;        // absolute floor for "this is a real edge, not noise"
+const SEAM_RATIO = 3.5;     // ...and it must stand this far above the padding's own texture
+const SEAM_ASYM = 0.34;     // left and right depths may differ by this much
+
 function contentBox(img, W, H) {
   const full = { x: 0, y: 0, w: W, h: H, W, H };
   try {
@@ -294,30 +308,88 @@ function contentBox(img, W, H) {
     const near = (a, b) => Math.abs(a[0] - b[0]) <= TRIM_TOL && Math.abs(a[1] - b[1]) <= TRIM_TOL && Math.abs(a[2] - b[2]) <= TRIM_TOL;
     const flatCol = (x, ref) => { for (let y = 0; y < sh; y++) if (!near(at(x, y), ref)) return false; return true; };
     const flatRow = (y, ref) => { for (let x = 0; x < sw; x++) if (!near(at(x, y), ref)) return false; return true; };
-
     const maxX = Math.floor(sw * TRIM_MAX), maxY = Math.floor(sh * TRIM_MAX);
+
+    // ── Pass 1: solid bars ──────────────────────────────────────────────
     let l = 0, r = sw - 1, t = 0, b = sh - 1;
-    const refL = at(0, Math.floor(sh / 2)), refR = at(sw - 1, Math.floor(sh / 2));
+    const refL = at(0, sh >> 1), refR = at(sw - 1, sh >> 1);
     while (l < maxX && flatCol(l, refL)) l++;
     while (r > sw - 1 - maxX && flatCol(r, refR)) r--;
-    const refT = at(Math.floor(sw / 2), 0), refB = at(Math.floor(sw / 2), sh - 1);
+    const refT = at(sw >> 1, 0), refB = at(sw >> 1, sh - 1);
     while (t < maxY && flatRow(t, refT)) t++;
     while (b > sh - 1 - maxY && flatRow(b, refB)) b--;
 
+    // ── Pass 2: a seam against a blurred backdrop ───────────────────────
+    if (l === 0 && r === sw - 1) {
+      const seam = seams(x => colDiff(at, x, sh), sw, maxX);
+      if (seam) { l = seam[0]; r = seam[1]; }
+    }
+    if (t === 0 && b === sh - 1) {
+      const seam = seams(y => rowDiff(at, y, sw), sh, maxY);
+      if (seam) { t = seam[0]; b = seam[1]; }
+    }
+
     if (r - l < sw * 0.3 || b - t < sh * 0.3) return full;   // that is not padding
-    // Trimming a single edge means the picture is simply off-centre, not
-    // letterboxed. Only symmetric-ish padding is really a frame.
+    // Padding on one side only is an off-centre picture, not a frame.
     const kx = l > 0 && (sw - 1 - r) > 0, ky = t > 0 && (sh - 1 - b) > 0;
     if (!kx && !ky) return full;
     const sx = W / sw, sy = H / sh;
     return {
       x: Math.round((kx ? l : 0) * sx),
       y: Math.round((ky ? t : 0) * sy),
-      w: Math.round(((kx ? r - l + 1 : sw)) * sx),
-      h: Math.round(((ky ? b - t + 1 : sh)) * sy),
+      w: Math.round((kx ? r - l + 1 : sw) * sx),
+      h: Math.round((ky ? b - t + 1 : sh) * sy),
       W, H,
     };
   } catch { return full; }   // tainted canvas, no context — show it whole
+}
+
+/** Mean absolute channel difference between column x and x+1. */
+function colDiff(at, x, sh) {
+  let s = 0;
+  for (let y = 0; y < sh; y++) {
+    const a = at(x, y), b = at(x + 1, y);
+    s += (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2])) / 3;
+  }
+  return s / sh;
+}
+/** Same, between rows y and y+1. */
+function rowDiff(at, y, sw) {
+  let s = 0;
+  for (let x = 0; x < sw; x++) {
+    const a = at(x, y), b = at(x, y + 1);
+    s += (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2])) / 3;
+  }
+  return s / sw;
+}
+
+/**
+ * Locate the inset's two edges along one axis.
+ * @param {(i:number)=>number} diff  difference between slice i and i+1
+ * @param {number} n     slices on this axis
+ * @param {number} max   deepest slice that may be trimmed
+ * @returns {[number, number]|null} inclusive [start, end] of the artwork
+ */
+function seams(diff, n, max) {
+  if (max < 2) return null;
+  const g = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) g[i] = diff(i);
+  // Baseline = the median texture of the OUTER strips, i.e. the padding itself.
+  // Comparing against a global average would let the busy artwork in the middle
+  // raise the bar until its own edge no longer clears it.
+  const outer = [...g.slice(0, max), ...g.slice(n - 1 - max)].sort((a, b) => a - b);
+  const base = outer[outer.length >> 1] || 0;
+  const need = Math.max(SEAM_MIN, base * SEAM_RATIO);
+
+  let lo = -1, hi = -1;
+  for (let i = 0; i < max; i++) if (g[i] >= need) { lo = i + 1; break; }
+  for (let i = n - 2; i >= n - 1 - max; i--) if (g[i] >= need) { hi = i; break; }
+  if (lo < 0 || hi < 0 || hi <= lo) return null;
+  // Padding added to centre an image is symmetric. Anything lopsided is a
+  // picture that simply has a quiet edge, and cropping it would be vandalism.
+  const dl = lo, dr = n - 1 - hi;
+  if (Math.abs(dl - dr) > Math.max(2, (dl + dr) * SEAM_ASYM)) return null;
+  return [lo, hi];
 }
 
 function setArtPlaceholder(el, t) {
