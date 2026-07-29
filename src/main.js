@@ -3901,6 +3901,24 @@ function updateNpPush() {
     if (pin) pin.title = !S().npDocked
       ? "Pin — make the panel part of the layout instead of floating over it"
       : (roomy ? "Unpin — let the panel float over the content" : "Pinned — the window is too narrow to give it its own column");
+    updateNarrowClasses();
+}
+
+// The track list dropped its Album column on a viewport media query, but the
+// viewport is not what the list actually gets: collapsing the sidebar gives it
+// ~270px more, pinning the drawer takes ~330px away, and neither moves the
+// window. So a wide window with the drawer docked squeezed Album down to a few
+// characters, while a narrow window with the sidebar hidden had room to spare
+// and hid it anyway. Measure the element and let the real width decide.
+const NARROW_AT = 560;   // below this the Album column stops being readable
+const TIGHT_AT  = 420;   // below this even the duration column has to go
+function updateNarrowClasses() {
+  const host = $("#trackList") || $(".main");
+  if (!host) return;
+  const w = host.clientWidth;
+  if (!w) return;        // hidden view — keep whatever is already set
+  document.body.classList.toggle("main-narrow", w < NARROW_AT);
+  document.body.classList.toggle("main-tight", w < TIGHT_AT);
 }
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
@@ -5256,6 +5274,16 @@ async function init() {
     // player's own box the same size — which the observer never reports.
     if (typeof ResizeObserver === "function") new ResizeObserver(publish).observe(pl);
     window.addEventListener("resize", publish);
+  })();
+  // Column layout follows the track list's own width. An observer on the element
+  // catches every cause at once — window resize, sidebar collapse, the drawer
+  // docking — without each of them having to remember to call it.
+  (() => {
+    const host = document.querySelector("#trackList");
+    if (!host) return;
+    updateNarrowClasses();
+    if (typeof ResizeObserver === "function") new ResizeObserver(updateNarrowClasses).observe(host);
+    else window.addEventListener("resize", updateNarrowClasses);
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();

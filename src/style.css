@@ -915,11 +915,43 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 
 /* ─── View header ─── */
 .view-head { display: flex; align-items: center; gap: 14px; row-gap: 8px; padding: 2px 24px 12px; flex-wrap: wrap; }
-.vh-actions { margin-left: auto; flex-shrink: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+/* `flex-shrink: 0` here was the reason the action row overflowed instead of
+   wrapping. With shrink disabled and a default `flex-basis: auto`, the box sizes
+   to max-content — the sum of every button on one line — so even after
+   .view-head's own wrap dropped it onto its own row it stayed wider than the
+   container, and its internal `flex-wrap: wrap` could never engage. It has to be
+   allowed to shrink for the wrap to mean anything. `min-width: 0` defeats the
+   automatic min-content floor a flex item gets by default. */
+.vh-actions { margin-left: auto; min-width: 0; display: flex; gap: 8px; flex-wrap: wrap; }
 .vh-actions .btn-line.sm { font-size: 12px; padding: 8px 14px; width: auto; }
 .vh-icon { width: 76px; height: 76px; border-radius: 12px; display: grid; place-items: center; font-size: 34px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 24px rgba(0,0,0,.35); flex-shrink: 0; }
-.vh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; }
-.vh-sub { font-size: 12px; color: var(--tx-2); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+/* The title block had no rule at all, so as a flex item it kept the default
+   `min-width: auto` and could never shrink below its own min-content width — a
+   long playlist name held the header open and pushed the buttons off the edge.
+   Let it shrink, and let an unbreakable title wrap instead of setting the floor. */
+.vh-txt { flex: 1 1 auto; min-width: 0; }
+
+/* ─── Columns driven by the list's MEASURED width, not the window's ───
+   The viewport is not what the track list gets: collapsing the sidebar hands it
+   ~270px, pinning the Now-playing drawer takes ~330px away, and neither changes
+   window.innerWidth. So a wide window with the drawer docked squeezed Album into
+   a few characters, while a narrow window with the sidebar hidden had room and
+   hid it anyway. updateNarrowClasses() measures #trackList and sets these.
+   Windows display scaling makes CSS-px media queries unreliable here too — the
+   same reason np-push is computed in JS. */
+body.main-narrow .track,
+body.main-narrow .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+body.main-narrow .track .album,
+body.main-narrow .lh-album { display: none; }
+body.main-tight .track,
+body.main-tight .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 28px; }
+body.main-tight .track .dur,
+body.main-tight .lh-dur { display: none; }
+.vh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; overflow-wrap: anywhere; }
+/* max-width was 60vw, which measures the WINDOW and not the column this text
+   actually sits in — with the sidebar and an open drawer both taking space, 60vw
+   is wider than the room available and the subtitle pushed the header out. */
+.vh-sub { font-size: 12px; color: var(--tx-2); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
 /* ─── List column header ─── */
 .list-head {
