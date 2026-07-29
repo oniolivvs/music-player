@@ -46,11 +46,11 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: #3a3a4d; background-clip: padding-box; }
 /* Smooth scrolling (Performance → Smooth scrolling). Eases programmatic/keyboard
    scrolls; scroll containers also stop chaining so lists feel less jumpy. */
-.tracklist, .modal-body, .src-list, .playlists-list, .np-next, .ck-list, .imp-hits, .imp-list, .side-section { overscroll-behavior: contain; }
+.tracklist, .modal-body, .src-list, .playlists-list, .np-next, .ck-list, .imp-list, .side-section { overscroll-behavior: contain; }
 .tracklist { scroll-behavior: auto !important; }
 body.smooth .modal-body, body.smooth .src-list,
 body.smooth .playlists-list, body.smooth .np-next, body.smooth .ck-list,
-body.smooth .imp-hits, body.smooth .imp-list, body.smooth .side-section { scroll-behavior: smooth; }
+body.smooth .imp-list, body.smooth .side-section { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { *, body.smooth * { scroll-behavior: auto !important; } }
 
 .app { flex: 1; display: grid; grid-template-columns: var(--side-w, 268px) 1fr; min-height: 0; gap: 8px; padding: 8px; position: relative; }
@@ -602,7 +602,6 @@ body.has-bg .track:hover,
 body.has-bg .pl-row:hover,
 body.has-bg .src-row:hover,
 body.has-bg .nx-row:hover,
-body.has-bg .imp-hit:hover,
 body.has-bg .imp-item:hover,
 body.has-bg .ck-opt:hover,
 body.has-bg .ac-pl:hover,
@@ -641,7 +640,6 @@ body.bg-light.has-bg .track:hover,
 body.bg-light.has-bg .pl-row:hover,
 body.bg-light.has-bg .src-row:hover,
 body.bg-light.has-bg .nx-row:hover,
-body.bg-light.has-bg .imp-hit:hover,
 body.bg-light.has-bg .imp-item:hover,
 body.bg-light.has-bg .ck-opt:hover,
 body.bg-light.has-bg .ac-pl:hover,
@@ -740,14 +738,6 @@ select#ytFilter.sm-sel { width: 138px; }
 .side-filter { width: 100%; padding: 7px 10px; font-size: 12px; }
 
 /* ─── Playlist search hits (YouTube playlists modal) ─── */
-.imp-hits { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
-.imp-hit { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
-.imp-hit:hover { background: var(--bg-3); }
-.imp-hit.on { background: var(--bg-3); outline: 1px solid var(--accent); }
-.imp-more { align-self: center; margin: 6px 0 2px; }
-.ih-t { font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ih-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
-.imp-or { text-align: center; font-size: 11px; color: var(--tx-3); padding: 10px 0 2px; }
 
 /* ─── In-list section separator (e.g. "already in your library") ─── */
 .list-sep {
@@ -760,8 +750,6 @@ select#ytFilter.sm-sel { width: 138px; }
 .list-sep svg { color: #34d399; }
 .track.owned { opacity: .72; }
 .track.owned:hover, .track.owned.selected, .track.owned.playing { opacity: 1; }
-.imp-hit { flex-wrap: wrap; }
-.ih-prev { width: 100%; font-size: 11px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 2px; }
 
 /* ─── SVG icon plumbing ─── */
 [data-ic], .row-ic { display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }

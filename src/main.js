@@ -2159,73 +2159,10 @@ async function importPlaylistDetail(save) {
 let impTracks = [];
 function openImport() {
   impTracks = [];
-  impHits = []; impSearchQuery = ""; impSearchOffset = 0; impSearchMore = false; impPreviewRun++;
-  $("#impQuery").value = ""; $("#impHits").innerHTML = "";
   $("#impUrl").value = ""; $("#impStatus").textContent = ""; $("#impList").innerHTML = "";
   $("#impDl").checked = S().autoSaveImports;
   $("#impFoot").hidden = true; $("#importModal").hidden = false;
-  $("#impQuery").focus();
-}
-// Search YouTube for playlists by name/author; picking a hit fetches its tracks.
-// Results accumulate: "Load more" fetches the next page via the offset param.
-let impHits = [], impSearchQuery = "", impSearchOffset = 0, impSearchMore = false, impPreviewRun = 0;
-async function impSearchGo(more = false) {
-  const q = more ? impSearchQuery : $("#impQuery").value.trim();
-  if (!q) return;
-  if (!IS_NATIVE) { flash("Playlist search needs the native app"); return; }
-  const host = $("#impHits");
-  const limit = Number(S().searchLimit) || 20;
-  if (!more) { impSearchQuery = q; impSearchOffset = 0; impHits = []; impPreviewRun++; host.innerHTML = `<div class="nx-note">Searching playlists…</div>`; }
-  else { const b = $("#impMore"); if (b) { b.disabled = true; b.textContent = "Loading…"; } }
-  try {
-    const hits = await invoke("yt_search_playlists", { query: q, limit, offset: impSearchOffset });
-    impSearchMore = Array.isArray(hits) && hits.length >= limit;
-    impSearchOffset += hits?.length || 0;
-    impHits.push(...(hits || []));
-    if (!impHits.length) { host.innerHTML = `<div class="nx-note">No playlists found for “${esc(q)}”.</div>`; return; }
-    impRenderHits();
-  } catch (e) {
-    if (more) { const b = $("#impMore"); if (b) { b.disabled = false; b.textContent = "Load more"; } flash("Load more failed"); }
-    else host.innerHTML = `<div class="nx-note">Search failed: ${esc(String(e))}</div>`;
-  }
-}
-function impRenderHits() {
-  const host = $("#impHits");
-  const sel = $("#impUrl").value;
-  host.innerHTML = impHits.map((h, i) =>
-    `<div class="imp-hit${h.url === sel ? " on" : ""}" data-hit="${i}" title="${esc(h.url)}">
-      <span class="ih-t">${esc(h.title)}</span>
-      <span class="ih-a">${esc(h.author || "")}</span>
-      ${h._prev ? `<div class="ih-prev">${esc(h._prev)}</div>` : ""}
-    </div>`).join("") +
-    (impSearchMore ? `<button id="impMore" class="btn-line sm imp-more">Load more</button>` : "");
-  host.querySelectorAll("[data-hit]").forEach(el => el.addEventListener("click", () => {
-    host.querySelectorAll(".imp-hit").forEach(x => x.classList.toggle("on", x === el));
-    $("#impUrl").value = impHits[Number(el.dataset.hit)].url;
-    impFetch();
-  }));
-  $("#impMore")?.addEventListener("click", () => impSearchGo(true));
-  impLoadPreviews();
-}
-// Background previews: first titles of each playlist, filled in lazily and cached.
-async function impLoadPreviews() {
-  const run = ++impPreviewRun;
-  const host = $("#impHits");
-  for (let i = 0; i < impHits.length; i++) {
-    if (run !== impPreviewRun) return; // superseded by a newer render
-    if (impHits[i]._prev) continue;
-    const el = host.querySelector(`[data-hit="${i}"]`);
-    if (!el || !el.isConnected) continue;
-    try {
-      const titles = await invoke("yt_playlist_preview", { url: impHits[i].url, count: 3 });
-      if (run !== impPreviewRun) return;
-      if (titles?.length) {
-        impHits[i]._prev = titles.join("  ·  ");
-        const cur = host.querySelector(`[data-hit="${i}"]`);
-        if (cur && !cur.querySelector(".ih-prev")) cur.insertAdjacentHTML("beforeend", `<div class="ih-prev">${esc(impHits[i]._prev)}</div>`);
-      }
-    } catch { return; }
-  }
+  $("#impUrl").focus();
 }
 async function impFetch() {
   const url = $("#impUrl").value.trim();
@@ -5131,8 +5068,6 @@ async function init() {
   $("#shareConnect").addEventListener("click", shareConnect);
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
-  $("#impSearch").addEventListener("click", impSearchGo);
-  $("#impQuery").addEventListener("keydown", e => { if (e.key === "Enter") impSearchGo(); });
 
   $("#sideFilter").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
