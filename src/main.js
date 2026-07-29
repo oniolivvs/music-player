@@ -223,7 +223,6 @@ function setArtImg(el, url) {
 // one. FIT_EXEMPT keeps uniform grids uniform: a results grid of ragged card
 // heights is worse than a consistent 16:9 crop.
 const _artRatio = new Map();                       // url -> clamped ratio
-const _artExact = new Map();                       // url -> was the clamp a no-op?
 const RATIO_MIN = 0.55, RATIO_MAX = 2.4;
 const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "dl-cover", "pl-cover", "vh-icon"];
 
@@ -233,21 +232,92 @@ function fitArtRatio(el, url) {
   if (!window.CSS?.supports?.("aspect-ratio: 1")) return;
   if (FIT_EXEMPT.some(c => el.classList.contains(c))) return;
   el.dataset.artUrl = url;
-  // background-size is never touched here: the stylesheet pins `cover` for the
-  // artwork, and writing `contain` for clamped images would reintroduce exactly
-  // the frame this is meant to remove.
-  const apply = r => { if (el.dataset.artUrl === url) el.style.aspectRatio = String(r); };
-  if (_artRatio.has(url)) return apply(_artRatio.get(url));
+  if (_artRatio.has(url)) return applyArtBox(el, url, _artRatio.get(url));
   const probe = new Image();
   probe.onload = () => {
-    const { naturalWidth: w, naturalHeight: h } = probe;
-    if (!w || !h) return;
-    const raw = w / h;
-    const r = Math.min(Math.max(raw, RATIO_MIN), RATIO_MAX);
-    _artRatio.set(url, r); _artExact.set(url, Math.abs(r - raw) < 0.001);
-    apply(r);
+    const { naturalWidth: W, naturalHeight: H } = probe;
+    if (!W || !H) return;
+    // A square sleeve padded to 16:9 at download time carries its bars as
+    // PIXELS. No amount of box-fitting removes those — they have to be found.
+    const box = contentBox(probe, W, H);
+    const raw = box.w / box.h;
+    box.r = Math.min(Math.max(raw, RATIO_MIN), RATIO_MAX);
+    _artRatio.set(url, box);
+    applyArtBox(el, url, box);
   };
   probe.src = url;
+}
+
+/** Show only `box` of the source image, filling the element. */
+function applyArtBox(el, url, box) {
+  if (el.dataset.artUrl !== url) return;             // a newer cover won the race
+  el.style.aspectRatio = String(box.r);
+  if (box.w === box.W && box.h === box.H) {          // nothing trimmed
+    el.style.backgroundSize = "cover";
+    el.style.backgroundPosition = "center";
+    return;
+  }
+  // Percentage background-size is relative to the element, and percentage
+  // background-position places the image so that P% of the overflow sits before
+  // it. Both resolve to a uniform scale here because the element was just given
+  // the trimmed region's own aspect ratio.
+  el.style.backgroundSize = `${(box.W / box.w) * 100}% ${(box.H / box.h) * 100}%`;
+  const px = box.W === box.w ? 50 : (box.x / (box.W - box.w)) * 100;
+  const py = box.H === box.h ? 50 : (box.y / (box.H - box.h)) * 100;
+  el.style.backgroundPosition = `${px}% ${py}%`;
+}
+
+/**
+ * Find the artwork inside an image that was padded to another aspect ratio.
+ * Walks in from each edge while the row/column is flat and still matches the
+ * colour the edge started with — that is what a pillarbox is, whether it is
+ * black, white or the dark red of a blurred backdrop.
+ *
+ * Bails to the full image on anything doubtful: a tainted canvas, a missing 2D
+ * context, or a trim so aggressive it would be cropping the art rather than its
+ * padding. Never throws — a cover that cannot be analysed must still be shown.
+ */
+const TRIM_TOL = 14;        // per-channel spread tolerated inside a flat band
+const TRIM_MAX = 0.42;      // never eat more than this fraction of a dimension
+function contentBox(img, W, H) {
+  const full = { x: 0, y: 0, w: W, h: H, W, H };
+  try {
+    const S = 160;          // scan a downscale: bars are wide, precision is not the point
+    const sw = Math.max(8, Math.min(S, W)), sh = Math.max(8, Math.round(sw * H / W));
+    const cv = document.createElement("canvas");
+    cv.width = sw; cv.height = sh;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return full;
+    ctx.drawImage(img, 0, 0, sw, sh);
+    const d = ctx.getImageData(0, 0, sw, sh).data;   // throws if tainted
+    const at = (x, y) => { const i = (y * sw + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+    const near = (a, b) => Math.abs(a[0] - b[0]) <= TRIM_TOL && Math.abs(a[1] - b[1]) <= TRIM_TOL && Math.abs(a[2] - b[2]) <= TRIM_TOL;
+    const flatCol = (x, ref) => { for (let y = 0; y < sh; y++) if (!near(at(x, y), ref)) return false; return true; };
+    const flatRow = (y, ref) => { for (let x = 0; x < sw; x++) if (!near(at(x, y), ref)) return false; return true; };
+
+    const maxX = Math.floor(sw * TRIM_MAX), maxY = Math.floor(sh * TRIM_MAX);
+    let l = 0, r = sw - 1, t = 0, b = sh - 1;
+    const refL = at(0, Math.floor(sh / 2)), refR = at(sw - 1, Math.floor(sh / 2));
+    while (l < maxX && flatCol(l, refL)) l++;
+    while (r > sw - 1 - maxX && flatCol(r, refR)) r--;
+    const refT = at(Math.floor(sw / 2), 0), refB = at(Math.floor(sw / 2), sh - 1);
+    while (t < maxY && flatRow(t, refT)) t++;
+    while (b > sh - 1 - maxY && flatRow(b, refB)) b--;
+
+    if (r - l < sw * 0.3 || b - t < sh * 0.3) return full;   // that is not padding
+    // Trimming a single edge means the picture is simply off-centre, not
+    // letterboxed. Only symmetric-ish padding is really a frame.
+    const kx = l > 0 && (sw - 1 - r) > 0, ky = t > 0 && (sh - 1 - b) > 0;
+    if (!kx && !ky) return full;
+    const sx = W / sw, sy = H / sh;
+    return {
+      x: Math.round((kx ? l : 0) * sx),
+      y: Math.round((ky ? t : 0) * sy),
+      w: Math.round(((kx ? r - l + 1 : sw)) * sx),
+      h: Math.round(((ky ? b - t + 1 : sh)) * sy),
+      W, H,
+    };
+  } catch { return full; }   // tainted canvas, no context — show it whole
 }
 
 function setArtPlaceholder(el, t) {
@@ -256,7 +326,7 @@ function setArtPlaceholder(el, t) {
   el.dataset.album = albumKey(t);
   // Back to the stylesheet's default shape until we know the next cover's, or
   // the previous track's ratio lingers over the placeholder.
-  delete el.dataset.artUrl; el.style.aspectRatio = ""; el.style.backgroundSize = "";
+  delete el.dataset.artUrl; el.style.aspectRatio = ""; el.style.backgroundSize = ""; el.style.backgroundPosition = "";
 }
 function artCell(t) {
   // Background on a fixed-size box — the ONE recipe confirmed to render on the
@@ -4002,7 +4072,7 @@ function renderNpPanel() {
     $("#ovMeta").innerHTML = `${esc(t.album)}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · <span class="ov-st ${streamed ? "on" : "loc"}">${streamed ? "streaming" : "local file"}</span>`;
   } else {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
-    delete art.dataset.artUrl; art.style.aspectRatio = ""; art.style.backgroundSize = "";  // square placeholder
+    delete art.dataset.artUrl; art.style.aspectRatio = ""; art.style.backgroundSize = ""; art.style.backgroundPosition = "";  // square placeholder
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
   // Up next — same list for sequential AND shuffle (pre-computed order).

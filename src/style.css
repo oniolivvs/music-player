@@ -760,7 +760,10 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
    given the image's measured ratio by fitArtRatio, so in the ordinary case
    `cover` has nothing to crop — and where the ratio has to be clamped, losing a
    sliver of an extreme image beats framing every normal one. */
-.ov-art.has-cover { background-size: cover !important; background-repeat: no-repeat !important; background-position: center !important; background-color: transparent !important; color: transparent; }
+/* size and position carry no !important: applyArtBox writes both inline when it
+   has found padding baked into the image and needs to show only part of it.
+   They are the fallback for the moment before the scan finishes. */
+.ov-art.has-cover { background-size: cover; background-repeat: no-repeat !important; background-position: center; background-color: transparent !important; color: transparent; }
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
