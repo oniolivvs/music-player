@@ -1826,8 +1826,34 @@ function playlistCardHtml(p, i) {
   </div>`;
 }
 function wirePlaylistCards(root, pls) {
-  root.querySelectorAll("[data-plhit]").forEach(el =>
-    el.addEventListener("click", () => openPlaylistDetail(pls[Number(el.dataset.plhit)])));
+  root.querySelectorAll("[data-plhit]").forEach(el => {
+    el.addEventListener("click", () => openPlaylistDetail(pls[Number(el.dataset.plhit)]));
+    // Playlist cards had no right-click at all: every other result in this view
+    // answers to one, so landing on a card felt like the menu had broken.
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      openPlaylistHitCtx(e.clientX, e.clientY, pls[Number(el.dataset.plhit)]);
+    });
+  });
+}
+
+// Right-click menu for a playlist found in search results — it is not in the
+// library yet, so the actions are about bringing it in, not editing it.
+function openPlaylistHitCtx(x, y, p) {
+  if (!p) return;
+  const menu = $("#ctxMenu");
+  menu.innerHTML =
+    `<div class="ctx-item" data-a="open">${ic(IC.eye)}Preview tracks</div>` +
+    `<div class="ctx-item" data-a="import">${ic(IC.dl)}Import playlist</div>` +
+    `<div class="ctx-item" data-a="url">${ic(IC.link)}Copy source link</div>`;
+  placeCtx(menu, x, y);
+  menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", async () => {
+    const a = it.dataset.a;
+    closeCtx();
+    if (a === "open") openPlaylistDetail(p);
+    else if (a === "import") importChannelPlaylist(p.url);
+    else if (a === "url") { try { await navigator.clipboard.writeText(p.url); flash("Link copied"); } catch { flash("Could not copy the link"); } }
+  }));
 }
 function prependPlaylistList(pls) {
   const host = $("#trackList");
@@ -3842,9 +3868,15 @@ function renderNpPanel() {
       if (t.thumbnail) setArtImg(art, t.thumbnail);
       else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
     }
-    $("#ovTitle").textContent = t.title;
+    // innerHTML: the title carries the storage badge, like the mini player.
+    $("#ovTitle").innerHTML = `${esc(t.title)}${netBadge(eff || t.path)}`;
     $("#ovSub").textContent = t.artist;
-    $("#ovMeta").textContent = `${t.album}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · ${isOnline(eff) ? "streaming" : "local file"}`;
+    // "local file" was a lie for a downloaded YouTube track: the path still
+    // starts with yt: while a local twin exists, so isOnline() reported
+    // streaming when the audio was coming off the disk. Ask the same question
+    // netBadge asks, and colour the answer to match its pill.
+    const streamed = isOnline(eff) && !localFileFor(eff);
+    $("#ovMeta").innerHTML = `${esc(t.album)}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · <span class="ov-st ${streamed ? "on" : "loc"}">${streamed ? "streaming" : "local file"}</span>`;
   } else {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
@@ -5147,6 +5179,17 @@ function initResizers() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
+  // Publishes the player's real height so the Now-playing drawer can sit exactly
+  // on top of it. A hard-coded bottom offset only ever matched one player
+  // height: padding changes, safe-area insets and a wrapped title all moved it.
+  (() => {
+    const pl = document.querySelector(".player");
+    if (!pl) return;
+    const publish = () => document.documentElement.style.setProperty("--player-h", Math.round(pl.getBoundingClientRect().height) + "px");
+    publish();
+    if (typeof ResizeObserver === "function") new ResizeObserver(publish).observe(pl);
+    else window.addEventListener("resize", publish);
+  })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates

@@ -316,16 +316,15 @@ body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
 
 /* Shared pill for every storage-state badge, whatever it decorates. */
 .net-pill {
-  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  width: 18px; height: 18px; padding: 0; border-radius: 5px;
-  vertical-align: -4px; margin-left: 6px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  padding: 0;
   background: var(--net-online-bg); color: var(--net-online); border: 1px solid var(--net-online-bd);
 }
-.net-pill svg { width: 12px; height: 12px; display: block; }
+.net-pill svg { display: block; }
 .net-pill.local { background: var(--net-local-bg); color: var(--net-local); border-color: var(--net-local-bd); }
 .net-pill.dead  { background: var(--net-dead-bg);  color: var(--net-dead);  border-color: var(--net-dead-bd); }
 /* Wide variant when the pill carries a count as well as the glyph. */
-.net-pill.wide { width: auto; padding: 0 6px; font-size: 10.5px; font-weight: 700; }
+.net-pill.wide { font-weight: 700; }
 
 /* Buttons carry their icon inline at text size, never larger than the label. */
 .btn-line svg, .btn svg { width: 13px; height: 13px; vertical-align: -2px; flex: 0 0 auto; }
@@ -695,7 +694,13 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .np-drawer {
   /* 8px inset like every other panel — it was 10px, leaving the drawer 2px
      off-grid from the nav bar and the app panels. */
-  position: fixed; top: 8px; right: calc(8px + var(--safe-right, 0px)); bottom: 118px; z-index: 79;
+  /* Bottom tracks the player's REAL height, published as --player-h by a
+     ResizeObserver. It used to be a hard 118px, which only matched one
+     particular player height: any change to its padding, to the safe-area
+     inset, or a wrapped title left the drawer floating short of the player or
+     tucked behind it. Top stays at 8px, the same row as the nav bar. */
+  position: fixed; top: 8px; right: calc(8px + var(--safe-right, 0px));
+  bottom: calc(var(--player-h, 110px) + 8px); z-index: 79;
   /* Effective width: the user's chosen width, capped to roughly a third of
      the viewport so that when the drawer pushes the layout aside (np-push)
      the track list keeps a usable share of the window. The 260px floor keeps
@@ -720,6 +725,26 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
+/* Streaming vs local, coloured like the pill so the two agree at a glance. */
+.ov-st { font-weight: 700; }
+.ov-st.on  { color: var(--net-online); }
+.ov-st.loc { color: var(--net-local); }
+
+/* ─── Storage pill: scales with its neighbouring text ───
+   Sized in em, not px, so it grows with the 17px drawer title and shrinks with
+   an 11px sidebar row without a rule per context. `line-height: 0` on the box
+   and absolute centring inside keep it out of the line box: the pill can be
+   taller than the text without pushing the line apart or nudging what sits
+   beside it — which is what made rows jitter when a badge appeared. */
+.net-pill {
+  width: 1.35em; height: 1.35em; border-radius: .32em;
+  margin-left: .35em; line-height: 0; vertical-align: -.28em;
+}
+.net-pill svg { width: .9em; height: .9em; }
+.net-pill.wide { width: auto; min-width: 1.35em; padding: 0 .35em; font-size: .78em; gap: .18em; line-height: 1.35em; }
+/* Reserve the row's height regardless of the badge, so a list where only some
+   rows are badged keeps an even rhythm. */
+.track .meta .t { min-height: 1.35em; }
 .np-next-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-top: 6px; }
 .np-next { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .nx-row { display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
@@ -841,14 +866,10 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 .src-row:hover .src-btn { opacity: 1; }
 .src-btn:hover { background: var(--bg-4); color: var(--tx-1); }
 .pl-count { margin-left: auto; font-size: 11px; color: var(--tx-3); }
-/* Sidebar rows are cramped: the storage pill shrinks and loses its margin so
-   it never pushes the playlist name into an ellipsis. */
-.pl-row .net-pill { width: 15px; height: 15px; margin-left: 4px; border-radius: 4px; }
-.pl-row .net-pill svg { width: 10px; height: 10px; }
-.pl-row .net-pill.wide { width: auto; padding: 0 4px; font-size: 9.5px; gap: 2px; }
-/* Now playing: aligned with the title's cap height rather than its baseline,
-   which sits too low against a larger font. */
-#nowTitle .net-pill { vertical-align: -3px; }
+/* Sidebar rows are cramped: a tighter margin so the pill never pushes the
+   playlist name into an ellipsis. Its SIZE needs no override — the em rule
+   already shrinks it with the row's smaller font. */
+.pl-row .net-pill { margin-left: .3em; }
 .pl-follow { font-size: 10px; opacity: .8; }
 
 /* ─── Followed playlists (Settings) ─── */
@@ -1031,7 +1052,9 @@ body.no-anim .dl-toggle.busy::before { animation: none; }
 /* Save CPU when the window isn't focused: freeze cosmetic animations. */
 body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .dl-drawer {
-  position: fixed; top: 10px; right: 10px; bottom: 118px; z-index: 79;
+  /* Same anchoring as the Now-playing drawer: 8px inset like every other
+     panel, and a bottom that follows the player's real height. */
+  position: fixed; top: 8px; right: 8px; bottom: calc(var(--player-h, 110px) + 8px); z-index: 79;
   width: min(400px, 92vw);
   background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
   padding: 14px 16px; display: flex; flex-direction: column;
@@ -1162,7 +1185,7 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
      modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {
-    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(118px + var(--safe-bottom));
+    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(var(--player-h, 110px) + 8px + var(--safe-bottom));
     width: min(300px, 84vw); z-index: 119;
     border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
   }
