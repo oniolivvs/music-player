@@ -302,7 +302,15 @@ body.has-bg .top-nav .nav-item:hover, body.has-bg .top-nav .nav-item.active { ba
 .track.pinned { background: rgba(255, 255, 255, .03); }
 body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
 .idx-pin svg { width: 12px; height: 12px; color: var(--accent-2); }
-.badge-stream { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px; vertical-align: middle; line-height: 1.2; }
+/* Pastille "en ligne" : une icone, pas du texte. Le libelle "☁ Stream"
+   s'allongeait dans chaque ligne et poussait les titres longs a l'ellipse
+   alors que l'information tient en un glyphe. Le SVG est mis a l'echelle du
+   texte voisin et aligne sur sa ligne de base. */
+.badge-stream { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px; vertical-align: -4px; flex: 0 0 auto; }
+.badge-stream svg { width: 12px; height: 12px; display: block; }
+/* Indisponible a la source : meme emplacement, code couleur d'alerte, pour
+   qu'un morceau mort se distingue d'un simple morceau non telecharge. */
+.badge-stream[title*="Unavailable"] { background: rgba(239, 68, 68, 0.16); color: #f87171; border-color: rgba(248, 113, 113, 0.32); }
 @keyframes spinFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .spinning svg, button.spinning svg { animation: spinFast 0.8s linear infinite; }
 .top-nav .ni-lbl { font-size: 12.5px; }

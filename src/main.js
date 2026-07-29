@@ -696,7 +696,7 @@ function _rowHtml(t, i, nowPath) {
   return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}"${canReorder() ? ' draggable="true"' : ""} data-path="${esc(t.path)}" data-idx="${i}">
     <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
     ${artCell(t)}
-    <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}${isStream ? ` <span class="badge-stream" title="Online / Streamed track (Not downloaded)">☁ Stream</span>` : ""}</div><div class="s">${esc(t.artist)}</div></div>
+    <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}${isStream ? ` <span class="badge-stream" title="${dlBlock[ytId(t.path)] ? "Unavailable at the source — cannot be downloaded or streamed" : "Online — streamed, no local file"}">${dlBlock[ytId(t.path)] ? IC.slash : IC.globe}</span>` : ""}</div><div class="s">${esc(t.artist)}</div></div>
     <div class="album">${esc(t.album)}</div>
     <span class="dur">${fmtDur(t.duration_secs)}</span>
     <button class="more" title="More" data-more="${i}">⋯</button>
@@ -754,10 +754,39 @@ function _virtSlice() {
   // and overwriting the target there would cut the animation short every time
   // the rendered window moved.
   if (!_sm.gliding) { _sm.target = host.scrollTop; _sm.expect = host.scrollTop; }
-  hydrateCovers();
-  proxyCovers(host);
-  // These rows replaced the ones that carried the drag decorations.
+  // Artwork is deliberately NOT done here. hydrateCovers + proxyCovers each walk
+  // the list with querySelectorAll and run a regex over every mounted row; at
+  // ~90 rows that is hundreds of nodes touched per re-slice, and a re-slice
+  // fires every few rows of scrolling — which is exactly the stutter. Nothing
+  // about artwork is urgent, and slices flown past during a fast scroll never
+  // need it at all, so it is deferred and coalesced (see scheduleArtwork).
+  scheduleArtwork();
+  // Drag decorations DO stay synchronous: the rows carrying them were just
+  // destroyed, and a frame without them makes the drop target flicker.
   _repaintDrag();
+}
+
+// Coalesces artwork work out of the scroll path. Repeated calls collapse into
+// one, run when the browser is idle — or after a short delay where
+// requestIdleCallback is missing (older WebKitGTK, the Android WebView).
+let _artTimer = 0, _artIdle = 0;
+function scheduleArtwork() {
+  const run = () => {
+    _artTimer = 0; _artIdle = 0;
+    const host = $("#trackList");
+    if (!host) return;
+    hydrateCovers();
+    // Scoped to the mounted rows rather than the whole host: the spacers carry
+    // no artwork, and the narrower scope is one less subtree to walk.
+    proxyCovers($("#virtRows") || host);
+  };
+  if (typeof requestIdleCallback === "function") {
+    if (_artIdle) cancelIdleCallback(_artIdle);
+    _artIdle = requestIdleCallback(run, { timeout: 300 });
+  } else {
+    clearTimeout(_artTimer);
+    _artTimer = setTimeout(run, 120);
+  }
 }
 
 // The column headers and the sort row belong to the track list: both must
@@ -924,6 +953,13 @@ function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected
 // its downloaded twin for an online path), plus the videoId if any.
 function localFileFor(p) { return isOnline(p) ? libraryLocalFor(ytId(p)) : p; }
 function isStreamTrack(p) { return isOnline(p) && !localFileFor(p); }
+// Ce qui reste RÉELLEMENT téléchargeable : en ligne, sans fichier local déjà
+// présent, et pas déjà connu comme indisponible (dlBlock). Compter les `yt:`
+// bruts annonçait « 20 mp3 » là où la moitié était déjà sur le disque ou
+// définitivement introuvable — un compteur qui ment à chaque lancement.
+function downloadablePaths(paths) {
+  return paths.filter(p => isStreamTrack(p) && !dlBlock[ytId(p)]);
+}
 function videoIdOf(p) {
   if (isOnline(p)) return ytId(p);
   const m = String(p).match(/\[([A-Za-z0-9_-]{11})\]/);
@@ -1300,7 +1336,11 @@ function openPlaylist(id) {
   markActive();
   const byPath = new Map(library.map(t => [t.path, t]));
   selected.clear();
-  const nOnline = pl.paths.filter(isOnline).length;
+  const nDl = downloadablePaths(pl.paths).length;
+  // Déjà tentés et définitivement introuvables : annoncés à part, parce qu'un
+  // bouton qui reste à "3 mp3" après trois échecs donne l'impression que
+  // l'app ne fait rien.
+  const nDead = pl.paths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
   // Rows are limited to tracks that actually exist on disk. A path is hidden
   // only while it has no local file: downloading it (or its twin landing in the
   // library) makes it appear on the next render, with no edit to the playlist.
@@ -1311,18 +1351,33 @@ function openPlaylist(id) {
   const nHidden = pl.paths.length - shownPaths.length;
   const fw = followFor(id);
   setViewHead({
-    icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} not downloaded (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} not downloaded (hidden)` : ""}${nDead ? ` · ${nDead} unavailable` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
-      (nOnline ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nOnline} mp3)</button>` : "") +
+      // Visible seulement en suivi : vérifier CETTE playlist tout de suite, sans
+      // attendre le balayage périodique ni passer par les réglages, qui vérifient
+      // tous les suivis à la fois.
+      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
+      (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
   $("#plRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
   $("#plUrlBtn")?.addEventListener("click", () => addByUrl(id));
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
   $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
+  $("#plCheckBtn")?.addEventListener("click", async (e) => {
+    const f = followFor(id);
+    if (!f) return;
+    const btn = e.currentTarget;
+    btn.classList.add("spinning"); btn.disabled = true;
+    try {
+      const n = await checkFollow(f, true);
+      saveFollows();
+      if (n) { renderPlaylists(); openPlaylist(id); }
+    } finally { btn.classList.remove("spinning"); btn.disabled = false; }
+  });
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
   renderTracks(shownPaths.map(p => byPath.get(p) || ensureOnlineTrack(p)).filter(Boolean));
@@ -1346,7 +1401,26 @@ async function addByUrl(plId) {
     renderPlaylists();
     if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
     flash(n ? `Added ${n} track${n === 1 ? "" : "s"}` : "Already in the playlist");
+    // Proposé dans la foulée : ajouter par URL puis devoir rouvrir la playlist
+    // et cliquer "Save locally" pour la même intention est une étape de trop.
+    // Seuls les titres réellement téléchargeables sont proposés — pas ceux qui
+    // ont déjà un fichier local, ni ceux déjà connus indisponibles.
+    if (n) await offerDownloadNew(tracks.map(t => t.path), "playlist");
   } catch (e) { flash(`Could not add: ${e}`); }
+}
+
+// Propose d'enregistrer localement ce qui vient d'être ajouté. Jamais
+// automatique : un import de 200 titres lancerait autant de téléchargements
+// sans que personne l'ait demandé, et la limite de stockage est vite atteinte.
+async function offerDownloadNew(paths, where) {
+  const todo = downloadablePaths(paths);
+  if (!todo.length) return;
+  const ok = await askConfirm(
+    `Save ${todo.length} new track${todo.length === 1 ? "" : "s"} locally?`,
+    `${todo.length === 1 ? "Ce titre sera téléchargé" : "Ces titres seront téléchargés"} en mp3 et ${todo.length === 1 ? "jouera" : "joueront"} hors ligne. Sinon ${todo.length === 1 ? "il reste écouté" : "ils restent écoutés"} en streaming.`,
+    "Download"
+  );
+  if (ok) downloadTracks(todo);
 }
 
 // Follow an ALREADY-imported playlist: reuse its remembered source URL, or ask
@@ -2521,9 +2595,18 @@ function dlRetryBlocked() {
 async function downloadPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
   if (!pl) return;
-  const online = pl.paths.filter(isOnline);
-  if (!online.length) { flash("All tracks of this playlist are already local"); return; }
-  if (!await askConfirm(`Save “${pl.name}” locally?`, `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3 (already-downloaded ones are skipped).`, "Download")) return;
+  const online = downloadablePaths(pl.paths);
+  const dead = pl.paths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
+  if (!online.length) {
+    flash(dead
+      ? `Nothing to download — ${dead} track${dead === 1 ? " is" : "s are"} unavailable at the source`
+      : "All tracks of this playlist are already local");
+    return;
+  }
+  // Le décompte annoncé est celui qui sera réellement tenté : promettre des
+  // mp3 déjà présents ou déjà connus introuvables use la confiance dans le
+  // chiffre affiché.
+  if (!await askConfirm(`Save “${pl.name}” locally?`, `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3.${dead ? ` ${dead} already known unavailable ${dead === 1 ? "is" : "are"} skipped.` : ""}`, "Download")) return;
   downloadTracks(online);
 }
 // A file for this video id already in the library (ANY source folder — the
@@ -2722,11 +2805,69 @@ async function dlPump() {
     await rescanFolder(dir); // picks up the new files with proper tags
   }
   await saveOnline();
+
+  // Rattrapage des liens AVANT de redessiner. Chaque téléchargement réussi fait
+  // déjà son PL.replacePath, mais un fichier peut n'entrer dans la bibliothèque
+  // qu'au rescan ci-dessus — la playlist garde alors son chemin `yt:`, le titre
+  // reste considéré comme non téléchargé, et disparaît de la vue filtrée alors
+  // qu'il vient d'arriver sur le disque. C'est ce qui donnait "seuls les titres
+  // d'avant le téléchargement s'affichent".
+  let relinked = 0;
+  for (const d of dlQueue) {
+    if (d.status !== "done" || !d.id || !d.path) continue;
+    const local = libraryLocalFor(d.id);
+    if (local && local !== d.path) { PL.replacePath(d.path, local); relinked++; }
+  }
+  if (relinked) await saveLibrary();
+
   renderPlaylists(); refreshView();
   dlRunning = false;
   dlRender();
   if (capHit) flash(`Storage cap reached (${capMb} MB) — remaining downloads skipped`);
   else if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
+
+  await offerPurgeUnavailable();
+}
+
+// Un refus définitif de la source (retirée, privée, bloquée) veut presque
+// toujours dire que le morceau n'est plus écoutable DU TOUT, même en ligne :
+// le garder en playlist ne laisse qu'une ligne morte qui échouera à chaque
+// lecture. On propose donc de l'enlever — on ne le fait jamais d'office, la
+// vidéo peut réapparaître et c'est à l'utilisateur de trancher.
+async function offerPurgeUnavailable() {
+  const dead = dlQueue.filter(d => d.permanent && d.id);
+  if (!dead.length) return;
+
+  const paths = new Set();
+  for (const d of dead) {
+    paths.add("yt:" + d.id);
+    if (d.path) paths.add(d.path);
+  }
+  // Rien à retirer si ces morceaux ont finalement un fichier local.
+  const removable = [...paths].filter(p => isStreamTrack(p));
+  if (!removable.length) return;
+
+  const titles = dead.slice(0, 5).map(d => `• ${d.title || d.id}`).join("\n");
+  const more = dead.length > 5 ? `\n… et ${dead.length - 5} autre${dead.length - 5 === 1 ? "" : "s"}` : "";
+  const okToPurge = await askConfirm(
+    `${dead.length} track${dead.length === 1 ? "" : "s"} unavailable at the source`,
+    `${titles}${more}\n\nCes morceaux ne sont téléchargeables ni lisibles en ligne. Les retirer des playlists et de la bibliothèque ?`,
+    "Remove"
+  );
+  if (!okToPurge) return;
+
+  const rm = new Set(removable);
+  for (const pl of PL.getPlaylists()) pl.paths = pl.paths.filter(p => !rm.has(p));
+  PL.persist();
+  library = library.filter(t => !rm.has(t.path));
+  await saveLibrary();
+
+  // La file est purgée aussi : sans ça la même question reviendrait au lot
+  // suivant pour des morceaux qui ne sont plus nulle part.
+  for (let i = dlQueue.length - 1; i >= 0; i--) if (dlQueue[i].permanent) dlQueue.splice(i, 1);
+  saveDlQueue();
+  renderPlaylists(); refreshView(); dlRender();
+  flash(`${rm.size} unavailable track${rm.size === 1 ? "" : "s"} removed`);
 }
 
 // Your Library means everything you have, not everything you downloaded. Online
@@ -2772,6 +2913,32 @@ async function refreshActiveViewAction() {
       showLibrary();
     } else if (active.type === "playlist") {
       await loadOnline();
+      // Redemande les titres à la SOURCE quand la playlist en a une. Sans ça,
+      // "Refresh" ne faisait que relire le cache local : une vidéo renommée en
+      // amont, ou importée avant que ses métadonnées soient connues, gardait à
+      // vie son libellé "YouTube Track (dQw4w9WgXcQ)".
+      const pl = PL.getPlaylists().find(p => p.id === active.id);
+      if (pl?.sourceUrl && IS_NATIVE) {
+        try {
+          const res = await invoke("yt_playlist", { url: pl.sourceUrl });
+          let renamed = 0;
+          for (const r of res.tracks || []) {
+            const t = onlineFromResult(r);
+            const prev = onlineIndex.get(t.path);
+            if (prev && prev.title === t.title && prev.artist === t.artist) continue;
+            onlineIndex.set(t.path, t);
+            // Le fichier téléchargé porte le même videoId : on remet aussi son
+            // titre à jour, sinon la version locale garde l'ancien libellé.
+            const local = libraryLocalFor(ytId(t.path));
+            if (local) {
+              const lt = library.find(x => x.path === local);
+              if (lt) { lt.title = t.title; lt.artist = t.artist; }
+            }
+            renamed++;
+          }
+          if (renamed) { await saveOnline(); await saveLibrary(); }
+        } catch (e) { console.warn("[refresh playlist]", e); }
+      }
       adoptPlaylistOnline();
       openPlaylist(active.id);
     } else if (active.type === "source") {
@@ -2795,14 +2962,17 @@ function showLibrary() {
   selected.clear();
   if (adoptPlaylistOnline()) saveLibrary();
   const artists = new Set(library.map(t => t.artist)).size;
-  const nOnline = library.filter(t => isOnline(t.path)).length;
+  const libPaths = library.map(t => t.path);
+  const nOnline = libPaths.filter(isOnline).length;
+  const nDl = downloadablePaths(libPaths).length;
+  const nDead = libPaths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
   // The library behaves like a playlist you cannot delete: same header, same
   // actions, same drag-to-reorder. "Follow" is deliberately absent — following
   // mirrors an upstream playlist, and the library has no upstream to mirror.
   setViewHead({
     icon: IC.disc,
     title: "Your Library",
-    subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}${nOnline ? ` · ${nOnline} online` : ""}`,
+    subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}${nOnline ? ` · ${nOnline} online` : ""}${nDead ? ` · ${nDead} unavailable` : ""}`,
     actions:
       `<button id="libRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="libUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
@@ -2810,7 +2980,7 @@ function showLibrary() {
       // control that vanishes whenever nothing is downloadable reads as missing
       // rather than as "nothing to do". With no online tracks it stays enabled
       // and says so on click.
-      `<button id="libDlBtn" class="btn-line sm"${nOnline ? "" : ` title="Nothing to download — everything here is already local"`}>${ic(IC.save)} Save locally${nOnline ? ` (${nOnline} mp3)` : ""}</button>` +
+      `<button id="libDlBtn" class="btn-line sm"${nDl ? "" : ` title="Nothing left to download — everything is local or already known unavailable"`}>${ic(IC.save)} Save locally${nDl ? ` (${nDl} mp3)` : ""}</button>` +
       `<button id="libDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
   $("#libRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
@@ -2839,13 +3009,21 @@ async function addUrlToLibrary() {
     await saveLibrary();
     if (active.type === "library") showLibrary();
     flash(fresh.length ? `Added ${fresh.length} track${fresh.length === 1 ? "" : "s"}` : "Already in your library");
+    if (fresh.length) await offerDownloadNew(fresh.map(t => t.path), "library");
   } catch (e) { flash(`Could not add: ${e}`); }
 }
 
 async function downloadLibraryOnline() {
-  const online = library.filter(t => isOnline(t.path)).map(t => t.path);
-  if (!online.length) { flash("Everything in your library is already local"); return; }
-  if (!await askConfirm("Save these locally?", `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3 (already-downloaded ones are skipped).`, "Download")) return;
+  const all = library.map(t => t.path);
+  const online = downloadablePaths(all);
+  const dead = all.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
+  if (!online.length) {
+    flash(dead
+      ? `Nothing to download — ${dead} track${dead === 1 ? " is" : "s are"} unavailable at the source`
+      : "Everything in your library is already local");
+    return;
+  }
+  if (!await askConfirm("Save these locally?", `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3.${dead ? ` ${dead} already known unavailable ${dead === 1 ? "is" : "are"} skipped.` : ""}`, "Download")) return;
   downloadTracks(online);
 }
 
@@ -2974,7 +3152,13 @@ async function checkDuplicatesFlow(type, plId = "") {
         const pl = PL.getPlaylists().find(p => p.id === plId);
         if (pl) {
           pl.paths = pl.paths.filter(p => !dupPaths.has(p));
-          PL._persist?.();
+          // playlists.js exporte `persist`, pas `_persist` (privé au module).
+          // L'ancien `PL._persist?.()` visait un undefined et l'optional
+          // chaining avalait l'appel sans erreur : la playlist était nettoyée
+          // en mémoire mais jamais écrite, donc les doublons revenaient au
+          // redémarrage. Pas d'optional chaining ici — si la fonction
+          // disparaît un jour, ça doit casser bruyamment, pas se taire.
+          PL.persist();
         }
       } else {
         library = library.filter(t => !dupPaths.has(t.path));
