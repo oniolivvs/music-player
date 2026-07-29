@@ -700,13 +700,16 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .np-drawer {
   /* 8px inset like every other panel — it was 10px, leaving the drawer 2px
      off-grid from the nav bar and the app panels. */
-  /* Bottom tracks the player's REAL height, published as --player-h by a
-     ResizeObserver. It used to be a hard 118px, which only matched one
-     particular player height: any change to its padding, to the safe-area
-     inset, or a wrapped title left the drawer floating short of the player or
-     tucked behind it. Top stays at 8px, the same row as the nav bar. */
+  /* --player-top is the distance from the viewport bottom to the player's TOP
+     edge, measured in JS. It is deliberately NOT the player's height: a height
+     is a border box and excludes `.player`'s own `margin: 0 8px 8px` (plus the
+     safe-area inset on mobile), so height + 8px landed exactly ON the player and
+     the drawer touched it — 8px on the other three sides, nothing at the bottom.
+     Measuring the top edge folds margin and inset in, so this one `+ 8px` is the
+     same 8px used at top and right. Do not add --safe-bottom here; it is already
+     inside the measurement. */
   position: fixed; top: 8px; right: calc(8px + var(--safe-right, 0px));
-  bottom: calc(var(--player-h, 110px) + 8px); z-index: 79;
+  bottom: calc(var(--player-top, 118px) + 8px); z-index: 79;
   /* Effective width: the user's chosen width, capped to roughly a third of
      the viewport so that when the drawer pushes the layout aside (np-push)
      the track list keeps a usable share of the window. The 260px floor keeps
@@ -1082,7 +1085,7 @@ body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .dl-drawer {
   /* Same anchoring as the Now-playing drawer: 8px inset like every other
      panel, and a bottom that follows the player's real height. */
-  position: fixed; top: 8px; right: 8px; bottom: calc(var(--player-h, 110px) + 8px); z-index: 79;
+  position: fixed; top: 8px; right: 8px; bottom: calc(var(--player-top, 118px) + 8px); z-index: 79;
   width: min(400px, 92vw);
   background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
   padding: 14px 16px; display: flex; flex-direction: column;
@@ -1213,7 +1216,7 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
      modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {
-    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(var(--player-h, 110px) + 8px + var(--safe-bottom));
+    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(var(--player-top, 118px) + 8px);
     width: min(300px, 84vw); z-index: 119;
     border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
   }

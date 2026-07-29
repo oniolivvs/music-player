@@ -5236,16 +5236,26 @@ function initResizers() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
-  // Publishes the player's real height so the Now-playing drawer can sit exactly
-  // on top of it. A hard-coded bottom offset only ever matched one player
-  // height: padding changes, safe-area insets and a wrapped title all moved it.
+  // Publishes the distance from the viewport bottom to the player's TOP edge,
+  // so the drawers can sit above it with the same 8px they use on every other
+  // side. Publishing the player's HEIGHT was subtly wrong: getBoundingClientRect
+  // returns the border box and excludes margins, while .player carries
+  // `margin: 0 8px 8px` — and more on mobile, where the safe-area inset is added.
+  // So `height + 8px` landed exactly ON the player's top edge and the drawers
+  // touched it, with 8px everywhere else and nothing at the bottom.
+  // Measuring the top edge folds the margin and the inset in, and a single
+  // `+ 8px` in the CSS then gives the same gap on all four sides.
   (() => {
     const pl = document.querySelector(".player");
     if (!pl) return;
-    const publish = () => document.documentElement.style.setProperty("--player-h", Math.round(pl.getBoundingClientRect().height) + "px");
+    const publish = () => document.documentElement.style.setProperty(
+      "--player-top", Math.round(window.innerHeight - pl.getBoundingClientRect().top) + "px");
     publish();
+    // ResizeObserver catches the player growing (wrapped title, taller layout);
+    // the resize listener catches a viewport height change that leaves the
+    // player's own box the same size — which the observer never reports.
     if (typeof ResizeObserver === "function") new ResizeObserver(publish).observe(pl);
-    else window.addEventListener("resize", publish);
+    window.addEventListener("resize", publish);
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
