@@ -442,7 +442,13 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
    they render at native size and only a corner shows). Mirrors .yc-thumb. */
 .art.has-cover { background-size: cover; background-position: center; background-repeat: no-repeat; color: transparent; font-size: 0; }
 .meta { min-width: 0; }
-.meta .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title truncates, the badge does NOT. Both used to live in the same
+   truncating box, so on a long title the ellipsis ate the badge and a
+   streamed track looked identical to a local one — exactly when knowing
+   matters. The row is a flex line: .tt shrinks and ellipses, the pill keeps
+   its width at the end. */
+.meta .t { font-weight: 600; display: flex; align-items: center; min-width: 0; }
+.meta .t .tt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta .s { font-size: 12px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track .dur { color: var(--tx-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .track .more { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 18px; opacity: 0; border-radius: 6px; width: 26px; height: 26px; }
@@ -751,7 +757,9 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .nx-row:hover { background: var(--bg-3); }
 .nx-row .art { width: 32px; height: 32px; font-size: 13px; flex-shrink: 0; }
 .nx-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.nx-meta .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Same split as the track rows: the title ellipses, the badge keeps its place. */
+.nx-meta .t { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; min-width: 0; }
+.nx-meta .t .tt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx-meta .s { font-size: 11px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx-dur { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
 .nx-note { font-size: 12px; color: var(--tx-3); padding: 6px 4px; }
@@ -768,7 +776,13 @@ body.np-push .app { margin-right: calc(var(--np-eff, 330px) + 8px); }
    ALWAYS steps aside when the drawer is open, pushed or floating: a covered
    nav bar is unclickable. */
 body.np-open .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
-body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
+/* Pinned AND given its own column: it is part of the layout now, so it drops
+   the overlay cues — no lifting shadow, a plain panel border like the sidebar.
+   Pinned but too narrow to split keeps the shadow: it is still floating over
+   the content, and pretending otherwise would hide that from the user. */
+body.np-push .np-drawer { box-shadow: none; border-color: var(--bd); }
+/* Floating: the shadow is what says "this is above the content". */
+body.np-open:not(.np-push) .np-drawer { box-shadow: -14px 0 44px rgba(0, 0, 0, .5); }
 #npPin.active { color: var(--accent-2); background: var(--bg-3); }
 .dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }
 .dlg-in { width: 100%; margin-top: 10px; }

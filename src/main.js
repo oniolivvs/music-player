@@ -879,7 +879,7 @@ function _rowHtml(t, i, nowPath) {
   return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}"${canReorder() ? ' draggable="true"' : ""} data-path="${esc(t.path)}" data-idx="${i}">
     <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
     ${artCell(t)}
-    <div class="meta"><div class="t">${blk ? `<span class="net-pill dead" title="Blocked — unblock it to play">${IC.slash}</span>` : ""}${esc(t.title)}${netBadge(t.path)}</div><div class="s">${esc(t.artist)}</div></div>
+    <div class="meta"><div class="t">${blk ? `<span class="net-pill dead" title="Blocked — unblock it to play">${IC.slash}</span>` : ""}<span class="tt">${esc(t.title)}</span>${netBadge(t.path)}</div><div class="s">${esc(t.artist)}</div></div>
     <div class="album">${esc(t.album)}</div>
     <span class="dur">${fmtDur(t.duration_secs)}</span>
     <button class="more" title="More" data-more="${i}">${IC.dots}</button>
@@ -3844,7 +3844,20 @@ function updateNpPush() {
   const eff = Math.min(Number(S().npW) || 330, Math.max(window.innerWidth * 0.34, 260));
   // ≥700px matches the phone-overlay CSS breakpoint: below it the class would
   // be set only for the stylesheet to neutralize it — don't set it at all.
-  document.body.classList.toggle("np-push", npOpen && window.innerWidth >= 700 && window.innerWidth - eff >= 430);
+  // The 430px floor keeps the track list usable once the drawer takes its cut.
+    const roomy = window.innerWidth >= 700 && window.innerWidth - eff >= 430;
+    // The PIN decides whether the drawer is part of the layout or floats over
+    // it. It used to only drop the shadow, while window width alone decided
+    // the push — so the button appeared to do almost nothing, and a wide
+    // window handed you a docked panel you never asked for. Pinned and roomy:
+    // the app shrinks and the drawer becomes a real column. Otherwise it
+    // overlays the content.
+    document.body.classList.toggle("np-push", npOpen && !!S().npDocked && roomy);
+    // Says why pinning did nothing when the window is too narrow to split.
+    const pin = $("#npPin");
+    if (pin) pin.title = !S().npDocked
+      ? "Pin — make the panel part of the layout instead of floating over it"
+      : (roomy ? "Unpin — let the panel float over the content" : "Pinned — the window is too narrow to give it its own column");
 }
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
@@ -3896,7 +3909,7 @@ function renderNpPanel() {
         const tr = trackByPath(effectivePath(p)) || trackByPath(p);
         if (!tr) return "";
         return `<div class="nx-row" data-qi="${it.qi}" title="${esc(tr.title)}">${artCell(tr)}
-          <span class="nx-meta"><span class="t">${esc(tr.title)}</span><span class="s">${esc(tr.artist)}</span></span>
+          <span class="nx-meta"><span class="t"><span class="tt">${esc(tr.title)}</span>${netBadge(p)}</span><span class="s">${esc(tr.artist)}</span></span>
           <span class="nx-dur">${fmtDur(tr.duration_secs)}</span></div>`;
       }).join("")
     : `<div class="nx-note">Queue is empty — play something.</div>`;
@@ -5372,7 +5385,7 @@ async function init() {
   document.querySelector(".now").addEventListener("contextmenu", ctxOnPlaying);
   for (const sel of ["#ovArt", "#ovTitle", "#ovSub", "#ovMeta"]) $(sel).addEventListener("contextmenu", ctxOnPlaying);
   $("#npClose").addEventListener("click", () => toggleNpPanel(false));
-  $("#npPin").addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); });
+  $("#npPin").addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); updateNpPush(); });
   document.querySelectorAll(".ss-toggle").forEach(el => el.addEventListener("click", () => {
     const key = el.dataset.coll;
     SETTINGS.setSetting(key, !S()[key]);
