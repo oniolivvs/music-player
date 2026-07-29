@@ -120,6 +120,24 @@ const IC = {
   save: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>`,
   radio: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M7 8a6 6 0 0 0 0 8M17 8a6 6 0 0 1 0 8M4.5 5a10 10 0 0 0 0 14M19.5 5a10 10 0 0 1 0 14"/></svg>`,
   music: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  // Storage state. These two carry a fixed meaning across the whole app —
+  // cloud = streamed, drive = on disk — so the same glyph always says the same
+  // thing wherever it appears.
+  cloud: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97 6 6 0 0 0-11.66-1.5A4 4 0 0 0 6.5 19z"/></svg>`,
+  drive: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>`,
+  cloudOff: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97 6 6 0 0 0-9-4.2"/><path d="M6.9 8.5A4 4 0 0 0 6.5 19h8"/><path d="m2 2 20 20"/></svg>`,
+  stop: `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
+  chart: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>`,
+  user: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`,
+  wifi: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8.5a16 16 0 0 1 20 0"/><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></svg>`,
+  power: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>`,
+  arrowL: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
+  arrowR: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`,
+  grid: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  rows: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`,
+  undo: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.1-6.4L3 9"/></svg>`,
+  menu: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>`,
+  dots: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>`,
 };
 function hydrateIcons(root = document) {
   root.querySelectorAll("[data-ic]").forEach(el => { el.innerHTML = IC[el.dataset.ic] || ""; });
@@ -510,7 +528,7 @@ function showStats() {
     subtitle: s.total
       ? `${s.total} play${s.total === 1 ? "" : "s"} · ${fmtLong(s.secs)} listened · ${s.rows.length} distinct track${s.rows.length === 1 ? "" : "s"}${s.neverPlayed ? ` · ${s.neverPlayed} never played` : ""}`
       : "No plays counted yet",
-    actions: s.total ? `<button id="stReset" class="btn-line sm">Reset stats</button>` : "",
+    actions: s.total ? `<button id="stReset" class="btn-line sm">${ic(IC.undo)} Reset stats</button>` : "",
   });
   showListChrome(false);
   const host = $("#trackList");
@@ -560,7 +578,7 @@ function showHistory() {
   markActive();
   selected.clear();
   const tracks = history2.map(h => trackByPath(h.path) || h).filter(Boolean);
-  setViewHead({ icon: IC.clock, title: "Recently played", subtitle: `${tracks.length} track${tracks.length === 1 ? "" : "s"}`, actions: tracks.length ? `<button id="histClear" class="btn-line sm">Clear history</button>` : "" });
+  setViewHead({ icon: IC.clock, title: "Recently played", subtitle: `${tracks.length} track${tracks.length === 1 ? "" : "s"}`, actions: tracks.length ? `<button id="histClear" class="btn-line sm">${ic(IC.trash)} Clear history</button>` : "" });
   renderTracks(tracks, true); // keep recency order (presorted)
   const cb = $("#histClear"); if (cb) cb.addEventListener("click", () => { history2 = []; saveHistory(); showHistory(); });
 }
@@ -858,14 +876,13 @@ function _rowHtml(t, i, nowPath) {
   const isNow = nowPath === t.path;
   const blk = isBlocked(t.path);
   const pin = _pinSet.has(t.path);
-  const isStream = isStreamTrack(t.path);
   return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}"${canReorder() ? ' draggable="true"' : ""} data-path="${esc(t.path)}" data-idx="${i}">
     <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
     ${artCell(t)}
-    <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}${isStream ? ` <span class="badge-stream" title="${dlBlock[ytId(t.path)] ? "Unavailable at the source — cannot be downloaded or streamed" : "Online — streamed, no local file"}">${dlBlock[ytId(t.path)] ? IC.slash : IC.globe}</span>` : ""}</div><div class="s">${esc(t.artist)}</div></div>
+    <div class="meta"><div class="t">${blk ? `<span class="net-pill dead" title="Blocked — unblock it to play">${IC.slash}</span>` : ""}${esc(t.title)}${netBadge(t.path)}</div><div class="s">${esc(t.artist)}</div></div>
     <div class="album">${esc(t.album)}</div>
     <span class="dur">${fmtDur(t.duration_secs)}</span>
-    <button class="more" title="More" data-more="${i}">⋯</button>
+    <button class="more" title="More" data-more="${i}">${IC.dots}</button>
   </div>`;
 }
 
@@ -1119,6 +1136,30 @@ function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected
 // its downloaded twin for an online path), plus the videoId if any.
 function localFileFor(p) { return isOnline(p) ? libraryLocalFor(ytId(p)) : p; }
 function isStreamTrack(p) { return isOnline(p) && !localFileFor(p); }
+
+// Storage-state badge — the single place that decides which glyph and colour a
+// path gets, so the same symbol never means two things in two views.
+//
+// A plain local file gets NO badge on purpose: it is the normal case, and
+// tagging 1600 rows with a green pill would turn the signal into wallpaper.
+// Only what needs the network, or what is broken, is marked.
+function netBadge(path, cls = "") {
+  if (!isOnline(path)) return "";
+  if (dlBlock[ytId(path)]) return `<span class="net-pill dead ${cls}" title="Unavailable at the source — cannot be downloaded or streamed">${IC.cloudOff}</span>`;
+  if (localFileFor(path)) return `<span class="net-pill local ${cls}" title="From YouTube, saved locally — plays offline">${IC.drive}</span>`;
+  return `<span class="net-pill ${cls}" title="Online — streamed, no local file">${IC.cloud}</span>`;
+}
+
+// Same idea for a whole set of paths: one pill summarising how much of a
+// playlist actually lives on disk.
+function netSummary(paths) {
+  const online = paths.filter(p => isStreamTrack(p) && !dlBlock[ytId(p)]).length;
+  const dead = paths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
+  if (dead) return `<span class="net-pill dead wide" title="${dead} track${dead === 1 ? "" : "s"} unavailable at the source">${IC.cloudOff}${dead}</span>`;
+  if (online) return `<span class="net-pill wide" title="${online} track${online === 1 ? "" : "s"} streamed — not saved locally">${IC.cloud}${online}</span>`;
+  if (paths.length) return `<span class="net-pill local" title="Every track is saved locally — plays offline">${IC.drive}</span>`;
+  return "";
+}
 // What is ACTUALLY still downloadable: online, with no local file already
 // present, and not already known unavailable (dlBlock). Counting raw `yt:`
 // paths advertised "20 mp3" where half were already on disk or permanently
@@ -1481,7 +1522,7 @@ function renderPlaylists() {
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       const fw = followFor(p.id);
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">${IC.repeat}</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">${IC.repeat}</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>${netSummary(p.paths)}
         <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">${IC.eye}</button>
         <button class="pl-del" data-del="${p.id}" title="Delete">${IC.x}</button></div>`;
     }).join("");
@@ -1733,13 +1774,13 @@ function renderOnlineResults() {
         (owned.length ? ` · ${owned.length} already in your library` : ""),
     actions: plMode ? "" :
       `<div class="yt-viewtog">
-        <button id="ytGridBtn" class="btn-line sm ${ytViewMode() === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">▦</button>
-        <button id="ytListBtn" class="btn-line sm ${ytViewMode() === "list" ? "ac-on" : ""}" title="List view">≡</button>
+        <button id="ytGridBtn" class="btn-line sm ${ytViewMode() === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">${IC.grid}</button>
+        <button id="ytListBtn" class="btn-line sm ${ytViewMode() === "list" ? "ac-on" : ""}" title="List view">${IC.rows}</button>
       </div>` +
       `<label class="yt-inc"><input type="checkbox" id="ytIncVid" ${wantVideos ? "checked" : ""}> Videos</label>` +
       `<label class="yt-inc"><input type="checkbox" id="ytIncPl" ${wantPlaylists ? "checked" : ""}> Playlists</label>` +
-      `<button id="ytPrev" class="btn-line sm" ${ytPage ? "" : "disabled"}>‹ Prev</button>` +
-      `<button id="ytNext" class="btn-line sm" ${ytHasMore ? "" : "disabled"}>Next ›</button>`,
+      `<button id="ytPrev" class="btn-line sm" ${ytPage ? "" : "disabled"}>${IC.arrowL} Prev</button>` +
+      `<button id="ytNext" class="btn-line sm" ${ytHasMore ? "" : "disabled"}>Next ${IC.arrowR}</button>`,
   });
   $("#ytIncVid")?.addEventListener("change", e => {
     SETTINGS.setSetting("ytIncludeVideos", e.target.checked);
@@ -1874,7 +1915,7 @@ async function renderYtGrid(fresh, owned, playlists = []) {
         <div class="yc-title" title="${esc(t.title)}">${esc(t.title)}</div>
         <div class="yc-sub">${esc(t.artist)}${vs ? ` · ${vs}` : ""}</div>
       </div>
-      <button class="more yc-more" title="More" data-more="${i}">⋯</button>
+      <button class="more yc-more" title="More" data-more="${i}">${IC.dots}</button>
     </div>`;
   };
   const plHtml = playlists.length
@@ -2381,7 +2422,7 @@ function updateImpCount() {
   const n = boxes.filter(c => c.checked).length;
   const followOnly = !n && $("#impFollow").checked;
   $("#impCount").textContent = `${n} of ${boxes.length} selected`;
-  $("#impGo").textContent = followOnly ? "Follow only" : n ? `Import ${n} track${n === 1 ? "" : "s"}` : "Import";
+  $("#impGo").innerHTML = followOnly ? `${ic(IC.repeat)} Follow only` : n ? `${ic(IC.dl)} Import ${n} track${n === 1 ? "" : "s"}` : `${ic(IC.dl)} Import`;
   $("#impGo").disabled = !n && !followOnly;
 }
 async function impGo() {
@@ -2622,18 +2663,18 @@ function dlRender() {
         (n.error ? ` · ${n.error} failed` : "") + (n.canceled ? ` · ${n.canceled} canceled` : "") +
         (dlNotice ? ` · ${dlNotice}` : "")
       : "");
-  $("#dlAction").textContent = n.queued + n.active > 0 ? "Stop all" : "Clear"; // tasks cancel via their own ✕
+  $("#dlAction").innerHTML = n.queued + n.active > 0 ? `${ic(IC.stop)} Stop all` : `${ic(IC.trash)} Clear`; // tasks cancel via their own ✕
   // Only rate-limit failures + canceled are retriable; final refusals
   // (copyright/private/geo…) stay out — retrying them can't succeed.
   const retriable = dlQueue.filter(d => d.status === "canceled" || (d.status === "error" && !d.permanent)).length;
   const dlBusy = n.queued + n.active > 0;
   $("#dlRetry").hidden = dlBusy || !retriable;
-  if (retriable) $("#dlRetry").textContent = `Retry ${retriable}`;
+  if (retriable) $("#dlRetry").innerHTML = `${ic(IC.refresh)} Retry ${retriable}`;
   // Blocked/skipped tracks (copyright/private/geo… or wrongly-blocked while
   // downloads were broken) can be force-retried — unblocks + requeues them.
   const blocked = dlQueue.filter(d => d.status === "error" && d.permanent).length;
   $("#dlRetryBlocked").hidden = dlBusy || !blocked;
-  if (blocked) $("#dlRetryBlocked").textContent = `Retry blocked ${blocked}`;
+  if (blocked) $("#dlRetryBlocked").innerHTML = `${ic(IC.slash)} Retry blocked ${blocked}`;
 
   // Windowed render: active + next queued + recent finished — never 1000+ rows.
   const active = dlQueue.filter(d => d.status === "active");
@@ -3436,7 +3477,11 @@ function nextIndex(from, manual = false) {
 }
 function updateNowPlaying(t, path) {
   setPlayIcon(true);
-  $("#nowTitle").textContent = t ? t.title : (path || "").split("/").pop();
+  // innerHTML rather than textContent: the title carries the storage badge, so
+  // you can tell at a glance whether what is playing needs the network.
+  $("#nowTitle").innerHTML = t
+    ? `${esc(t.title)}${netBadge(path || t.path)}`
+    : esc((path || "").split("/").pop());
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
   const art = $("#npArt");
   if (t) {
@@ -4318,7 +4363,7 @@ function openSettings() {
         <span class="dir-pick">
           <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
           <button id="setYtPick" class="btn-line sm" title="Pick the binary">${ic(IC.folder)}</button>
-          <button id="setYtTest" class="btn-line sm" title="Test">Test</button>
+          <button id="setYtTest" class="btn-line sm" title="Test">${ic(IC.check)} Test</button>
           <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)}Install</button>
         </span></div>
       <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>`}
@@ -4337,7 +4382,7 @@ function openSettings() {
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
       <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
       <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
-      <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">Run again…</button></div>
+      <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">${ic(IC.refresh)} Run again…</button></div>
     </div>
     </section>
     <section class="set-pane" data-pane="downloads">
@@ -4371,12 +4416,12 @@ function openSettings() {
         ? `<div class="set-row"><label>Signed in</label><b>${esc(s.gdriveTokens.email || "Google account")}</b></div>
            <div class="set-row"><label>Auto-sync <span class="set-sub">(on launch + after changes)</span></label><input type="checkbox" id="setSyncAuto" ${s.syncAuto !== false ? "checked" : ""}></div>
            <div class="set-row"><label>${s.syncAt ? "Last synced " + new Date(s.syncAt).toLocaleString() : "Never synced"}</label>
-             <span class="dir-pick"><button id="setSyncNow" class="btn-line sm">Sync now</button><button id="setSignOut" class="btn-line sm">Sign out</button></span></div>
+             <span class="dir-pick"><button id="setSyncNow" class="btn-line sm">${ic(IC.refresh)} Sync now</button><button id="setSignOut" class="btn-line sm">${ic(IC.power)} Sign out</button></span></div>
            <div class="set-hint">Playlists, settings, blocked tracks and follows sync through the private app folder of your Google Drive — same account on any device stays in sync, anywhere. Your audio files are not uploaded (use “Share over WiFi” for those).</div>`
         : `<div class="set-hint">Sign in with Google to sync your playlists / settings / blocked / follows across your devices through your own Google Drive (nothing goes to us). Audio files aren't uploaded.<br><br><b>One-time setup:</b> create a free OAuth client at <b>console.cloud.google.com</b> → APIs &amp; Services → Credentials → <i>Create OAuth client ID</i> → application type <b>Desktop app</b>, enable the <b>Google Drive API</b>, then paste the Client ID (and secret) below.</div>
            <div class="set-row"><label>Google OAuth Client ID</label><input type="text" id="setGdId" class="text-in" placeholder="…apps.googleusercontent.com" value="${esc(s.gdriveClientId)}"></div>
            <div class="set-row"><label>Client secret <span class="set-sub">(Desktop app)</span></label><input type="text" id="setGdSecret" class="text-in" placeholder="GOCSPX-…" value="${esc(s.gdriveClientSecret)}"></div>
-           <button id="setSignIn" class="btn">Sign in with Google</button>`}
+           <button id="setSignIn" class="btn">${ic(IC.user)} Sign in with Google</button>`}
     </div>
     <div class="set-group"><div class="set-title">Notifications</div>
       <div class="set-row"><label>Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
@@ -4421,8 +4466,8 @@ function openSettings() {
       <div class="set-hint">Versions that need a reinstall are always hands-off unless checking is off: the installer downloads in the background and starts on its own${IS_ANDROID ? ", then Android shows its own install prompt" : ""}. Only instant updates follow the setting above, because applying one reloads the app. Checks happen at startup and when this panel opens — never mid-playback.</div>
       <div class="set-row"><label>Version <b id="setCurVer">…</b></label>
         <span class="dir-pick">
-          <button id="setUpdCheck" class="btn-line sm">Check now</button>
-          <button id="updateBtn" class="btn-line sm" hidden>Update</button>
+          <button id="setUpdCheck" class="btn-line sm">${ic(IC.refresh)} Check now</button>
+          <button id="updateBtn" class="btn-line sm" hidden>${ic(IC.dl)} Update</button>
         </span></div>
       <div class="set-hint" id="setAudioInfo">Audio output: checking…</div>
       <div class="set-hint" id="setEngineInfo"></div>
@@ -4432,11 +4477,11 @@ function openSettings() {
       <div class="set-row" id="setVerRow" hidden><label>Switch / downgrade version</label>
         <span class="dir-pick">
           <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
-          <button id="setVerGo" class="btn-line sm" disabled>Build</button>
+          <button id="setVerGo" class="btn-line sm" disabled>${ic(IC.gear)} Build</button>
         </span></div>
       <div class="set-hint" id="setVerHint" hidden>Rebuilds a chosen version from the local source tree before restarting (desktop dev only).</div>
     </div>
-    <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>
+    <div class="set-actions"><button id="setReset" class="btn-line">${ic(IC.undo)} Reset to defaults</button></div>
     </section>
     </div>`;
   const body = $("#settingsBody");
@@ -4887,14 +4932,17 @@ async function askCookieConsent(browser) {
   host.innerHTML = `<div class="nx-note">Looking for installed browsers…</div>`;
   $("#cookieModal").hidden = false;
   const ok = $("#ckOk");
+  // The countdown writes into a dedicated label span, never the button itself:
+  // setting textContent on the button would wipe the icon next to it.
+  const okLbl = $("#ckOkLbl") || ok;
   ok.disabled = true;
   let left = 5;
-  ok.textContent = `Accept (${left})`;
+  okLbl.textContent = `Accept (${left})`;
   clearInterval(_ckTimer);
   _ckTimer = setInterval(() => {
     left--;
-    if (left <= 0) { clearInterval(_ckTimer); ok.disabled = false; ok.textContent = "Accept"; }
-    else ok.textContent = `Accept (${left})`;
+    if (left <= 0) { clearInterval(_ckTimer); ok.disabled = false; okLbl.textContent = "Accept"; }
+    else okLbl.textContent = `Accept (${left})`;
   }, 1000);
   let infos = [];
   try { infos = await invoke("detect_browsers") || []; } catch {}

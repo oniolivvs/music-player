@@ -302,15 +302,35 @@ body.has-bg .top-nav .nav-item:hover, body.has-bg .top-nav .nav-item.active { ba
 .track.pinned { background: rgba(255, 255, 255, .03); }
 body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
 .idx-pin svg { width: 12px; height: 12px; color: var(--accent-2); }
-/* "Online" pill: an icon, not text. The old "☁ Stream" label stretched every
-   row and pushed long titles into an ellipsis, when the information fits in a
-   single glyph. The SVG is scaled to the neighbouring text and sits on its
-   baseline. */
-.badge-stream { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(59, 130, 246, 0.18); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px; vertical-align: -4px; flex: 0 0 auto; }
-.badge-stream svg { width: 12px; height: 12px; display: block; }
-/* Unavailable at the source: same slot, alert colour, so a dead track reads
-   differently from one that simply has not been downloaded yet. */
-.badge-stream[title*="Unavailable"] { background: rgba(239, 68, 68, 0.16); color: #f87171; border-color: rgba(248, 113, 113, 0.32); }
+/* ─── Storage state: one colour language, used everywhere ───
+   blue  = streamed, no local file      green = on disk
+   red   = unavailable at the source
+   These sit outside the app's purple accent on purpose: they answer a
+   different question ("where does this live?") and must not be mistaken for
+   selection or focus, which own the accent. */
+:root {
+  --net-online: #60a5fa;  --net-online-bg: rgba(59, 130, 246, .16);  --net-online-bd: rgba(96, 165, 250, .34);
+  --net-local:  #34d399;  --net-local-bg:  rgba(16, 185, 129, .14);  --net-local-bd:  rgba(52, 211, 153, .30);
+  --net-dead:   #f87171;  --net-dead-bg:   rgba(239, 68, 68, .15);   --net-dead-bd:   rgba(248, 113, 113, .32);
+}
+
+/* Shared pill for every storage-state badge, whatever it decorates. */
+.net-pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  width: 18px; height: 18px; padding: 0; border-radius: 5px;
+  vertical-align: -4px; margin-left: 6px; flex: 0 0 auto;
+  background: var(--net-online-bg); color: var(--net-online); border: 1px solid var(--net-online-bd);
+}
+.net-pill svg { width: 12px; height: 12px; display: block; }
+.net-pill.local { background: var(--net-local-bg); color: var(--net-local); border-color: var(--net-local-bd); }
+.net-pill.dead  { background: var(--net-dead-bg);  color: var(--net-dead);  border-color: var(--net-dead-bd); }
+/* Wide variant when the pill carries a count as well as the glyph. */
+.net-pill.wide { width: auto; padding: 0 6px; font-size: 10.5px; font-weight: 700; }
+
+/* Buttons carry their icon inline at text size, never larger than the label. */
+.btn-line svg, .btn svg { width: 13px; height: 13px; vertical-align: -2px; flex: 0 0 auto; }
+.btn-line, .btn { display: inline-flex; align-items: center; gap: 6px; }
+
 @keyframes spinFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .spinning svg, button.spinning svg { animation: spinFast 0.8s linear infinite; }
 .top-nav .ni-lbl { font-size: 12.5px; }
@@ -821,6 +841,14 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 .src-row:hover .src-btn { opacity: 1; }
 .src-btn:hover { background: var(--bg-4); color: var(--tx-1); }
 .pl-count { margin-left: auto; font-size: 11px; color: var(--tx-3); }
+/* Sidebar rows are cramped: the storage pill shrinks and loses its margin so
+   it never pushes the playlist name into an ellipsis. */
+.pl-row .net-pill { width: 15px; height: 15px; margin-left: 4px; border-radius: 4px; }
+.pl-row .net-pill svg { width: 10px; height: 10px; }
+.pl-row .net-pill.wide { width: auto; padding: 0 4px; font-size: 9.5px; gap: 2px; }
+/* Now playing: aligned with the title's cap height rather than its baseline,
+   which sits too low against a larger font. */
+#nowTitle .net-pill { vertical-align: -3px; }
 .pl-follow { font-size: 10px; opacity: .8; }
 
 /* ─── Followed playlists (Settings) ─── */

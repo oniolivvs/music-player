@@ -48,7 +48,7 @@
 
     <main class="main">
       <header class="topbar">
-        <button id="sideToggle" class="icon-btn side-toggle" title="Menu">☰</button>
+        <button id="sideToggle" class="icon-btn side-toggle" title="Menu" data-ic="menu"></button>
         <div class="search-wrap">
           <span class="search-ico" data-ic="search"></span>
           <input id="search" type="search" placeholder="Search library — Enter to search YouTube (videos + playlists)" autocomplete="off">
@@ -103,9 +103,9 @@
     <div class="dl-head">
       <span id="dlTitle" class="dl-title">Downloads</span>
       <span class="dl-btns">
-        <button id="dlRetry" class="btn-line sm" hidden>Retry</button>
-        <button id="dlRetryBlocked" class="btn-line sm" hidden title="Retry the skipped/blocked tracks too (clears them from the never-retry list)">Retry blocked</button>
-        <button id="dlAction" class="btn-line sm">Stop all</button>
+        <button id="dlRetry" class="btn-line sm" hidden><span data-ic="refresh"></span> Retry</button>
+        <button id="dlRetryBlocked" class="btn-line sm" hidden title="Retry the skipped/blocked tracks too (clears them from the never-retry list)"><span data-ic="slash"></span> Retry blocked</button>
+        <button id="dlAction" class="btn-line sm"><span data-ic="stop"></span> Stop all</button>
         <button id="dlClose" class="icon-btn" title="Hide (downloads keep running)" data-ic="x"></button>
       </span>
     </div>
@@ -161,7 +161,7 @@
         <div class="set-group"><div class="set-title">Host — share this device's library</div>
           <div id="shareHostIdle">
             <div class="set-hint">Start a local server so another device can browse, stream and download your library + playlists.</div>
-            <button id="shareHostStart" class="btn">Start sharing</button>
+            <button id="shareHostStart" class="btn"><span data-ic="wifi"></span> Start sharing</button>
             <div id="shareHostErr" class="set-hint share-err" hidden></div>
           </div>
           <div id="shareHostOn" hidden>
@@ -171,7 +171,7 @@
                 <div class="share-code" id="shareCode">000000</div></div>
             </div>
             <div id="shareHostInfo" class="set-hint"></div>
-            <button id="shareHostStop" class="btn-line sm">Stop sharing</button>
+            <button id="shareHostStop" class="btn-line sm"><span data-ic="stop"></span> Stop sharing</button>
           </div>
         </div>
 
@@ -181,7 +181,7 @@
           <div class="set-row"><label>Port</label><input type="number" id="shareHostPort" class="num-in" value="0" min="0" max="65535"></div>
           <div class="set-row"><label>Code</label><input type="text" id="shareConnCode" class="text-in" placeholder="000000" inputmode="numeric" maxlength="6"></div>
           <label class="setup-chk"><input type="checkbox" id="shareSaveLocal"> Save streamed tracks locally as I play them</label>
-          <button id="shareConnect" class="btn">Connect</button>
+          <button id="shareConnect" class="btn"><span data-ic="link"></span> Connect</button>
           <div id="shareConnStatus" class="set-hint"></div>
         </div>
       </div>
@@ -200,7 +200,7 @@
           <div class="pd-headmeta">
             <div id="plDetailSub" class="set-hint"></div>
             <div class="pd-actions">
-              <button id="plDetailImport" class="btn">Import playlist</button>
+              <button id="plDetailImport" class="btn"><span data-ic="dl"></span> Import playlist</button>
               <a id="plDetailLink" class="btn-line sm" target="_blank" rel="noopener">Open on YouTube ↗</a>
             </div>
           </div>
@@ -230,8 +230,8 @@
 Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
         <div id="ckList" class="ck-list"></div>
         <div class="setup-actions">
-          <button id="ckCancel" class="btn-line">Cancel</button>
-          <button id="ckOk" class="btn" disabled>Accept (5)</button>
+          <button id="ckCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
+          <button id="ckOk" class="btn" disabled><span data-ic="check"></span> <span id="ckOkLbl">Accept (5)</span></button>
         </div>
       </div>
     </div>
@@ -244,8 +244,8 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
         <p id="dlgMsg" class="dlg-msg" hidden></p>
         <input type="text" id="dlgInput" class="text-in dlg-in" hidden autocomplete="off">
         <div class="setup-actions">
-          <button id="dlgCancel" class="btn-line">Cancel</button>
-          <button id="dlgOk" class="btn">OK</button>
+          <button id="dlgCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
+          <button id="dlgOk" class="btn"><span data-ic="check"></span> OK</button>
         </div>
       </div>
     </div>
@@ -267,8 +267,8 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           </label>
         </div>
         <div class="setup-actions">
-          <button id="dupCancel" class="btn-line">Cancel</button>
-          <button id="dupConfirm" class="btn">Remove Duplicates</button>
+          <button id="dupCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
+          <button id="dupConfirm" class="btn"><span data-ic="trash"></span> Remove duplicates</button>
         </div>
       </div>
     </div>
@@ -282,18 +282,18 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <p class="setup-p">First launch! Do you want to configure the app now (yt-dlp binary, browser cookies, download folder), or start with the defaults?</p>
           <p class="setup-hint">Everything stays editable later in <b>Settings</b>.</p>
           <div class="setup-actions">
-            <button id="suDefaults" class="btn-line">Use defaults</button>
-            <button id="suConfigure" class="btn">Configure now</button>
+            <button id="suDefaults" class="btn-line"><span data-ic="check"></span> Use defaults</button>
+            <button id="suConfigure" class="btn"><span data-ic="gear"></span> Configure now</button>
           </div>
         </div>
         <div class="setup-step" data-step="1" hidden>
           <p class="setup-p"><b>1/3 — yt-dlp</b> powers YouTube search, streaming and downloads.</p>
           <div id="suYtStatus" class="setup-status">Detecting…</div>
           <div class="setup-row">
-            <button id="suYtPick" class="btn-line sm">Pick the binary…</button>
-            <button id="suYtRetry" class="btn-line sm">Re-detect</button>
+            <button id="suYtPick" class="btn-line sm"><span data-ic="folder"></span> Pick the binary…</button>
+            <button id="suYtRetry" class="btn-line sm"><span data-ic="refresh"></span> Re-detect</button>
           </div>
-          <div class="setup-actions"><button class="btn su-next">Next</button></div>
+          <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="2" hidden>
           <p class="setup-p"><b>2/3 — Browser cookies</b> (optional): lets yt-dlp act as your logged-in browser for age/member-restricted tracks.</p>
@@ -311,7 +311,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
               <option value="vivaldi">Vivaldi</option>
             </select>
           </div>
-          <div class="setup-actions"><button class="btn su-next">Next</button></div>
+          <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="3" hidden>
           <p class="setup-p"><b>3/3 — Downloads & preferences</b></p>
@@ -323,7 +323,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <label class="setup-chk"><input type="checkbox" id="suPrefLocal" checked> Play the local file when a track is downloaded</label>
           <label class="setup-chk"><input type="checkbox" id="suAutoSave"> Tick “Save locally” by default when importing a playlist</label>
           <label class="setup-chk"><input type="checkbox" id="suNotify" checked> Desktop notification on track change</label>
-          <div class="setup-actions"><button id="suFinish" class="btn">Finish</button></div>
+          <div class="setup-actions"><button id="suFinish" class="btn"><span data-ic="check"></span> Finish</button></div>
         </div>
       </div>
     </div>
@@ -338,14 +338,14 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
       <div class="modal-body">
         <div class="imp-row">
           <input id="impUrl" type="text" placeholder="Playlist URL (YouTube, YouTube Music…)" autocomplete="off">
-          <button id="impFetch" class="btn-line sm">Fetch</button>
+          <button id="impFetch" class="btn-line sm"><span data-ic="search"></span> Fetch</button>
         </div>
         <div id="impStatus" class="set-hint"></div>
         <div id="impList" class="imp-list"></div>
         <div id="impFoot" class="imp-foot" hidden>
           <div class="imp-foot-row">
-            <button id="impAll" class="btn-line sm">Select all</button>
-            <button id="impNone" class="btn-line sm">Clear</button>
+            <button id="impAll" class="btn-line sm"><span data-ic="check"></span> Select all</button>
+            <button id="impNone" class="btn-line sm"><span data-ic="x"></span> Clear</button>
             <span id="impCount" class="imp-count"></span>
           </div>
           <div class="imp-foot-row">
@@ -355,7 +355,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <div class="imp-foot-row">
             <label class="imp-dl" title="Watch this playlist and auto-add its future tracks"><input type="checkbox" id="impFollow"> <span class="bic" data-ic="repeat"></span> Follow</label>
             <label class="imp-dl" title="Also download the selected tracks as local mp3 files"><input type="checkbox" id="impDl"> Save locally (mp3)</label>
-            <button id="impGo" class="btn">Import</button>
+            <button id="impGo" class="btn"><span data-ic="dl"></span> Import</button>
           </div>
         </div>
       </div>
@@ -390,8 +390,8 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
         </div>
         <div class="imp-foot-row">
           <label class="imp-dl" title="Also download every matched track as a local mp3"><input type="checkbox" id="extDl"> Save locally (mp3)</label>
-          <button id="extCancel" class="btn-line sm" hidden>Cancel</button>
-          <button id="extGo" class="btn">Import</button>
+          <button id="extCancel" class="btn-line sm" hidden><span data-ic="x"></span> Cancel</button>
+          <button id="extGo" class="btn"><span data-ic="dl"></span> Import</button>
         </div>
         <div id="extBar" class="ext-bar" hidden><div id="extBarFill"></div></div>
         <div id="extStatus" class="set-hint"></div>
