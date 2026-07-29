@@ -1,5 +1,5 @@
 {
-  "version": "0.22.63",
+  "version": "0.22.64",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixed: removing duplicates now actually saves. The playlist branch called PL._persist, which playlists.js does not export — optional chaining swallowed the call, so the cleanup lived in memory only and duplicates came back on restart. Scrolling no longer stutters: cover art was being re-scanned across every mounted row on each re-slice; it is now deferred and coalesced off the scroll path. Download counts only count what will actually be attempted — already-local and known-unavailable tracks are excluded and reported separately. After a batch, tracks the source refuses for good can be removed on confirmation. Newly downloaded tracks reappear immediately instead of staying hidden until the next restart. Online tracks now carry an icon instead of a text badge, with a distinct colour for unavailable ones. Adding by URL offers to download right away. Playlist Refresh re-fetches titles from the source instead of only rereading the local cache, and a followed playlist can be checked for new tracks on its own.",
+  "notes": "Downloads panel: yt-dlp's wall of text is reduced to a short label — a Premium-only video now reads 'Premium only' instead of the id, the repetition and a truncated sentence; the raw message stays in the tooltip. The Activity dot always shows and carries the batch state (purple running, red failed, amber canceled, green all through), and only pulses while something is actually running. The list is split into In progress / Waiting / Failed / Canceled / Saved, failures first. Ctrl+Enter searches in the background: the view stays put, the result parks in Activity and opens on click, and several can run at once without cancelling or overwriting each other. Follow checks appear in Activity with per-playlist progress instead of running invisibly. — Previous fixes still included: removing duplicates now actually saves. The playlist branch called PL._persist, which playlists.js does not export — optional chaining swallowed the call, so the cleanup lived in memory only and duplicates came back on restart. Scrolling no longer stutters: cover art was being re-scanned across every mounted row on each re-slice; it is now deferred and coalesced off the scroll path. Download counts only count what will actually be attempted — already-local and known-unavailable tracks are excluded and reported separately. After a batch, tracks the source refuses for good can be removed on confirmation. Newly downloaded tracks reappear immediately instead of staying hidden until the next restart. Online tracks now carry an icon instead of a text badge, with a distinct colour for unavailable ones. Adding by URL offers to download right away. Playlist Refresh re-fetches titles from the source instead of only rereading the local cache, and a followed playlist can be checked for new tracks on its own.",
   "platforms": [
     "linux",
     "windows",
