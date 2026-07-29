@@ -186,8 +186,67 @@ function artInitial(t) { const s = (t.album || t.title || "?").trim(); return (s
 // ─── Album art (embedded cover, deduped per album, lazily fetched) ───
 const coverCache = new Map(); // albumKey -> dataURL | "" (none/pending)
 function albumKey(t) { return `${t.artist}|||${t.album}`; }
+// YouTube publishes several stills per video. The one stored on a track is
+// whatever the search result carried — usually hqdefault with sqp cropping
+// parameters, which decodes to 336×188. That is fine for a card in a grid and
+// far too small for the Now-playing panel, where it is painted at ~290px wide
+// and, after the padding is cropped away, blown up from under 190px of real
+// picture. maxresdefault is 1280×720 when the uploader provided it.
+//
+// Only the big artwork asks for these. A results grid would pay one extra 404
+// per card for sizes that often do not exist; a single panel pays it once.
+const YT_STILLS = ["maxresdefault", "sddefault", "hqdefault"];
+function ytStills(url) {
+  const m = String(url).match(/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\//);
+  if (!m) return [url];
+  // The original stays last: it is known to exist, whatever the others do.
+  return [...YT_STILLS.map(s => `https://i.ytimg.com/vi/${m[1]}/${s}.jpg`), url];
+}
+
+/**
+ * Load the first still in `list` that really exists, then hand it to `done`.
+ * A missing size does not always 404 — YouTube may answer 200 with a 120×90
+ * grey placeholder — so a candidate is only accepted once it is bigger than
+ * that. `token` guards against a track change mid-flight.
+ */
+function pickStill(list, token, alive, done) {
+  let i = 0;
+  const tryNext = () => {
+    if (!alive(token)) return;
+    if (i >= list.length) return;
+    const url = list[i++];
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (!alive(token)) return;
+      if (img.naturalWidth > 140 && img.naturalHeight > 100) done(url, img);
+      else tryNext();
+    };
+    img.onerror = tryNext;
+    img.src = url;
+  };
+  tryNext();
+}
+
 function setArtImg(el, url) {
   el.style.background = ""; el.textContent = ""; el.classList.add("has-cover");
+  // The Now-playing panel is the one place a bigger still is worth fetching.
+  if (!IS_ANDROID && el.classList.contains("ov-art") && /^https?:\/\//.test(url)) {
+    const list = ytStills(url);
+    if (list.length > 1) {
+      el.dataset.artWanted = url;
+      el.style.backgroundImage = `url("${url}")`;   // show something immediately
+      fitArtRatio(el, url);
+      pickStill(list, url, t => el.dataset.artWanted === t, (best, img) => {
+        if (best === url) return;                   // already showing it
+        el.style.backgroundImage = `url("${best}")`;
+        // The probe already holds the decoded image; measure that one, since a
+        // larger still can carry different padding from the cropped variant.
+        fitArtRatio(el, best, img);
+      });
+      return;
+    }
+  }
   // Android WebView won't load network images → proxy them to a data: URL.
   if (IS_ANDROID && /^https?:\/\//.test(url)) {
     el.dataset.proxied = url;
@@ -226,7 +285,13 @@ const _artRatio = new Map();                       // url -> clamped ratio
 const RATIO_MIN = 0.55, RATIO_MAX = 2.4;
 const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "dl-cover", "pl-cover", "vh-icon"];
 
-function fitArtRatio(el, url) {
+/**
+ * @param {Element} el
+ * @param {string} url
+ * @param {HTMLImageElement} [ready] an already-decoded, CORS-clean copy — the
+ *   still picker holds one, and re-fetching it just to measure would be waste.
+ */
+function fitArtRatio(el, url, ready) {
   // Without aspect-ratio support the CSS falls back to a fixed height; there is
   // nothing to drive there, and forcing height:auto would collapse the box.
   if (!window.CSS?.supports?.("aspect-ratio: 1")) return;
@@ -253,6 +318,7 @@ function fitArtRatio(el, url) {
   // in local files. i.ytimg.com does send Access-Control-Allow-Origin, so
   // asking for the image in CORS mode makes it readable; measured on all four
   // thumbnail variants, tainted without the attribute and readable with it.
+  if (ready?.naturalWidth) return settle(ready, true);
   const remote = /^https?:/i.test(url);
   const probe = new Image();
   if (remote) probe.crossOrigin = "anonymous";
@@ -464,7 +530,8 @@ function setArtPlaceholder(el, t) {
   el.dataset.album = albumKey(t);
   // Back to the stylesheet's default shape until we know the next cover's, or
   // the previous track's ratio lingers over the placeholder.
-  delete el.dataset.artUrl; el.style.aspectRatio = ""; el.style.backgroundSize = ""; el.style.backgroundPosition = "";
+  delete el.dataset.artUrl; delete el.dataset.artWanted;
+  el.style.aspectRatio = ""; el.style.backgroundSize = ""; el.style.backgroundPosition = "";
 }
 function artCell(t) {
   // Background on a fixed-size box — the ONE recipe confirmed to render on the
@@ -4210,7 +4277,8 @@ function renderNpPanel() {
     $("#ovMeta").innerHTML = `${esc(t.album)}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · <span class="ov-st ${streamed ? "on" : "loc"}">${streamed ? "streaming" : "local file"}</span>`;
   } else {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
-    delete art.dataset.artUrl; art.style.aspectRatio = ""; art.style.backgroundSize = ""; art.style.backgroundPosition = "";  // square placeholder
+    delete art.dataset.artUrl; delete art.dataset.artWanted;   // cancels any still upgrade in flight
+    art.style.aspectRatio = ""; art.style.backgroundSize = ""; art.style.backgroundPosition = "";
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
   // Up next — same list for sequential AND shuffle (pre-computed order).
