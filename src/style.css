@@ -772,10 +772,13 @@ body.np-open { --np-eff: min(var(--np-w, 330px), max(34vw, 260px)); }
    column and the WHOLE app shrinks around it; otherwise it floats over the
    content like on phones. */
 body.np-push .app { margin-right: calc(var(--np-eff, 330px) + 8px); }
-/* The drawer starts at top:8px — the same row as the nav bar — so the nav bar
-   ALWAYS steps aside when the drawer is open, pushed or floating: a covered
-   nav bar is unclickable. */
-body.np-open .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
+/* The nav bar only steps aside when the drawer is PINNED, i.e. actually part
+   of the layout. Floating, the drawer overlays the content and shrinking the
+   nav bar for it made the whole top row jump every time the panel opened —
+   for a bar that ends well before the drawer's edge anyway. The drawer sits
+   above it in z-order, so the buttons it does cover stay reachable by closing
+   or unpinning it. */
+body.np-push .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
 /* Pinned AND given its own column: it is part of the layout now, so it drops
    the overlay cues — no lifting shadow, a plain panel border like the sidebar.
    Pinned but too narrow to split keeps the shadow: it is still floating over
