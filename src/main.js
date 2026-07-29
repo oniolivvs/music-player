@@ -223,7 +223,7 @@ function hydrateCovers() {
   if (artObserver) arts.forEach(el => artObserver.observe(el));
   else { const seen = new Set(); for (const t of view.slice(0, 60)) { const k = albumKey(t); if (!seen.has(k)) { seen.add(k); fetchCover(t); } } }
 }
-function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else if (active.type === "online") renderOnlineResults(); else showLibrary(); }
+function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else if (active.type === "online") renderOnlineResults(); else if (active.type === "stats") showStats(); else if (active.type === "history") showHistory(); else showLibrary(); }
 
 // The Android WebView won't load external network background-images, so YouTube
 // covers (i.ytimg…) are proxied through the Rust backend into inline data: URLs
@@ -389,6 +389,172 @@ function recordHistory(t, path) {
   if (history2.length > lim) history2.length = lim;
   saveHistory();
 }
+// ─── Compteur d'écoutes ───
+// L'historique ne peut pas servir de base : il déduplique par morceau, donc il
+// ne sait dire que "quand", jamais "combien de fois". On tient donc un compteur
+// à part : { path: { n, secs, first, last, title, artist, album } }.
+//
+// Une écoute n'est comptée qu'après PLAY_THRESHOLD_S secondes réellement
+// jouées. Sans ce seuil, parcourir sa bibliothèque en enchaînant les suivants
+// gonflerait les compteurs de morceaux jamais écoutés — et le classement
+// finirait par mesurer le zapping plutôt que les goûts.
+const PLAY_THRESHOLD_S = 30;
+let plays = {};
+// Le morceau en cours, validé seulement à sa sortie. On s'appuie sur wallPos(),
+// qui donne le temps RÉELLEMENT joué — les pauses en sont déjà déduites, ce
+// qu'un simple minuteur ne saurait pas faire sans se réarmer à chaque reprise.
+let _curPlay = null;
+
+async function loadPlays() {
+  const raw = await storeLoad("plays");
+  if (raw) { try { plays = JSON.parse(raw) || {}; } catch { plays = {}; } }
+  if (typeof plays !== "object" || !plays) plays = {};
+}
+function savePlays() { storeSave("plays", JSON.stringify(plays)); }
+
+// Valide le morceau qui vient de se terminer, s'il a été assez écouté.
+// À appeler AVANT wallStart() du suivant : après, l'horloge est repartie de
+// zéro et le temps joué est perdu.
+function commitPlay() {
+  const p = _curPlay;
+  _curPlay = null;
+  if (!p) return;
+  const played = wallPos();
+  if (played < p.need) return;
+  const e = plays[p.path] || { n: 0, secs: 0, first: Date.now() };
+  e.n++;
+  e.secs += Math.round(played);
+  e.last = Date.now();
+  // Métadonnées recopiées : un morceau retiré de la bibliothèque doit rester
+  // lisible dans les statistiques, sinon le classement se troue avec le temps.
+  e.title = p.t.title || e.title || "";
+  e.artist = p.t.artist || e.artist || "";
+  e.album = p.t.album || e.album || "";
+  plays[p.path] = e;
+  savePlays();
+}
+
+// Ouvre le suivi d'un morceau. Le seuil s'adapte aux titres courts : sinon un
+// interlude de 40 s ne pourrait jamais atteindre 30 s de lecture utile après
+// la moindre avance, et n'existerait jamais dans les statistiques.
+function armPlayCount(t, path) {
+  // Pas de commitPlay() ici : à ce stade wallStart(0) a déjà remis l'horloge à
+  // zéro et le temps du morceau précédent est perdu. La validation se fait
+  // explicitement AVANT, sur chaque chemin de changement de piste.
+  if (!t || !path) return;
+  const dur = Number(t.duration_secs) || 0;
+  const need = dur && dur < PLAY_THRESHOLD_S * 2 ? Math.max(5, dur / 2) : PLAY_THRESHOLD_S;
+  _curPlay = { path, t, need };
+}
+
+// ─── Statistiques d'écoute ───
+// Tout est dérivé de `plays`. Les entrées sans écoute validée n'y figurent
+// pas : « les moins écoutés » se lit donc parmi ce qui a DÉJÀ été écouté au
+// moins une fois, et la bibliothèque jamais lancée est comptée à part — mêler
+// les deux donnerait un classement dominé par des morceaux jamais ouverts.
+function statsAgg() {
+  const rows = Object.entries(plays).map(([path, e]) => ({ path, ...e }));
+  const total = rows.reduce((a, r) => a + (r.n || 0), 0);
+  const secs = rows.reduce((a, r) => a + (r.secs || 0), 0);
+
+  const by = (key) => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = (r[key] || "").trim() || "—";
+      const cur = m.get(k) || { name: k, n: 0, secs: 0, tracks: new Set() };
+      cur.n += r.n || 0; cur.secs += r.secs || 0; cur.tracks.add(r.path);
+      m.set(k, cur);
+    }
+    return [...m.values()].map(x => ({ ...x, tracks: x.tracks.size }));
+  };
+
+  const neverPlayed = library.filter(t => !plays[t.path]).length;
+  return { rows, total, secs, artists: by("artist"), albums: by("album"), neverPlayed };
+}
+
+function fmtLong(s) {
+  s = Math.max(0, Math.round(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if (h) return `${h} h ${String(m).padStart(2, "0")}`;
+  if (m) return `${m} min`;
+  return `${s} s`;
+}
+
+function statRows(list, labelKey, max, opts = {}) {
+  if (!list.length) return `<div class="st-empty">Rien encore</div>`;
+  const top = list[0]?.n || 1;
+  return list.slice(0, max).map((r, i) => `
+    <div class="st-row" ${opts.path ? `data-path="${esc(r.path)}"` : ""}>
+      <span class="st-rank">${i + 1}</span>
+      <span class="st-name" title="${esc(r[labelKey] || "")}">${esc(r[labelKey] || "—")}${opts.sub && r[opts.sub] ? `<span class="st-sub">${esc(r[opts.sub])}</span>` : ""}</span>
+      <span class="st-bar"><i style="width:${Math.max(3, Math.round((r.n / top) * 100))}%"></i></span>
+      <span class="st-n">${r.n}<span class="st-unit">×</span></span>
+      <span class="st-time">${fmtLong(r.secs)}</span>
+    </div>`).join("");
+}
+
+function showStats() {
+  active = { type: "stats", id: "" };
+  markActive();
+  selected.clear();
+  const s = statsAgg();
+  const byPlays = [...s.rows].sort((a, b) => b.n - a.n || b.secs - a.secs);
+  const leastPlayed = [...s.rows].sort((a, b) => a.n - b.n || a.secs - b.secs);
+  const byArtist = [...s.artists].sort((a, b) => b.n - a.n);
+  const leastArtist = [...s.artists].sort((a, b) => a.n - b.n);
+  const byAlbum = [...s.albums].sort((a, b) => b.n - a.n);
+
+  setViewHead({
+    icon: IC.disc,
+    title: "Listening stats",
+    subtitle: s.total
+      ? `${s.total} play${s.total === 1 ? "" : "s"} · ${fmtLong(s.secs)} listened · ${s.rows.length} distinct track${s.rows.length === 1 ? "" : "s"}${s.neverPlayed ? ` · ${s.neverPlayed} never played` : ""}`
+      : "No plays counted yet",
+    actions: s.total ? `<button id="stReset" class="btn-line sm">Reset stats</button>` : "",
+  });
+  showListChrome(false);
+  const host = $("#trackList");
+  host.classList.remove("yt-grid");
+
+  if (!s.total) {
+    // Message explicite plutôt qu'un tableau vide : le comptage vient d'être
+    // introduit, personne ne peut deviner qu'il faut d'abord écouter.
+    host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.disc}</div>
+      Aucune écoute comptée pour l'instant.<br>
+      Une écoute est validée après ${PLAY_THRESHOLD_S} s de lecture réelle — les pauses ne comptent pas,
+      et parcourir la bibliothèque en enchaînant les suivants ne gonfle rien.<br>
+      Le comptage démarre maintenant : l'historique passé ne contenait pas cette information.</div>`;
+    return;
+  }
+
+  host.innerHTML = `
+    <div class="st-wrap">
+      <div class="st-grid">
+        <div class="st-card"><div class="st-h">Most played tracks</div>${statRows(byPlays, "title", 15, { path: true, sub: "artist" })}</div>
+        <div class="st-card"><div class="st-h">Least played tracks</div>${statRows(leastPlayed, "title", 15, { path: true, sub: "artist" })}</div>
+        <div class="st-card"><div class="st-h">Top artists</div>${statRows(byArtist, "name", 15)}</div>
+        <div class="st-card"><div class="st-h">Least played artists</div>${statRows(leastArtist, "name", 10)}</div>
+        <div class="st-card st-wide"><div class="st-h">Top albums</div>${statRows(byAlbum, "name", 12)}</div>
+      </div>
+      <div class="st-note">Une écoute compte après ${PLAY_THRESHOLD_S} s réellement jouées (ou la moitié de la durée pour les titres courts). Les pauses sont déduites.</div>
+    </div>`;
+
+  // Un clic sur un morceau le lance, comme partout ailleurs dans l'app.
+  host.querySelectorAll(".st-row[data-path]").forEach(el => el.addEventListener("click", () => {
+    const p = el.dataset.path;
+    const t = trackByPath(p);
+    if (!t) { flash("Ce morceau n'est plus dans la bibliothèque"); return; }
+    view = [t]; queue = [p]; curIndex = -1;
+    hardPlay(0);
+  }));
+
+  $("#stReset")?.addEventListener("click", async () => {
+    if (!await askConfirm("Reset listening stats?", "Les compteurs repartent de zéro. Les morceaux et playlists ne sont pas touchés.", "Reset")) return;
+    plays = {}; savePlays(); showStats();
+    flash("Statistiques remises à zéro");
+  });
+}
+
 function showHistory() {
   active = { type: "history", id: "" };
   markActive();
@@ -3212,6 +3378,7 @@ async function checkDuplicatesFlow(type, plId = "") {
 function markActive() {
   $("#navLibrary").classList.toggle("active", active.type === "library");
   $("#navHistory").classList.toggle("active", active.type === "history");
+  $("#navStats").classList.toggle("active", active.type === "stats");
   renderSources();
   // playlist highlight is refreshed by renderPlaylists on open; refresh to sync
   document.querySelectorAll("#playlistsList .pl-row[data-pl]").forEach(el => el.classList.toggle("active", active.type === "playlist" && active.id === el.dataset.pl));
@@ -3311,6 +3478,9 @@ async function startSource(cmd, path, gain) {
 let playSeq = 0; // guards against overlapping hardPlay calls (fast double-clicks)
 async function hardPlay(i) {
   if (i < 0 || i >= queue.length) return;
+  // Le morceau sortant est valide ICI, tant que wallPos() porte encore son
+  // temps joue : hardPlay appelle wallStart(0) plus bas.
+  commitPlay();
   // Blocked track chosen directly (or reached): skip to the next playable one.
   if (isBlocked(queue[i])) {
     const j = nextIndex(i, true);
@@ -3350,6 +3520,7 @@ async function hardPlay(i) {
   playing = true; wallStart(0); updatePlayingRow();
   rpcTrack(t);            // fresh track → progress bar at 0 (honours rpcDelay)
   recordHistory(t, queue[i]);
+  armPlayCount(t, queue[i]);
   savePlayback();
   if (t) $("#nowSub").textContent = `${t.artist} — ${t.album}`;
   mediaPlayback();
@@ -3459,10 +3630,11 @@ function startPolling() {
       // current track already ended — fall through to end-of-track recovery.
     }
     if (queueSettled && queued < expectedQueued && queued >= 1 && preIndex >= 0) {
+      commitPlay(); // avant wallStart(0), sinon le temps joue est perdu
       history.push(curIndex); curIndex = preIndex;
       const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
       wallStart(0); updateNowPlaying(t, queue[curIndex]); updatePlayingRow(); mediaPlayback();
-      rpcTrack(t); recordHistory(t, queue[curIndex]); savePlayback(); // gapless advance
+      rpcTrack(t); recordHistory(t, queue[curIndex]); armPlayCount(t, queue[curIndex]); savePlayback(); // gapless advance
       await schedulePreload();
     } else if (queued === 0 && playing) {
       // Sink drained: end of queue — or the stream failed to open (e.g. a 403
@@ -4927,7 +5099,7 @@ function initResizers() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
   if (IS_ANDROID && !folders.length) {
@@ -4960,6 +5132,7 @@ async function init() {
   $("#rescanBtn").addEventListener("click", rescanAll);
   $("#navLibrary").addEventListener("click", showLibrary);
   $("#navHistory").addEventListener("click", showHistory);
+  $("#navStats").addEventListener("click", showStats);
 
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
