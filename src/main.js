@@ -1904,7 +1904,7 @@ function openPlaylist(id) {
       // every follow at once.
       // A spinning magnifier meant nothing. The refresh arrow is the icon whose
       // rotation reads as "working", and it only spins while the check runs.
-      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.refresh)} Check now</button>` : "") +
+      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
       (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
@@ -1916,12 +1916,16 @@ function openPlaylist(id) {
     const f = followFor(id);
     if (!f) return;
     const btn = e.currentTarget;
+    btn.innerHTML = `${ic(IC.refresh)} Checking…`;
     btn.classList.add("spinning"); btn.disabled = true;
     try {
       const n = await checkFollow(f, true);
       saveFollows();
       if (n) { renderPlaylists(); openPlaylist(id); }
-    } finally { btn.classList.remove("spinning"); btn.disabled = false; }
+    } finally {
+      btn.classList.remove("spinning"); btn.disabled = false;
+      btn.innerHTML = `${ic(IC.search)} Check now`;
+    }
   });
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
@@ -2866,8 +2870,16 @@ function filterBlocked(list) {
 }
 function autoBlockUnplayableTrack(path, reason = "") {
   if (!path) return;
-  setBlocked([path], true);
-  flash(reason ? `Track unplayable (${reason}) — automatically hidden` : "Track unplayable — automatically hidden");
+  if (!isOnline(path)) {
+    // Local file missing or inaccessible on disk: purge from library and revert playlists
+    library = library.filter(x => x.path !== path);
+    saveLibrary();
+    const vid = videoIdOf(path);
+    if (vid) PL.replacePath(path, "yt:" + vid);
+  } else {
+    setBlocked([path], true);
+  }
+  flash(reason ? `Track unplayable (${reason}) — automatically updated` : "Track unplayable — automatically updated");
   refreshView();
 }
 
@@ -3214,21 +3226,21 @@ function libraryLocalFor(id) {
 }
 function downloadTracks(paths) {
   if (!IS_NATIVE) { flash("Downloads need the native app"); return; }
-  let added = 0, linked = 0, blocked = 0;
+  let added = 0, blocked = 0;
   for (const p of paths) {
     if (!isOnline(p)) continue;
     if (dlQueue.some(d => d.path === p && (d.status === "queued" || d.status === "active"))) continue;
-    const local = libraryLocalFor(ytId(p));
-    if (local) { PL.replacePath(p, local); linked++; continue; } // no download needed
+    // Don't trust libraryLocalFor here — it may return ghost paths for files
+    // deleted from disk. The Rust backend's find_existing() does the real
+    // filesystem check and will skip if already downloaded.
     if (dlBlock[ytId(p)]) { blocked++; continue; } // known-unavailable: never retried
     const t = onlineIndex.get(p);
     dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", status: "queued", pct: 0 });
     added++;
   }
-  if (linked) { saveOnline(); renderPlaylists(); refreshView(); }
   const skipNote = blocked ? ` · ${blocked} unavailable skipped` : "";
-  if (!added) { flash((linked ? `${linked} track${linked === 1 ? "" : "s"} already local` : blocked ? "Nothing to download" : "Already in the download queue") + skipNote); return; }
-  if (linked || blocked) flash(`Downloading ${added}${linked ? ` · ${linked} already local` : ""}${skipNote}`);
+  if (!added) { flash((blocked ? "Nothing to download" : "Already in the download queue") + skipNote); return; }
+  if (blocked) flash(`Downloading ${added}${skipNote}`);
   dlRender();
   if (!dlRunning) dlPump();
 }
@@ -3300,14 +3312,9 @@ async function dlPump() {
       // Claim it synchronously (no await above this line since the concurrency
       // check) so two runners can never grab the same queued item.
       d.status = "active"; d.pct = 0;
-      // The library may have grown mid-batch (rescans): link instead of downloading.
-      const local = libraryLocalFor(d.id);
-      if (local) {
-        d.status = "done"; d.pct = 100;
-        PL.replacePath(d.path, local);
-        dlRender();
-        continue;
-      }
+      // Don't shortcut via libraryLocalFor here — it may return ghost paths
+      // for files no longer on disk. The Rust yt_download → find_existing
+      // does the real filesystem check and returns the path if already there.
       // Enforce the storage cap before spending bandwidth on a new file.
       if (capMb && IS_NATIVE) {
         try {
