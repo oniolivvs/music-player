@@ -5146,17 +5146,23 @@ async function checkFollow(f, manual = false) {
   if (res.title) f.title = res.title;
   const tracks = (res.tracks || []).map(onlineFromResult);
   const known = new Set(f.knownIds || []);
-  const fresh = tracks.filter(t => !known.has(ytId(t.path)));
-  // Union: a track removed upstream then re-added must not come back as "new".
+  const brandNew = tracks.filter(t => !known.has(ytId(t.path)));
+  const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
+  const localPaths = pl ? new Set(pl.paths) : new Set();
+  const missing = tracks.filter(t => known.has(ytId(t.path)) && !localPaths.has(t.path));
+  const fresh = [...brandNew, ...missing];
   f.knownIds = [...new Set([...(f.knownIds || []), ...tracks.map(t => ytId(t.path))])];
   if (!fresh.length) { if (manual) flash(`“${f.title}” — no new tracks`); return 0; }
   fresh.forEach(t => onlineIndex.set(t.path, t));
-  const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
   if (pl) fresh.forEach(t => PL.addToPlaylist(f.playlistId, t.path));
   await saveOnline();
   renderPlaylists(); refreshView();
   if (f.autoDownload) downloadTracks(fresh.map(t => t.path));
-  flash(`${fresh.length} new track${fresh.length === 1 ? "" : "s"} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
+  const label = brandNew.length && missing.length
+    ? `${brandNew.length} new + ${missing.length} restored`
+    : brandNew.length ? `${brandNew.length} new track${brandNew.length === 1 ? "" : "s"}`
+    : `${missing.length} restored track${missing.length === 1 ? "" : "s"}`;
+  flash(`${label} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
   return fresh.length;
 }
 
