@@ -4251,9 +4251,10 @@ function applyIconOnly() {
   const on = mode === "always" || (mode === "auto" && document.body.classList.contains("main-narrow"));
   document.body.classList.toggle("icon-only", on);
 }
+function npIsPinned() { return !!S().npDocked && window.innerWidth >= 700; }
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
-  if (npOpen && dlOpen) { dlOpen = false; dlRender(); }
+  if (npOpen && dlOpen && !npIsPinned()) { dlOpen = false; dlRender(); }
   $("#npPanel").hidden = !npOpen;
   document.body.classList.toggle("np-open", npOpen);
   updateNpPush();
@@ -5794,7 +5795,7 @@ async function init() {
   $("#dlAction").addEventListener("click", dlStop);
   $("#dlRetry").addEventListener("click", dlRetry);
   $("#dlRetryBlocked").addEventListener("click", dlRetryBlocked);
-  $("#dlToggle").addEventListener("click", () => { dlOpen = !dlOpen; if (dlOpen && npOpen) toggleNpPanel(false); dlRender(); });
+  $("#dlToggle").addEventListener("click", () => { dlOpen = !dlOpen; if (dlOpen && npOpen && !npIsPinned()) toggleNpPanel(false); dlRender(); });
   $("#dlClose").addEventListener("click", () => { dlOpen = false; dlRender(); });
 
   sortMode = S().sortMode || "default";
@@ -5846,7 +5847,7 @@ async function init() {
     if (e.key !== "Escape") return;
     if (_dlgResolve) { dlgClose(_dlgHasInput ? null : false); return; }
     closeCtx(); $("#settingsModal").hidden = true; $("#importModal").hidden = true;
-    if (dlOpen) { dlOpen = false; dlRender(); }
+    if (dlOpen) { dlOpen = false; dlRender(); return; }
     if (npOpen) toggleNpPanel(false);
   });
 
