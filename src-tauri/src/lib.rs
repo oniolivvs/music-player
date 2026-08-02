@@ -37,6 +37,18 @@ async fn scan_diff(
     Ok(library::scan_diff(&paths, &known))
 }
 
+/// Ground-truth existence check used to validate library-cache paths: the JS
+/// `libraryLocalFor` trusts the library list blindly, so a deleted/moved/corrupt
+/// file still counts as "downloaded" (ghost) until this prunes it.
+#[tauri::command]
+fn fs_exists(path: String) -> bool {
+    let p = std::path::Path::new(&path);
+    match std::fs::metadata(p) {
+        Ok(m) => m.is_file() && m.len() > 0,
+        Err(_) => false,
+    }
+}
+
 #[tauri::command]
 fn play(path: String, gain: f32, state: State<AppState>) -> u64 {
     state.audio.play(path, gain)
@@ -857,7 +869,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
+            scan, scan_diff, fs_exists, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
             source_version, self_update, restart_app, list_versions, switch_version,
             latest_release, open_url, download_apk, install_apk, download_installer, run_installer,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,

@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.40 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.88 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1334,3 +1334,15 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .ac-actions .btn-line { margin: 6px 8px 0 0; }
   .dl-head { flex-wrap: wrap; row-gap: 6px; }
 }
+
+/* ─── User-toggleable columns (Settings → Lists) ───
+   body.col-no-album / body.col-no-dur hide the Album / Duration column.
+   Both rows (.track) and the header (.list-head) share the same grid, so we
+   collapse the column cell AND remove it from the template. */
+body.col-no-album .track > .album,
+body.col-no-album .list-head > .lh-album { display: none; }
+body.col-no-album .track, body.col-no-album .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+body.col-no-dur .track > .dur,
+body.col-no-dur .list-head > .lh-dur { display: none; }
+body.col-no-dur .track, body.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) minmax(0, 1.4fr) 28px; }
+body.col-no-album.col-no-dur .track, body.col-no-album.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 28px; }

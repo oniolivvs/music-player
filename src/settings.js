@@ -73,6 +73,8 @@ const DEFAULTS = {
   uiSortSel: true,       // show the sort selector
   collSources: false,    // Sources section collapsed
   collPlaylists: false,  // Playlists section collapsed
+  colAlbum: true,        // show the Album column in the track list
+  colDur: true,          // show the Duration column in the track list
   npDocked: false,       // Up-next panel docked as a side column
   uiNpOpen: false,       // Up-next panel open (restored at launch)
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge

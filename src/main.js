@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.40";
+const SRC_VERSION = "0.22.88";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -758,6 +758,7 @@ let plays = {};
 // gives the time ACTUALLY played — pauses are already excluded from it, which
 // a plain timer could only reproduce by re-arming itself on every resume.
 let _curPlay = null;
+let _skipCommit = false; // don't score the outgoing track (engine pause/resume retry)
 
 async function loadPlays() {
   const raw = await storeLoad("plays");
@@ -770,6 +771,7 @@ function savePlays() { storeSave("plays", JSON.stringify(plays)); }
 // Call it BEFORE the next wallStart(): after that the clock has restarted from
 // zero and the played time is gone.
 function commitPlay() {
+  if (_skipCommit) { _skipCommit = false; return; }
   const p = _curPlay;
   _curPlay = null;
   if (!p) return;
@@ -1472,6 +1474,87 @@ function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected
 // its downloaded twin for an online path), plus the videoId if any.
 function localFileFor(p) { return isOnline(p) ? libraryLocalFor(ytId(p)) : p; }
 function isStreamTrack(p) { return isOnline(p) && !localFileFor(p); }
+
+// ─── Canonical track identity (the "route": one song = one row) ─────────
+// Duplicates exist because every insert deduped by the `path` STRING, so the
+// same song stored as "yt:<id>" AND as a local mp3 landed as two rows. Identity
+// is musical, not path-based: a YouTube id when any exists, else a normalized
+// title|artist|duration key (suffixes/punctuation stripped so "X (Official
+// Video)" matches "X", and ±2s duration tolerance for yt-dlp vs ID3 tags).
+function trackKey(t) {
+  if (!t) return "";
+  const vid = videoIdOf(t.path) || t.videoId || t.id || null;
+  if (vid) return "yt:" + vid;
+  const norm = s => String(s || "").toLowerCase()
+    .replace(/\s*[\(\[][^\)\]]*(official|video|audio|lyric|lyrics|hd|mv|visualizer|feat\.?|ft\.?)[^\)\]]*[\)\]]/gi, " ")
+    .replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+  const title = norm(t.title), artist = norm(t.artist);
+  if (!title || title === "unknown") return "";
+  const dur = Math.round((Number(t.duration_secs) || 0) / 2);
+  return `ta:${title}|${artist}|${dur}`;
+}
+// Richer entry wins when two rows share a key: prefer one with a real local
+// file, then metadata completeness (thumbnail + duration), as rank score.
+function trackRichness(t) {
+  if (!t) return 0;
+  return (localFileFor(t.path) && !isOnline(t.path) ? 100 : 0)
+       + (t.thumbnail ? 4 : 0) + (t.duration_secs ? 2 : 0) + (t.album && t.album !== "YouTube" ? 1 : 0);
+}
+
+// Validated-local cache: the library list is a CACHE that goes stale when a file
+// is deleted / moved / half-written outside the app. `_localOk` is the single
+// source of truth: null = probing, true = a real file on disk, absent = known-bad
+// → libraryLocalFor falls through to the next candidate.
+const _localOk = new Map();
+const _localIdx = { built: false, byId: new Map() }; // videoId → paths[] (O(1) look-up)
+let _pruneQ = new Set(); let _pruneT = null;
+// Batched: a burst of missing files (library clean-up) used to do ONE filter +
+// disc write + full refreshView per ghost, freezing the UI for seconds.
+function _pruneRemove(path) { _pruneQ.add(path); _schedulePrune(); }
+function _schedulePrune() {
+  if (_pruneT) return;
+  _pruneT = setTimeout(() => {
+    _pruneT = null;
+    if (!_pruneQ.size) return;
+    const dead = _pruneQ; _pruneQ = new Set();
+    const before = library.length;
+    library = library.filter(x => !dead.has(x.path));
+    if (library.length !== before) saveLibrary();
+    if (["library", "playlist", "online", "history"].includes(active.type)) refreshView(); // ONE redraw for the whole burst
+  }, 250);
+}
+// Bounded probe pool: hundreds of fs_exists at launch saturated Tauri IPC and
+// starved the webview (the 1-FPS freeze). Queue them, run only a few at a time.
+const PROBE_PARALLEL = 4; let _probeActive = 0; const _probeQ = [];
+function probeLocal(path) {
+  if (!IS_NATIVE || _localOk.has(path)) return;
+  _localOk.set(path, null);
+  _probeQ.push(path); _pumpProbes();
+}
+function _pumpProbes() {
+  while (_probeActive < PROBE_PARALLEL && _probeQ.length) {
+    const path = _probeQ.shift(); _probeActive++;
+    invoke("fs_exists", { path }).then(ok => {
+      if (ok) _localOk.set(path, true);
+      else { _localOk.delete(path); _pruneRemove(path); }
+    }).catch(() => _localOk.delete(path))
+      .finally(() => { _probeActive--; _pumpProbes(); });
+  }
+}
+// videoId → [local paths] index, so libraryLocalFor is O(#candidates), not
+// O(library) with a regex per entry × per rendered row (~the big launch cost).
+function _rebuildLocalIdx() {
+  _localIdx.byId.clear();
+  for (const x of library) {
+    if (isOnline(x.path)) continue;
+    const id = x.id || x.videoId || videoIdOf(x.path);
+    if (!id) continue;
+    (_localIdx.byId.get(id) || _localIdx.byId.set(id, []).get(id)).push(x.path);
+  }
+  _localIdx.built = true;
+}
+
+function nLocalPaths(paths) { let n = 0; for (const p of paths) if (localFileFor(p)) n++; return n; }
 
 // Storage-state badge — the single place that decides which glyph and colour a
 // path gets, so the same symbol never means two things in two views.
@@ -2907,8 +2990,15 @@ async function resumeDownloads() {
       onlineIndex.set(it.path, { path: it.path, id: it.id, title: it.title || it.path, artist: "", album: "YouTube", duration_secs: 0, gain: 1, thumbnail: "" });
     }
   }
-  const paths = items.map(it => it.path).filter(Boolean);
-  if (paths.length) { downloadTracks(paths); flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}…`); }
+  // Don't re-download what's already on disk: resumeDownloads runs on EVERY app
+  // start, and re-queueing blindly re-downloaded everything each launch (the
+  // backend's own disk check would catch it, but only AFTER a wasteful resolve).
+  // Check both the library index AND, for robustness, skip nothing that still
+  // has an unfinished .part — yt-dlp resumes that on its own.
+  const todo = items.filter(it => it.path && isOnline(it.path) && !libraryLocalFor(it.id));
+  const paths = todo.map(it => it.path);
+  const skipped = items.length - todo.length;
+  if (paths.length) { downloadTracks(paths); flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}${skipped ? ` · ${skipped} already on disk` : ""}…`); }
 }
 
 // ─── Background tasks (search, imports, refreshes) ─────────────────────────
@@ -3218,11 +3308,27 @@ async function downloadPlaylist(id) {
 }
 // A file for this video id already in the library (ANY source folder — the
 // desktop script and the app share the "Title [id].ext" naming convention).
+// Every candidate goes through the on-disk truth (_localOk): entries already
+// probed-missing are skipped outright (fixes ghosts), unprobed ones are
+// scheduled for the real filesystem check (probeLocal) so a stale library entry
+// can't keep a track falsely "downloaded" forever. First credible candidate wins.
 function libraryLocalFor(id) {
   if (!id) return null;
-  const tag = `[${id}]`;
-  const t = library.find(x => !isOnline(x.path) && (x.path.includes(tag) || x.id === id || x.videoId === id || videoIdOf(x.path) === id));
-  return t ? t.path : null;
+  if (!_localIdx.built) _rebuildLocalIdx();
+  let cands = _localIdx.byId.get(id) || [];
+  // Fallback for files whose id isn't in [brackets] (we match on the name tag).
+  if (!cands.length) {
+    const tag = `[${id}]`;
+    for (const x of library) if (!isOnline(x.path) && x.path.includes(tag)) { cands.push(x.path); }
+  }
+  let cand = null, probed = false;
+  for (const path of cands) {
+    const st = _localOk.get(path);
+    if (st === true) return path;                 // verified real file
+    if (st === undefined) { cand ??= path; if (!probed) { probeLocal(path); probed = true; } }
+    // st === null → currently probing; skip (don't report a probable ghost)
+  }
+  return cand;
 }
 function downloadTracks(paths) {
   if (!IS_NATIVE) { flash("Downloads need the native app"); return; }
@@ -3605,7 +3711,10 @@ async function addUrlToLibrary() {
     if (!tracks.length) { flash("Nothing found at that URL"); return; }
     tracks.forEach(t => onlineIndex.set(t.path, t));
     const have = new Set(library.map(t => t.path));
-    const fresh = tracks.filter(t => !have.has(t.path));
+    const keys = new Set(library.map(trackKey).filter(Boolean));
+    // Dedupe by musical identity too — a track already local (downloaded mp3)
+    // must NOT be re-added as a separate yt: row or the UI shows the song twice.
+    const fresh = tracks.filter(t => !have.has(t.path) && !keys.has(trackKey(t)));
     library = library.concat(fresh);
     saveOnline();
     await saveLibrary();
@@ -3631,65 +3740,31 @@ async function downloadLibraryOnline() {
 
 // ─── Duplicate Checker ───
 function findDuplicates(tracks) {
-  const byVid = new Map();
-  const byPath = new Map();
-  const byTitleArt = new Map();
-
+  // Group by canonical musical identity (trackKey) — not by path — so a
+  // song stored both as "yt:<id>" and as a local mp3 (with or without [id])
+  // lands in ONE group even when raw paths differ. trackKey already strips
+  // decorative suffixes and tolerates ±2s on duration.
+  const byKey = new Map();
   for (const t of tracks) {
     if (!t || !t.path) continue;
-    const vid = videoIdOf(t.path);
-    if (vid) {
-      if (!byVid.has(vid)) byVid.set(vid, []);
-      byVid.get(vid).push(t);
-    }
-    if (!byPath.has(t.path)) byPath.set(t.path, []);
-    byPath.get(t.path).push(t);
-
-    const normTitle = String(t.title || "").toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
-    const normArtist = String(t.artist || "").toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
-    if (normTitle && normTitle !== "unknown") {
-      const key = normArtist && normArtist !== "unknown" ? `${normTitle}|||${normArtist}` : normTitle;
-      if (!byTitleArt.has(key)) byTitleArt.set(key, []);
-      byTitleArt.get(key).push(t);
-    }
+    const k = trackKey(t) || ("path:" + t.path); // unkeyable → its own group, by path
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(t);
   }
 
   const dupGroups = [];
-  const processedPaths = new Set();
-
-  const addGroup = (groupTracks, reason) => {
-    const unassigned = groupTracks.filter(t => !processedPaths.has(t.path));
-    if (unassigned.length < 2 && groupTracks.length < 2) return;
-
-    const allInGroup = [...groupTracks];
-    allInGroup.sort((a, b) => {
-      const aLocal = localFileFor(a.path) ? 2 : 0;
-      const bLocal = localFileFor(b.path) ? 2 : 0;
-      if (aLocal !== bLocal) return bLocal - aLocal;
-      const aRich = (a.thumbnail ? 1 : 0) + (a.duration_secs ? 1 : 0);
-      const bRich = (b.thumbnail ? 1 : 0) + (b.duration_secs ? 1 : 0);
-      return bRich - aRich;
-    });
-
+  for (const [k, group] of byKey.entries()) {
+    if (group.length < 2) continue;
+    const allInGroup = [...group];
+    allInGroup.sort((a, b) => trackRichness(b) - trackRichness(a)); // local + rich metadata first
     const keep = allInGroup[0];
     const dups = allInGroup.slice(1);
-    const newDups = dups.filter(d => !processedPaths.has(d.path));
-    if (newDups.length > 0) {
-      allInGroup.forEach(t => processedPaths.add(t.path));
-      dupGroups.push({ keep, duplicates: dups, allTracks: allInGroup, reason });
-    }
-  };
-
-  for (const [vid, group] of byVid.entries()) {
-    if (group.length > 1) addGroup(group, `Same YouTube ID (${vid})`);
+    const isYt = k.startsWith("yt:");
+    dupGroups.push({
+      keep, duplicates: dups, allTracks: allInGroup,
+      reason: isYt ? `Same YouTube ID (${k.slice(3)})` : (k.startsWith("path:") ? "Identical path" : "Same song (title · artist · duration)"),
+    });
   }
-  for (const [p, group] of byPath.entries()) {
-    if (group.length > 1) addGroup(group, "Identical path");
-  }
-  for (const [key, group] of byTitleArt.entries()) {
-    if (group.length > 1) addGroup(group, "Same Title & Artist");
-  }
-
   return dupGroups;
 }
 
@@ -3703,9 +3778,9 @@ function openDupModal({ groups, totalDups, scopeName, onConfirm }) {
   listEl.innerHTML = groups.map(g => `
     <div style="margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border, rgba(255,255,255,0.1));">
       <div style="font-weight:600; color:var(--fg, #fff);">${esc(g.keep.title)} <span style="font-weight:normal; opacity:0.7;">— ${esc(g.keep.artist)}</span></div>
-      <div style="font-size:11px; color:#4ade80; margin-top:2px;">✔ Keeping: ${isStreamTrack(g.keep) ? "Online stream" : esc(baseName(localFileFor(g.keep.path) || g.keep.path))}</div>
+      <div style="font-size:11px; color:#4ade80; margin-top:2px;">${IC.check} Keeping: ${isStreamTrack(g.keep) ? "Online stream" : esc(baseName(localFileFor(g.keep.path) || g.keep.path))}</div>
       ${g.duplicates.map(d => `
-        <div style="font-size:11px; color:#f87171; margin-top:2px;">✖ Removing: ${isStreamTrack(d) ? "Online stream" : esc(baseName(localFileFor(d.path) || d.path))}</div>
+        <div style="font-size:11px; color:#f87171; margin-top:2px;">${IC.slash} Removing: ${isStreamTrack(d) ? "Online stream" : esc(baseName(localFileFor(d.path) || d.path))}</div>
       `).join("")}
     </div>
   `).join("");
@@ -3962,6 +4037,20 @@ async function schedulePreload() {
   }
   else { preIndex = -1; expectedQueued = 1; }
 }
+// Sink silently emptied while paused (rodio keeps background-buffering a paused
+// http stream until the queue drains) → resume() replays NOTHING, no error. If
+// the resumed sink is already finished, hard-restart the track at the frozen
+// position instead: the fresh play re-resolves the stream URL (the usual cause
+// of the drain is an expired googlevideo link).
+async function resumeWithRetry() {
+  const st = await invoke("status");
+  if (st && (st.epoch || 0) === curEpoch && st.finished) {
+    const pos = wallPos();
+    _skipCommit = true; // a resume, not a finished listen — keep its partial play time
+    await hardPlay(curIndex);
+    if (pos > 1) { try { await invoke("seek", { secs: pos }); wallSeek(pos); } catch {} }
+  }
+}
 async function togglePlay() {
   if (curIndex < 0 && view.length) return playFrom(0);
   if (_needsStart && !playing) {
@@ -3983,7 +4072,7 @@ async function togglePlay() {
       if (st && (st.epoch || 0) === curEpoch && st.position > 0 && Math.abs(st.position - wallPos()) > 0.4) { wallSeek(st.position); renderSeek(st.position); }
     } catch {}
   }
-  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); }
+  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); resumeWithRetry(); }
   updatePlayingRow(); mediaPlayback();
 }
 async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); return; } history.push(curIndex); await hardPlay(j); }
@@ -4000,8 +4089,11 @@ async function prev() {
 let _lastTimeTxt = "", _lastSeekVal = -1;
 function renderSeek(p) {
   const el = $("#seek");
-  el.value = p;
   const max = Number(el.max) || 1;
+  // Never let a runaway wall clock show "345:12" for a 2:57 track: clamp the
+  // displayed position to the track's real duration (ticks also advance it).
+  if (curIndex >= 0 && max > 1) p = Math.min(p, max);
+  el.value = p;
   el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
   const txt = fmtDur(p);
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
@@ -4176,6 +4268,15 @@ function applyUiPrefs() {
   $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
   document.body.classList.toggle("np-docked", !!s.npDocked);
   $("#npPin").classList.toggle("active", !!s.npDocked);
+  applyListCols();
+}
+
+// Track-list column visibility ("Album" / duration) — a body class hides the
+// column everywhere at once (header + every row), driven purely by settings.
+function applyListCols() {
+  const s = S();
+  document.body.classList.toggle("col-no-album", !s.colAlbum);
+  document.body.classList.toggle("col-no-dur", !s.colDur);
 }
 
 // ─── Now Playing panel: big artwork + track info + up-next queue ───
@@ -4443,13 +4544,30 @@ function rpcStop() { _rpcClearTimers(); clearRPC(); }
 
 // ─── Library (persisted) ───
 async function saveLibrary() {
-  // Last-line guard: never persist two entries for the same path, whatever
-  // code path inserted them (keep the first = richest after enrich).
+  // Last-line guard: never persist two rows for the SAME SONG, whatever path code
+  // inserted them. Identity is musical (trackKey), not path-string — so a
+  // "yt:<id>" + its local mp3 (with or without [id]) collapse to ONE entry.
   if (library.length) {
-    const m = new Map();
-    for (const t of library) if (!m.has(t.path)) m.set(t.path, t);
-    if (m.size !== library.length) { console.warn(`[library] dropped ${library.length - m.size} duplicate entries`); library = [...m.values()]; }
+    const seenPath = new Set(); const byKey = new Map(); let dup = 0;
+    for (const t of library) {
+      if (seenPath.has(t.path)) { dup++; continue; } seenPath.add(t.path); // same exact path: drop
+      const k = trackKey(t);
+      if (!k) { byKey.set(Symbol(), t); continue; } // unkeyable: keep as-is
+      const prev = byKey.get(k);
+      if (!prev) { byKey.set(k, t); continue; }
+      dup++;
+      const winner = trackRichness(t) >= trackRichness(prev) ? t : prev; // richer/local wins
+      if (winner !== prev) byKey.set(k, t);
+      // Keep the winner's richer metadata (the loser may hold the local file).
+    }
+    if (dup) {
+      console.warn(`[library] merged ${dup} duplicate song entries (by identity, not path)`);
+      const paths = new Set(); const out = [];
+      for (const t of byKey.values()) if (!paths.has(t.path)) { paths.add(t.path); out.push(t); }
+      library = out;
+    }
   }
+  _localIdx.built = false; // library changed → drop the videoId→paths index
   enrichLibrary();
   await storeSave("library", JSON.stringify({ folders, tracks: library }));
 }
@@ -4781,6 +4899,12 @@ function openSettings() {
           <option value="never"${s.iconOnly === "never" ? " selected" : ""}>Always show labels</option>
         </select></div>
       <div class="set-row"><label>Playlist names in the sidebar</label><input type="checkbox" id="setPlNames" ${s.hidePlNames ? "" : "checked"}></div>
+      <div class="set-row"><label>Album column</label><input type="checkbox" id="setColAlbum" ${s.colAlbum !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Duration column</label><input type="checkbox" id="setColDur" ${s.colDur !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Default sort</label>
+        <select id="setDefSort" class="sel sm-sel wide">
+          ${["default","title","title-desc","artist","album","dur","dur-desc"].map(m => `<option value="${m}"${s.sortMode === m ? " selected" : ""}>${m === "default" ? "Smart (current order)" : m.replace("-", " (") + (m.includes("-") ? ")" : "")}</option>`).join("")}
+        </select></div>
       <div class="set-hint">Adaptive keeps the labels while they fit and falls back to icons when the panel gets narrow — each button keeps its tooltip either way.</div>
       <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the dock button in the “Now playing” panel docks it as a side column.</div>
     </div>
@@ -4818,10 +4942,10 @@ function openSettings() {
         </span></div>
       <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>`}
       ${IS_ANDROID
-        ? `<div class="set-hint">⚠️ <b>Account risk:</b> using your logged-in YouTube session for downloads is more traceable and often makes YouTube <b>block</b> extraction. The built-in engine works without it — browser cookies are a desktop-only option, so they're disabled here.</div>`
+        ? `<div class="set-hint">${ic(IC.alert)} <b>Account risk:</b> using your logged-in YouTube session for downloads is more traceable and often makes YouTube <b>block</b> extraction. The built-in engine works without it — browser cookies are a desktop-only option, so they're disabled here.</div>`
         : `<div class="set-row"><label>Cookies from browser</label>
         <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
-      <div class="set-hint">⚠️ A logged-in YouTube session often gets blocked (“format not available”) and is more traceable on your account — keep <b>None</b> unless you need age/member-restricted content. Failed calls retry without cookies automatically.</div>`}
+      <div class="set-hint">${ic(IC.alert)} A logged-in YouTube session often gets blocked (“format not available”) and is more traceable on your account — keep <b>None</b> unless you need age/member-restricted content. Failed calls retry without cookies automatically.</div>`}
       <div class="set-row"><label>Search results</label>
         <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row"><label>Show videos in search</label><input type="checkbox" id="setIncVid" ${s.ytIncludeVideos !== false ? "checked" : ""}></div>
@@ -5064,6 +5188,9 @@ function openSettings() {
   $("#setIconOnly")?.addEventListener("change", e => { SETTINGS.setSetting("iconOnly", e.target.value); applyIconOnly(); });
   // Checked = names visible, so the stored flag is the inverse of the box.
   $("#setPlNames")?.addEventListener("change", e => { SETTINGS.setSetting("hidePlNames", !e.target.checked); document.body.classList.toggle("pl-no-names", !e.target.checked); });
+  $("#setColAlbum")?.addEventListener("change", e => { SETTINGS.setSetting("colAlbum", e.target.checked); applyListCols(); refreshView(); });
+  $("#setColDur")?.addEventListener("change", e => { SETTINGS.setSetting("colDur", e.target.checked); applyListCols(); refreshView(); });
+  $("#setDefSort")?.addEventListener("change", e => { sortMode = e.target.value; SETTINGS.setSetting("sortMode", sortMode); const sel = $("#sortSel"); if (sel) sel.value = sortMode; refreshView(); });
   $("#setTopPad").addEventListener("input", e => { SETTINGS.setSetting("topbarPad", Number(e.target.value)); document.documentElement.style.setProperty("--topbar-pad", `${e.target.value}px`); });
   $("#setThumbSize").addEventListener("input", e => { SETTINGS.setSetting("thumbSize", Number(e.target.value)); document.documentElement.style.setProperty("--thumb-size", `${e.target.value}px`); });
   $("#setThumbImg").addEventListener("change", e => { SETTINGS.setSetting("sliderImage", e.target.value.trim()); applyThumbImage(S()); });
@@ -5128,6 +5255,25 @@ async function loadFollows() {
 }
 function saveFollows() { storeSave("follows", JSON.stringify(follows)); }
 function followFor(playlistId) { return follows.find(f => f.playlistId === playlistId && f.enabled !== false); }
+
+// The playlist may point at the LOCAL file while the upstream track is "yt:id" —
+// once downloaded, replacePath swaps yt: → D:\music\…[id].mp3, so a raw
+// paths.has("yt:id") misses it. Match by videoId against every local entry.
+function findInPlaylistLocal(pl, id) {
+  if (!pl || !id) return null;
+  const tag = `[${id}]`;
+  for (const p of pl.paths) {
+    if (isOnline(p)) { if (ytId(p) === id) return p; continue; }
+    if (String(p).includes(tag) || videoIdOf(p) === id) return p;
+  }
+  return null;
+}
+function localPathsHas(pl, ytPath) {
+  if (!pl) return false;
+  if (pl.paths.includes(ytPath)) return true;
+  return !!findInPlaylistLocal(pl, ytId(ytPath));
+}
+
 function addFollow({ url, title, playlistId, autoDownload, knownIds }) {
   const dup = follows.find(f => f.url === url);
   if (dup) { // re-following the same URL updates the existing follow
@@ -5149,8 +5295,13 @@ async function checkFollow(f, manual = false) {
   const known = new Set(f.knownIds || []);
   const brandNew = tracks.filter(t => !known.has(ytId(t.path)));
   const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
-  const localPaths = pl ? new Set(pl.paths) : new Set();
-  const missing = tracks.filter(t => known.has(ytId(t.path)) && !localPaths.has(t.path));
+  // A known track is "missing" only if we really don't have it: its local copy
+  // replaces its yt: path in the playlist on download, so a raw path check would
+  // flag EVERY downloaded follow as missing → autoDownload re-downloaded the
+  // whole playlist on every launch. Test the actual local file / live queue too.
+  const inQueue = new Set(dlQueue.filter(d => d.status === "done" || d.status === "queued" || d.status === "active").map(d => ytId(d.path)));
+  const hasLocal = id => !!(findInPlaylistLocal(pl, id) || libraryLocalFor(id) || inQueue.has(id));
+  const missing = tracks.filter(t => known.has(ytId(t.path)) && !localPathsHas(pl, t.path) && !hasLocal(ytId(t.path)));
   const fresh = [...brandNew, ...missing];
   f.knownIds = [...new Set([...(f.knownIds || []), ...tracks.map(t => ytId(t.path))])];
   if (!fresh.length) { if (manual) flash(`“${f.title}” — no new tracks`); return 0; }

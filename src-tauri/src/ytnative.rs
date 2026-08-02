@@ -463,24 +463,6 @@ fn parse_hms(s: &str) -> Option<u64> {
     }
 }
 
-fn best_stream_url(player: &rustypipe::model::VideoPlayer) -> Result<String, String> {
-    if let Some(s) = player
-        .audio_streams
-        .iter()
-        .filter(|s| s.mime.to_lowercase().contains("mp4"))
-        .max_by_key(|s| s.bitrate)
-    {
-        return Ok(s.url.clone());
-    }
-    player
-        .video_streams
-        .iter()
-        .filter(|s| s.mime.to_lowercase().contains("mp4"))
-        .min_by_key(|s| s.bitrate)
-        .map(|s| s.url.clone())
-        .ok_or_else(|| "no AAC/mp4 stream available for this video".into())
-}
-
 // ─── ANDROID_VR stream resolution ───────────────────────────────────────────
 // As of 2025+, YouTube gates stream URLs behind PO tokens (BotGuard) and JS
 // signature descrambling for every client rustypipe supports (Desktop/Ios/Tv →
@@ -699,31 +681,6 @@ pub async fn download(
     // the online index by the frontend).
     let _ = write_tags(&path, &title, &artist, id);
     Ok(path)
-}
-
-/// Pick the download URL for a player + quality ("best" → highest-bitrate m4a;
-/// a kbps cap → the m4a closest to and preferably ≤ the target).
-fn pick_download_url(player: &rustypipe::model::VideoPlayer, quality: &str) -> Result<String, String> {
-    if quality == "best" || quality.is_empty() {
-        return stream_url_of(player);
-    }
-    let target = quality.parse::<u32>().unwrap_or(0) * 1000;
-    let m4a: Vec<_> = player.audio_streams.iter().filter(|s| s.mime.to_lowercase().contains("mp4")).collect();
-    if m4a.is_empty() {
-        return stream_url_of(player);
-    }
-    let under = m4a.iter().filter(|s| s.bitrate <= target).max_by_key(|s| s.bitrate);
-    Ok(under.or_else(|| m4a.iter().min_by_key(|s| s.bitrate)).unwrap().url.clone())
-}
-
-fn stream_url_of(player: &rustypipe::model::VideoPlayer) -> Result<String, String> {
-    player
-        .audio_streams
-        .iter()
-        .filter(|s| s.mime.to_lowercase().contains("mp4"))
-        .max_by_key(|s| s.bitrate)
-        .map(|s| s.url.clone())
-        .ok_or_else(|| "no AAC/m4a audio stream available".into())
 }
 
 fn write_tags(path: &str, title: &str, artist: &str, id: &str) -> Result<(), String> {
