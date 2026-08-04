@@ -394,7 +394,19 @@ body.has-bg .top-drop {
   position: relative; height: 118px; border-radius: 9px; overflow: hidden;
   /* Faint music-note placeholder until the cover lands (inline
      background-image overrides the image layer, keeping the color). */
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a4a5c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E") center / 34px no-repeat var(--bg-3);
+  background: var(--bg-3);
+  /* Painted through a mask rather than baked into the data: URI. The colour was
+     hard-coded #4a4a5c, so this note stayed dark-theme grey when the light
+     wallpaper theme flipped everything else. As a stencil it takes currentColor
+     like every other icon. */
+  position: relative;
+}
+.yc-thumb::after {
+  content: ""; position: absolute; inset: 0;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E") center / 34px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E") center / 34px no-repeat;
+  opacity: .55; pointer-events: none;
 }
 .yc-thumb[style*="background-image"] { background-size: cover; }
 /* NO aspect-ratio here, not even behind @supports: WebKitGTK (desktop) and
@@ -621,9 +633,14 @@ body.has-bg .modal { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 
    rectangle — the rest of the app stays sharp. The full-screen backdrop only dims
    very slightly for focus; it must NOT blur, or the whole background goes soft. */
 body.has-bg .modal-backdrop { background: rgba(0, 0, 0, .18); }
+/* Now Playing is NOT in this list on purpose.
+   It carries the same panel tint as the sidebar and the player, but it also sat
+   here — so it blurred a wallpaper that the layer behind it had already blurred
+   statically. Two blurs stacked, and the panel read as noticeably foggier than
+   everything around it at the same opacity setting. One tint, driven by the
+   Panel opacity slider, is what makes it match. */
 body.has-bg .modal,
 body.has-bg .dl-drawer,
-body.has-bg .np-drawer,
 body.has-bg .ctx-menu {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -1346,3 +1363,14 @@ body.col-no-dur .track > .dur,
 body.col-no-dur .list-head > .lh-dur { display: none; }
 body.col-no-dur .track, body.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) minmax(0, 1.4fr) 28px; }
 body.col-no-album.col-no-dur .track, body.col-no-album.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 28px; }
+
+/* The select chevron is a data: URI, and a data: URI is its own document —
+   currentColor means nothing inside it, so the stroke has to be literal. It is
+   set to #a6a9b8, which is exactly --tx-2, so it matches the muted text it sits
+   beside on the dark theme and needs no help there.
+   Over a light wallpaper --tx-2 flips dark and the chevron stayed pale, the one
+   control that ignored the theme. Same file, one darker stroke. */
+body.bg-light select,
+body.bg-light .select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%233a3d4a' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
