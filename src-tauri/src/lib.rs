@@ -877,6 +877,7 @@ pub fn run() {
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
             play_stream, preload_stream, prefetch_stream, play_direct, preload_direct,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
+            youtube::yt_recommendations,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,
             youtube::yt_channel, youtube::yt_channel_videos,
             youtube::yt_channel_playlists, youtube::yt_channel_all,

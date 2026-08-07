@@ -78,6 +78,7 @@ const DEFAULTS = {
   npDocked: false,       // Up-next panel docked as a side column
   uiNpOpen: false,       // Up-next panel open (restored at launch)
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge
+  recoEnabled: true,     // Show a "For you" recommendation rail on the library home page
   npW: 330,              // Now-playing panel width (px) — drag its left edge
   ytView: "grid",        // YouTube results on desktop: grid (mini-YouTube cards) | list
   ytViewTouch: "list",   // YouTube results on phones/touch: rows read better + 40px covers
@@ -86,6 +87,7 @@ const DEFAULTS = {
   playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)
   downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
   dlConcurrency: 3,      // simultaneous invoke("yt_download") calls the queue pump runs (1-4)
+  shuffleSearchOnly: true, // when search filtered the view, shuffle stays inside the hits (default: true)
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
   gdriveClientId: "",    // user's Google OAuth Client ID (Desktop app)

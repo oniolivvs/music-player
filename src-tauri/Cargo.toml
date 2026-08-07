@@ -55,8 +55,18 @@ rustypipe = { version = "0.11", default-features = false, features = ["rustls-tl
 # addresses rotate → 403). Matches the reqwest version rustypipe pulls (0.12).
 reqwest = { version = "0.12", default-features = false }
 
-# MPRIS/SMTC media controls (src/mpris.rs). Linux: the pure-Rust zbus backend
-# (no libdbus). Windows/other: souvlaki's default (SMTC) backend.
+# OS media controls (src/mpris.rs) — the current track + the OS's media keys.
+#   - Linux: MPRIS over the pure-Rust zbus backend (no libdbus needed).
+#   - Windows: the SMTC backend, which is exactly what the volume-OSD flyout and
+#     Bluetooth/USB headset transport buttons use — i.e. what makes Music Player
+#     show up in "Now playing" and react to the headset's stop/pause/skip.
+#   - macOS: MPNowPlayingInfoCenter via souvlaki's default backend.
+# The Windows dep lives in its own target section because souvlaki's SMTC
+# backend needs no feature flags, whereas Linux needs the explicit `use_zbus`
+# one — so they must be declared separately.
+[target.'cfg(target_os = "windows")'.dependencies]
+souvlaki = { version = "0.8", default-features = false }
+
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
 

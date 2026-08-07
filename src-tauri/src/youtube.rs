@@ -551,6 +551,46 @@ fn flat_extract(cfg: &YtCfg, target: &str) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+/// Impulse-response recommendations: given what you've been listening to, we
+/// put together a sensible YouTube seed and let yt-dlp do a search. The browser
+/// cookies (same setting as downloads) mean the results are traffic-signed to
+/// your Google account, so suggestions are the same ones YouTube shows you
+/// when you're signed in on the web.
+///   Frontend sends the distinct artist/title of the last few distinct plays
+///   (dedup), and we return a merged, deduped deduplicated track list.
+#[tauri::command]
+pub async fn yt_recommendations(
+    cfg: State<'_, YtCfg>,
+    seeds: Vec<String>,
+) -> Result<Vec<OnlineTrack>, String> {
+    let seeds: Vec<String> = seeds
+        .into_iter()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| s.chars().count() >= 2)
+        .take(3)
+        .collect();
+    if seeds.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Merge several `ytsearch` calls so we get a good mix, then drop anything
+    // we already saw or that is a duplicate of another recommendation.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for s in &seeds {
+        let tab = format!("ytsearch15:{s}");
+        if let Ok(entries) = flat_extract(&cfg, &tab) {
+            for v in entries {
+                if let Some(t) = track_from_json(&v) {
+                    if seen.insert(t.id.clone()) {
+                        out.push(t);
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn yt_search(
     cfg: State<'_, YtCfg>,

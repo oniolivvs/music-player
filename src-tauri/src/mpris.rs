@@ -1,21 +1,32 @@
-//! Desktop media integration — MPRIS over D-Bus on Linux (via souvlaki, pure-Rust
-//! zbus backend, so no libdbus needed inside a container). This is what makes
-//! KDE/GNOME media widgets, playerctl and media keys see the current track.
+//! Desktop media integration.
+//! - **Linux** : MPRIS over D-Bus (KDE/GNOME widgets, playerctl).
+//! - **Windows** : SMTC — the OS media flyout, the volume OSD and, crucially,
+//!   headset media keys (play/pause/skip sent over Bluetooth/USB) all go through
+//!   it. Without this module being a no-op on Windows, Music Player never showed
+//!   up and the headset buttons did nothing on it.
+//! - **macOS** : MPNowPlayingInfoCenter (souvlaki's backend).
 //! Commands push state from the frontend; widget/media-key actions come back as
 //! "media" Tauri events the frontend listens to.
+//!
+//! souvlaki's MPRIS backend is only compiled on Linux (the `use_zbus` feature is
+//! declared there); on Windows souvlaki is pulled with NO platform feature, so
+//! it builds its native SMTC backend — exactly what the OS flyout and headsets
+//! use. We never import the raw `souvlaki::platform` path from here; the whole
+//! crate re-exports `MediaControls` at the root, which keeps this file portable
+//! across all desktop OSes.
 
-#![allow(unused_variables, dead_code, unused_imports)]
-
-#[cfg(all(unix, not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
     SeekDirection,
 };
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
-#[cfg(any(not(unix), target_os = "android"))]
+// Stub on Android (souvlaki's SMTC Windows backend needs HWND, MPRIS needs D-Bus
+// — both are meaningless on Android, where Tauri routes via the webview anyway).
+#[cfg(target_os = "android")]
 pub struct MediaControls;
 
 #[derive(Default)]
@@ -24,15 +35,21 @@ pub struct MediaState(pub Mutex<Option<MediaControls>>);
 /// Called once at app setup so the player shows up in desktop media widgets
 /// immediately; also serves as a lazy fallback from the commands below.
 pub fn init(app: &AppHandle, state: &MediaState) -> Result<(), String> {
-    ensure(app, state)
+    // SMTC on Windows *requires* an HWND; on Linux it is unused and the MPRIS
+    // name drives everything. Grab the window once at setup so Windows works.
+    #[cfg(target_os = "windows")]
+    ensure_with_hwnd(app, state)?;
+    #[cfg(not(target_os = "windows"))]
+    ensure(app, state)?;
+    Ok(())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(target_os = "android")]
 fn ensure(_app: &AppHandle, _state: &MediaState) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(all(unix, not(target_os = "android")))]
+#[cfg(all(not(target_os = "android"), not(target_os = "windows")))]
 fn ensure(app: &AppHandle, state: &MediaState) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "media lock poisoned")?;
     if guard.is_some() {
@@ -44,6 +61,45 @@ fn ensure(app: &AppHandle, state: &MediaState) -> Result<(), String> {
         hwnd: None,
     };
     let mut controls = MediaControls::new(config).map_err(|e| format!("{e:?}"))?;
+    attach(app, &mut controls)?;
+    *guard = Some(controls);
+    Ok(())
+}
+
+/// Windows path: souvlaki's SMTC backend dies inside `MediaControls::new` without
+/// a window handle, so we must resolve the main Tauri WebviewWindow first. All of
+/// this lives behind `cfg(target_os = "windows")` so the Linux/macOS build above
+/// stays completely untouched.
+#[cfg(target_os = "windows")]
+fn ensure_with_hwnd(app: &AppHandle, state: &MediaState) -> Result<(), String> {
+    let mut guard = state.0.lock().map_err(|_| "media lock poisoned")?;
+    if guard.is_some() {
+        return Ok(());
+    }
+    let hwnd = fetch_hwnd(app).ok_or("SMTC: could not resolve main window HWND")?;
+    let config = PlatformConfig {
+        dbus_name: "musicplayer",
+        display_name: "Music Player",
+        hwnd: Some(hwnd),
+    };
+    let mut controls = MediaControls::new(config).map_err(|e| format!("{e:?}"))?;
+    attach(app, &mut controls)?;
+    *guard = Some(controls);
+    Ok(())
+}
+
+/// Resolve the Tauri window's real Win32 HWND for souvlaki's SMTC backend.
+/// Returns the raw pointer souvlaki expects; `None` while the webview is still
+/// starting (the lazy `ensure` below re-tries on the next track, so a cold start
+/// that races the webview just delays SMTC by one metadata push).
+#[cfg(target_os = "windows")]
+fn fetch_hwnd(app: &AppHandle) -> Option<*mut std::ffi::c_void> {
+    let win = app.get_webview_window("main")?;
+    win.hwnd().ok().map(|h| h.0 as *mut std::ffi::c_void)
+}
+
+#[cfg(not(target_os = "android"))]
+fn attach(app: &AppHandle, controls: &mut MediaControls) -> Result<(), String> {
     let handle = app.clone();
     controls
         .attach(move |event| {
@@ -73,7 +129,6 @@ fn ensure(app: &AppHandle, state: &MediaState) -> Result<(), String> {
             let _ = handle.emit("media", msg);
         })
         .map_err(|e| format!("{e:?}"))?;
-    *guard = Some(controls);
     Ok(())
 }
 
@@ -87,17 +142,19 @@ pub fn media_update(
     art: String,
     duration_secs: f64,
 ) -> Result<(), String> {
-    ensure(&app, &state)?;
-    #[cfg(all(unix, not(target_os = "android")))]
-    if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
-        c.set_metadata(MediaMetadata {
-            title: Some(&title),
-            artist: Some(&artist),
-            album: Some(&album),
-            cover_url: if art.is_empty() { None } else { Some(&art) },
-            duration: (duration_secs > 0.0).then(|| Duration::from_secs_f64(duration_secs)),
-        })
-        .map_err(|e| format!("{e:?}"))?;
+    #[cfg(not(target_os = "android"))]
+    {
+        init(&app, &state)?;
+        if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
+            c.set_metadata(MediaMetadata {
+                title: Some(&title),
+                artist: Some(&artist),
+                album: Some(&album),
+                cover_url: if art.is_empty() { None } else { Some(&art) },
+                duration: (duration_secs > 0.0).then(|| Duration::from_secs_f64(duration_secs)),
+            })
+            .map_err(|e| format!("{e:?}"))?;
+        }
     }
     Ok(())
 }
@@ -109,16 +166,18 @@ pub fn media_playback(
     playing: bool,
     position_secs: f64,
 ) -> Result<(), String> {
-    ensure(&app, &state)?;
-    #[cfg(all(unix, not(target_os = "android")))]
-    if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
-        let progress = Some(MediaPosition(Duration::from_secs_f64(position_secs.max(0.0))));
-        let pb = if playing {
-            MediaPlayback::Playing { progress }
-        } else {
-            MediaPlayback::Paused { progress }
-        };
-        c.set_playback(pb).map_err(|e| format!("{e:?}"))?;
+    #[cfg(not(target_os = "android"))]
+    {
+        init(&app, &state)?;
+        if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
+            let progress = Some(MediaPosition(Duration::from_secs_f64(position_secs.max(0.0))));
+            let pb = if playing {
+                MediaPlayback::Playing { progress }
+            } else {
+                MediaPlayback::Paused { progress }
+            };
+            c.set_playback(pb).map_err(|e| format!("{e:?}"))?;
+        }
     }
     Ok(())
 }

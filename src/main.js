@@ -869,6 +869,12 @@ function showStats() {
     actions: s.total ? `<button id="stReset" class="btn-line sm">${ic(IC.undo)} Reset stats</button>` : "",
   });
   showListChrome(false);
+  // Belt + suspenders: this writes straight into the virtualized #trackList.
+  // If _virt is still set from the previous list view, the persistent scroll
+  // listener runs _virtSlice() on the flat stats markup and wipes it — which is
+  // exactly the "stats panel vanishes as soon as you scroll" bug. renderTracks()
+  // (history / library / playlist) resets _virt; be explicit here too.
+  _virt = null;
   const host = $("#trackList");
   host.classList.remove("yt-grid");
 
@@ -1406,7 +1412,7 @@ function wireTrackList() {
   wireReorder(host);
   host.addEventListener("click", (e) => {
     const playBtn = e.target.closest("[data-play]");
-    if (playBtn) { e.stopPropagation(); playFrom(Number(playBtn.dataset.play)); return; }
+    if (playBtn) { e.stopPropagation(); playInScope(Number(playBtn.dataset.play)); return; }
     const more = e.target.closest("[data-more]");
     if (more) {
       e.stopPropagation();
@@ -1419,14 +1425,14 @@ function wireTrackList() {
     const row = e.target.closest(".track");
     if (row) {
       // Touch: tap plays immediately; long-press opens the context menu (below).
-      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playFrom(Number(row.dataset.idx)); return; }
+      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playInScope(Number(row.dataset.idx)); return; }
       rowClick(e, Number(row.dataset.idx), row.dataset.path);
     }
   });
   host.addEventListener("dblclick", (e) => {
     if (e.target.closest("[data-more]")) return;
     const row = e.target.closest(".track");
-    if (row) playFrom(Number(row.dataset.idx));
+    if (row) playInScope(Number(row.dataset.idx));
   });
   host.addEventListener("contextmenu", (e) => {
     const row = e.target.closest(".track");
@@ -1520,7 +1526,7 @@ function _schedulePrune() {
     const before = library.length;
     library = library.filter(x => !dead.has(x.path));
     if (library.length !== before) saveLibrary();
-    if (["library", "playlist", "online", "history"].includes(active.type)) refreshView(); // ONE redraw for the whole burst
+    if (["library", "playlist", "online", "history", "stats"].includes(active.type)) refreshView(); // ONE redraw for the whole burst
   }, 250);
 }
 // Bounded probe pool: hundreds of fs_exists at launch saturated Tauri IPC and
@@ -1654,7 +1660,7 @@ function openContextMenu(x, y) {
     `<div class="ctx-item" data-add="__new">${ic(IC.plus)}New playlist…</div>`;
   placeCtx(menu, x, y);
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
-  menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
+  menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playInScope(i); closeCtx(); });
   menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
   menu.querySelector("[data-block]")?.addEventListener("click", (e) => {
     const on = e.currentTarget.dataset.block === "on";
@@ -2716,7 +2722,9 @@ async function shareSaveRemote(t) {
   try {
     const file = await invoke("share_download", { url: t._remoteUrl, dir: S().downloadDir || "", name, id: vid || t.path });
     const dir = file.slice(0, file.lastIndexOf("/"));
-    if (!folders.includes(dir)) folders.push(dir);
+    // Do NOT silently add the destination folder to Sources — a download should
+    // never twist the library's settings. The track list is refreshed by the
+    // rescan regardless; whether the folder sticks around is the user's choice.
     await rescanFolder(dir);
     taskEnd(tid, { detail: "saved", ttl: 4000 });
   } catch (e) { taskEnd(tid, { status: "error", detail: String(e) }); }
@@ -3509,7 +3517,9 @@ async function dlPump() {
   await Promise.all(Array.from({ length: MAX_DL_WORKERS }, runner));
 
   if (dir) {
-    if (!folders.includes(dir)) folders.push(dir);
+    // No silent sources: downloading to a folder should never push it onto the
+    // Sources list on its own. The rescan is required (otherwise the song has
+    // no tags in the library), but the setting belongs in the sidebar.
     await rescanFolder(dir); // picks up the new files with proper tags
   }
   await saveOnline();
@@ -3696,6 +3706,71 @@ function showLibrary() {
   $("#libDlBtn")?.addEventListener("click", downloadLibraryOnline);
   $("#libDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("library"));
   renderTracks(library);
+  renderRecoRail(); // async, fills itself in above the list when ready
+}
+
+// ─── "For you" rail on the library home ───
+// YouTube has no public "personalized feed" endpoint an external app can call,
+// so we do the honest version: seed yt-dlp searches with YOUR recent listening
+// (titles + artists of the last tracks played / most played) — with your
+// browser cookies attached, so the results rank the way YouTube ranks for you.
+// Rendered as a horizontal card rail pinned above the track list. Fails silent
+// (no rail) when there's nothing to seed from or the network is down.
+let _recoState = { day: "", loaded: false, tracks: [] };
+async function renderRecoRail() {
+  $("#recoRail")?.remove();
+  if (!IS_NATIVE || !S().recoEnabled) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (_recoState.day === today && _recoState.loaded) { _paintReco(_recoState.tracks); return; }
+  // Seeds: last 3 distinct "artist - title" from history, fallback top played.
+  let seeds = [];
+  for (const h of history2) {
+    const t = trackByPath(h.path) || h;
+    const s = `${t.artist} ${t.title}`.trim();
+    if (s && !seeds.includes(s)) seeds.push(s);
+    if (seeds.length >= 3) break;
+  }
+  if (!seeds.length) {
+    const agg = [...statsAggWorldwide()].slice(0, 3); // fall through to plays
+    seeds = agg;
+  }
+  if (!seeds.length) return;
+  try {
+    const tracks = await invoke("yt_recommendations", { seeds });
+    _recoState = { day: today, loaded: true, tracks: tracks || [] };
+    if (active.type === "library") _paintReco(_recoState.tracks);
+  } catch (e) { /* silent — recommendations are a bonus, never an error */ }
+}
+// Top played as recommendation seeds when history is empty.
+function statsAggWorldwide() {
+  const s = statsAgg();
+  return [...s.rows].sort((a, b) => b.n - a.n).slice(0, 3).map(r => `${r.artist || ""} ${r.title || ""}`.trim()).filter(Boolean);
+}
+function _paintReco(tracks) {
+  const listHost = $("#trackList");
+  if (!listHost || !tracks?.length) return;
+  $("#recoRail")?.remove();
+  const rail = document.createElement("div");
+  rail.id = "recoRail";
+  rail.className = "reco-rail";
+  rail.innerHTML = `<div class="reco-head"><span class="reco-title">${IC.sparkle || "✨"} For you</span><span class="reco-sub">from your listening</span>
+    <button class="btn-line sm reco-refresh" title="Refresh recommendations">${ic(IC.refresh)} Refresh</button></div>
+    <div class="reco-row">` + tracks.slice(0, 20).map((t, i) => `
+      <div class="reco-card" data-ri="${i}" title="${esc(t.title)}">
+        <div class="reco-thumb" style="background-image:url('${esc(t.thumbnail)}')"></div>
+        <div class="reco-t">${esc(t.title)}</div>
+        <div class="reco-a">${esc(t.artist)}</div>
+      </div>`).join("") + `</div>`;
+  listHost.parentElement.insertBefore(rail, listHost);
+  rail.querySelector(".reco-refresh")?.addEventListener("click", () => { _recoState.loaded = false; renderRecoRail(); });
+  rail.querySelectorAll(".reco-card").forEach(el => el.addEventListener("click", async () => {
+    const t = tracks[Number(el.dataset.ri)];
+    if (!t) return;
+    onlineIndex.set(t.path || `yt:${t.id}`, t);
+    queue = [t.path || `yt:${t.id}`];
+    history = [];
+    await hardPlay(0);
+  }));
 }
 
 // "Add from URL" for the library. Mirrors addByUrl(), but the destination is
@@ -3948,6 +4023,43 @@ function updateNowPlaying(t, path) {
   // playback start (hardPlay / gapless advance) with an explicit position of 0.
 }
 async function playFrom(viewIdx) { _drainSkips = 0; queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
+// New: when the view came from a search against a playlist/folder AND the user
+// picked a hit AND shuffle is NOT restricted to the search, we widen the queue
+// to the whole scope. Detection is *semantic*, not via a hidden marker:
+// we recompute the unfiltered scope right here (same rule as the search input
+// listener, single source of truth) and compare lengths.
+async function playInScope(viewIdx) {
+  _drainSkips = 0;
+  const q = ($("#search")?.value || "").trim();
+  if (!q || S().shuffleSearchOnly) { await playFrom(viewIdx); return; }
+  // Same scope computation as the #search listener: playlist → playlist paths,
+  // source → folder contents, library → library itself.
+  let scopeList = library;
+  if (active.type === "playlist") {
+    const pl = PL.getPlaylists().find(p => p.id === active.id);
+    if (pl) {
+      const by = new Map(library.map(t => [t.path, t]));
+      scopeList = pl.paths.map(p => by.get(p) || ensureOnlineTrack(p)).filter(Boolean);
+    }
+  } else if (active.type === "source") {
+    scopeList = library.filter(t => inFolder(t, active.id));
+  }
+  // The view is a filtered subset iff it differs in length from the full scope.
+  if (scopeList.length > view.length) {
+    const first = view[viewIdx];
+    if (first) {
+      const wanted = first.path;
+      queue = scopeList.map(t => t.path);
+      history = [];
+      const at = queue.indexOf(wanted);
+      if (at > 0) { queue.splice(at, 1); queue.unshift(wanted); }
+      if (shuffle) buildShuffle(0);
+      await hardPlay(0);
+      return;
+    }
+  }
+  await playFrom(viewIdx);
+}
 // If an online track was downloaded (file named "… [<id>].mp3"), play the local
 // file instead of streaming from YouTube (Settings → "Prefer local file").
 function effectivePath(path) {
@@ -4924,6 +5036,8 @@ function openSettings() {
       <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
       <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
       <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
+      <div class="set-row"><label>Shuffle stays inside search results</label><input type="checkbox" id="setShufSearch" ${s.shuffleSearchOnly ? "checked" : ""}></div>
+      <div class="set-hint">Picking a song from filtered results starts the whole playlist afterwards (default OFF). Tick this to keep the shuffle strictly inside the matches.</div>
       <div class="set-row"><label>Resume where I left off</label><input type="checkbox" id="setResume" ${s.resumePlayback ? "checked" : ""}></div>
       <div class="set-hint">On launch, reopen the last track paused at the spot you stopped — press play to continue.</div>
       <div class="set-row"><label>Keep a listening history <span class="set-sub">(0 = off · up to 1000)</span></label><input type="number" id="setHist" class="num-in" min="0" max="1000" step="10" value="${s.historyLimit ?? 50}"></div>
@@ -5122,6 +5236,7 @@ function openSettings() {
   $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
+  $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
   $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
   const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); if (!el) return; el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };

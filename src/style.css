@@ -244,6 +244,18 @@ body.compact-top .top-gear, body.compact-top .icon-btn { width: 26px; height: 26
 .search-wrap input:hover { border-color: var(--bd-2); }
 .search-wrap input:focus { background: var(--bg-2); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, .22); outline: none; }
 .search-wrap:focus-within .search-ico { opacity: 1; color: var(--accent); }
+/* Native search-field clear button is grey and generic. Give it the app's accent
+   so it matches the rest of the bar and reads as a real button, not a browser
+   leftover. (WebKit-specific pseudo-element; harmless in engines without it.) */
+.search-wrap input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px; cursor: pointer; opacity: .7;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='%238B5CF6'/%3E%3Cpath d='M8 8l8 8M16 8l-8 8' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: cover;
+  transition: opacity .12s, transform .1s;
+}
+.search-wrap input::-webkit-search-cancel-button:hover { opacity: 1; transform: scale(1.12); }
 body.compact-top .search-wrap input { border-radius: 9px; }
 .count { color: var(--tx-3); font-size: 12px; font-weight: 600; white-space: nowrap; }
 
@@ -613,7 +625,7 @@ body::before {
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
-/* Every surface — panels, drawers, menus AND modals — uses the same panel-alpha
+/* Every surface — panels, menus AND modals — uses the same panel-alpha
    tint, so the whole UI is uniformly see-through; the Panel opacity slider drives
    all of them at once and the dim slider makes it darker behind. The wallpaper
    layer is blurred ONCE (static) behind the panels, so those need no live blur.
@@ -1114,6 +1126,11 @@ select.sel.sm-sel.wide { width: 158px; }
 .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .st-wide { grid-column: 1 / -1; }
 .st-card { background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 12px; padding: 12px 14px 14px; min-width: 0; }
+/* Stats cards ride over the wallpaper: same translucency as every other surface
+   (driven by the Panel opacity slider, which already blends the base into the
+   rgba() tint), not the flat opaque --bg-2 they had by default. */
+body.has-bg .st-card { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+body.bg-light.has-bg .st-card { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
 .st-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx-3); margin-bottom: 8px; }
 .st-row {
   display: grid; grid-template-columns: 22px minmax(0, 1fr) 70px 52px 62px;
