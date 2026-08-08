@@ -553,7 +553,13 @@ fn install_apk(path: String) -> Result<(), String> {
         if path != "/storage/emulated/0/Android/data/com.oniolivvs.musicplayer/files/update.apk" {
             return Err("not the downloaded update APK".into());
         }
+        // UB garde: le contexte JNI n'est prêt qu'après l'initNdkContext de la
+        // MainActivity (onCreate → JNI). Un from_raw(null) est de l'UB natif,
+        // pas un Err — on vérifie avant d'appeler JNI.
         let ctx = ndk_context::android_context();
+        if ctx.vm().is_null() || ctx.context().is_null() {
+            return Err("android bridge not ready yet".into());
+        }
         let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
         let activity = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };

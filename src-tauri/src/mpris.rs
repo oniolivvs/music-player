@@ -44,6 +44,12 @@ pub fn init(app: &AppHandle, state: &MediaState) -> Result<(), String> {
     Ok(())
 }
 
+// Sous Android, Tauri 2 ne fournit ni plugin MediaSession (boutons casque,
+// notification média) ni Service en avant-plan. La lecture tient tant que le
+// process a la priorité CPU ; dès que l'écran s'éteint ou l'app tombe en
+// arrière-plan, Android peut la tuer. Un vrai fix passerait par un Foreground
+// Service Kotlin (PlayerService) + MediaSession branchés au JNI ; pour
+// l'instant on déclare au moins les permissions associées dans android.yml.
 #[cfg(target_os = "android")]
 fn ensure(_app: &AppHandle, _state: &MediaState) -> Result<(), String> {
     Ok(())

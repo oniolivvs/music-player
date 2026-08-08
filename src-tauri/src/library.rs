@@ -201,7 +201,16 @@ pub fn open_path(path: String) -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("cannot open file manager: {e}"));
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "android")]
+    {
+        // The system file manager has no CLI (no xdg-open/explorer on Android) —
+        // opening a folder needs an Intent bridge we don't carry; the JS hides
+        // the entry anyway (revealPath guard). Be honest instead of erroring on
+        // a missing binary.
+        let _ = target;
+        return Err("no file manager bridge on Android".into());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
     {
         if std::process::Command::new("xdg-open").arg(&target).spawn().is_ok() {
             return Ok(());

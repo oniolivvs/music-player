@@ -1635,7 +1635,7 @@ function openContextMenu(x, y) {
   menu.innerHTML =
     `<div class="ctx-item" data-play="1">${ic(IC.play)}Play</div>` +
     (nOnline ? `<div class="ctx-item" data-dl="1">${ic(IC.save)}Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
-    (paths.length === 1 && localFileFor(paths[0]) ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
+    (paths.length === 1 && localFileFor(paths[0]) && !IS_ANDROID ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
     // ── removal / deletion ──
     // An online track in the library has no local file to delete and no playlist
     // to leave, so without this there would be no way to get rid of one — and
@@ -1799,7 +1799,7 @@ function openPlaylistCtx(x, y, id) {
 
 // Open a folder (or a file's containing folder) in the host file manager.
 async function revealPath(path) {
-  if (!IS_NATIVE) { flash("Available only in the app"); return; }
+  if (!IS_NATIVE || IS_ANDROID) { flash("Available only on desktop"); return; }
   if (!path) return;
   try { await invoke("open_path", { path }); }
   catch (e) { flash(`Could not open location: ${e}`); }
@@ -5144,7 +5144,9 @@ function applySettings() {
   shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
   repeatMode = ["off", "all", "one"].includes(S().repeatDefault) ? S().repeatDefault : "off";
   updateRepeatBtn();
-  const v = S().defaultVolume; $("#volume").value = v; $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 });
+  // Sans PI usager : pas un if — .catch(() => {}) évite un rejet non trappé si
+  // le backend refuse le volume (device non prêt / init audio KO, surtout Android).
+  const v = S().defaultVolume; $("#volume").value = v; $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 }).catch(() => {});
 }
 // Version switcher / downgrade (Settings → System → Updates). Lists the version
 // commits from local git and, on Build, checks one out + rebuilds + restarts.
@@ -5200,7 +5202,7 @@ function openSettings() {
           <input type="color" id="setCustText" value="${s.customText}" title="Text">
         </span></div>
       <div class="set-row"><label>Corner radius</label><input type="range" id="setRadius" min="0" max="22" value="${s.radius}"></div>
-      <div class="set-row"><label>UI scale</label><input type="range" id="setScale" min="85" max="125" value="${s.uiScale}"></div>
+      <div class="set-row" ${IS_ANDROID ? "hidden" : ""}><label>UI scale</label><input type="range" id="setScale" min="85" max="125" value="${s.uiScale}"></div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
       <div class="set-row"><label>Custom accent <span class="set-sub">(normal · hover)</span></label>
@@ -5491,7 +5493,7 @@ function openSettings() {
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
   $("#setSmoothAmt").addEventListener("input", e => SETTINGS.setSetting("smoothStrength", Number(e.target.value)));
-  $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
+  $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }).catch(() => {}); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
   $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
@@ -6323,17 +6325,18 @@ async function init() {
   });
   let _volT = null;
   $("#volume").addEventListener("input", e => {
-    invoke("set_volume", { level: Number(e.target.value) / 100 });
+    invoke("set_volume", { level: Number(e.target.value) / 100 }).catch(() => {});
     e.target.style.setProperty("--fill", `${e.target.value}%`);
     clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", Number(e.target.value)), 400);
   });
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
+  // Sur le WebView Android, un tap direct sur la barre (ou un drag sans friction)
+  // peut n'émettre QUE `change` (ou coalescer `input`+`change`). On écoute aussi
+  // pointerup/pointercancel : le seek doit se faire même si `change` n'arrive pas,
+  // et `seeking` doit toujours retomber à false.
   $("#seek").addEventListener("change", async () => {
     const s = Number($("#seek").value);
-    // Si invoke("seek") rejette (défaillance moteur/réseau), `seeking` resterait
-    // `true` et la progress loop se figerait définitivement — le try/catch
-    // garantit seeké + barre repartie.
     try { await invoke("seek", { secs: s }); } catch {}
     wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
     // Refresh the presence only if one is (or should be) shown: while playing,
@@ -6341,6 +6344,15 @@ async function init() {
     // presence that rpcPause/rpcStop already cleared.
     if (playing || _rpcPauseTimer) updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing);
   });
+  // Filet mobile : si le drag finit sans `change` (cas marginal), on seek quand même,
+  // et libère `seeking` — sans ça la progress loop reste gelée indéfiniment.
+  $("#seek").addEventListener("pointerup", async () => {
+    if (!seeking) return;
+    const s = Number($("#seek").value);
+    try { await invoke("seek", { secs: s }); } catch {}
+    wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
+  });
+  $("#seek").addEventListener("pointercancel", () => { seeking = false; });
 
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
