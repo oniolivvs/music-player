@@ -4383,16 +4383,19 @@ function renderSeek(p) {
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
   _lastSeekVal = p;
 }
-function startProgressLoop() {
-  const loop = () => {
-    if (!seeking && curIndex >= 0 && !document.hidden) {
+  // Le rAF tourne en continu, mais en pause/idle il ne fait qu'un no-op (le
+  // rendu s'arrête) : un 60fps qui repeint la barre recalculait le compositing
+  // de tout le panneau, et aidait à déclencher le glitch fluctuant sur fond
+  // translucide. On relance simplement quand la lecture repart.
+  function startProgressLoop() {
+    const loop = () => {
+      if (seeking || curIndex < 0 || !playing || document.hidden) { requestAnimationFrame(loop); return; } // idle/pause → no-op
       const p = wallPos();
       if (Math.abs(p - _lastSeekVal) > 0.05) renderSeek(p);
-    }
+      requestAnimationFrame(loop);
+    };
     requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
-}
+  }
 
 let _posTick = 0;
 let _lastAudioErr = "";
@@ -6247,12 +6250,20 @@ async function init() {
   // Column layout follows the track list's own width. An observer on the element
   // catches every cause at once — window resize, sidebar collapse, the drawer
   // docking — without each of them having to remember to call it.
+  // Observe .main (conteneur stable) plutôt que #trackList directement : la
+  // liste voit sa largeur changer quand les classes narrow/icon-only se togglent,
+  // ce qui redisparaît la RO → feedback loop (toggle → resize → toggle) —
+  // l'oscillation "UI glitchée toutes les quelques secondes".
   (() => {
     updateNarrowClasses();
-    const targets = [document.querySelector("#trackList"), document.querySelector(".sidebar")].filter(Boolean);
-    if (typeof ResizeObserver === "function" && targets.length) {
-      const ro = new ResizeObserver(updateNarrowClasses);
-      targets.forEach(t => ro.observe(t));
+    const stable = document.querySelector(".main");
+    if (typeof ResizeObserver === "function" && stable) {
+      const ro = new ResizeObserver(() => updateNarrowClasses());
+      ro.observe(stable);
+      // La sidebar a son propre seuil (drag) ; son RO ne fait que lire, sans
+      // réécrire les classes qui l'ont déclenché.
+      const side = document.querySelector(".sidebar");
+      if (side) new ResizeObserver(() => updateSideClasses()).observe(side);
     } else window.addEventListener("resize", updateNarrowClasses);
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadSuppressed(), loadDeclined(), loadHistory(), loadBlocked(), loadPlays()]);

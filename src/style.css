@@ -646,10 +646,10 @@ body::before {
   content: ""; position: fixed; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;
   filter: blur(var(--app-bg-blur, 18px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
-  /* Promote to its own GPU layer so the (static) blur is cached as a texture and
-     NOT recomputed every time a panel above it repaints — big win for scroll /
-     hover smoothness over a wallpaper on software-rendered WebKitGTK. */
-  transform: translateZ(0); will-change: transform; backface-visibility: hidden;
+  /* La promotion GPU (translateZ + will-change) ne tient pas sur software-render
+     (WebKitGTK) → le blur se re-calculait à chaque repaint des panneaux au-dessus,
+     ce qui produisait exactement l'oscillation "correct puis glitché". On laisse
+     le moteur décider seul (pas de layer forcé) ; le blur reste statique. */
   display: none;
 }
 body.has-bg::before { display: block; }
