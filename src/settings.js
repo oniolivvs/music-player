@@ -23,6 +23,8 @@ export const ACCENTS = {
 
 const DEFAULTS = {
   accent: "violet",
+  customAccentA: "#8B5CF6", // custom accent (accent: "custom") — base color
+  customAccentB: "#A78BFA", // custom accent — hover / highlight color
   showArt: true,
   compactRows: false,
   animations: true,
@@ -47,9 +49,11 @@ const DEFAULTS = {
   topbarPad: 13,         // top bar vertical padding (px) — customizable height
   sliderImage: "",       // custom image for the slider thumb (the "pink dot"); empty = accent color
   thumbSize: 12,         // slider thumb diameter (px)
+  pbPad: 17,             // player control icon size (px) — "Player icon size" slider
   downloadDir: "",       // empty = ~/Music/MusicPlayer (resolved by the backend)
   preferLocal: true,     // play the local file when an online track is downloaded
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog
+  newTrackBehavior: "ask", // new tracks in followed playlists: ask (propose once) | auto (download, no prompt) | off (manual only)
   searchLimit: 20,       // YouTube search result count
   ytdlpPath: "",         // explicit yt-dlp binary; empty = auto-detect
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
@@ -79,6 +83,10 @@ const DEFAULTS = {
   uiNpOpen: false,       // Up-next panel open (restored at launch)
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge
   recoEnabled: true,     // Show a "For you" recommendation rail on the library home page
+  ytFeedEnabled: true,   // YouTube home tab (personal feed) in the top navigation bar
+  ytFeedSections: "forYou,trending,current,history", // feed sections, in display order
+  ytFeedRegion: "",      // trending region code ("" = default/global)
+  ytFeedLimit: 12,       // tracks fetched per online feed section (1-50)
   npW: 330,              // Now-playing panel width (px) — drag its left edge
   ytView: "grid",        // YouTube results on desktop: grid (mini-YouTube cards) | list
   ytViewTouch: "list",   // YouTube results on phones/touch: rows read better + 40px covers

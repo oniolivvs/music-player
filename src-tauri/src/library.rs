@@ -44,7 +44,11 @@ fn parse_db_gain(s: &str) -> Option<f32> {
     Some(10f32.powf(db / 20.0).clamp(0.2, 2.0))
 }
 
-const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac"];
+const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac",
+    // Video files are first-class playable tracks in this app, so they count as
+    // media everywhere "audio" is checked: a folder holding only videos must
+    // NOT read as an empty source, and its files can be sized / deleted.
+    "mp4", "webm", "mkv"];
 
 /// Canonical form of a path: symlinks resolved (e.g. Fedora atomic's
 /// /home/user → /var/home/user), Windows' `\\?\` verbatim prefix stripped.
@@ -157,7 +161,7 @@ pub async fn delete_file(path: String) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
     if !AUDIO_EXTS.contains(&ext.as_str()) {
-        return Err(format!("refusing to delete a non-audio file (.{ext})"));
+        return Err(format!("refusing to delete a non-media file (.{ext})"));
     }
     std::fs::remove_file(p).map_err(|e| e.to_string())
 }
@@ -169,7 +173,10 @@ pub async fn delete_file(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
-    let target = if p.is_dir() {
+    let is_file = p.is_file();
+    let target = if is_file {
+        path.clone()
+    } else if p.is_dir() {
         path.clone()
     } else {
         p.parent()
@@ -179,6 +186,15 @@ pub fn open_path(path: String) -> Result<(), String> {
     };
     #[cfg(target_os = "windows")]
     {
+        // A real file gets SELECTED in Explorer (`/select,"C:\…"`) instead of only
+        // opening its parent folder — matches what the user expects from a track row.
+        if is_file {
+            return std::process::Command::new("explorer")
+                .arg(format!("/select,{}", target.replace('/', "\\")))
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("cannot open file manager: {e}"));
+        }
         return std::process::Command::new("explorer")
             .arg(&target)
             .spawn()

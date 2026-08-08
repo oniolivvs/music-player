@@ -577,7 +577,7 @@ function hydrateCovers() {
   if (artObserver) arts.forEach(el => artObserver.observe(el));
   else { const seen = new Set(); for (const t of view.slice(0, 60)) { const k = albumKey(t); if (!seen.has(k)) { seen.add(k); fetchCover(t); } } }
 }
-function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else if (active.type === "online") renderOnlineResults(); else if (active.type === "stats") showStats(); else if (active.type === "history") showHistory(); else showLibrary(); }
+function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else if (active.type === "online") renderOnlineResults(); else if (active.type === "stats") showStats(); else if (active.type === "history") showHistory(); else if (active.type === "ytfeed") showYtFeed(); else showLibrary(); }
 
 // The Android WebView won't load external network background-images, so YouTube
 // covers (i.ytimg…) are proxied through the Rust backend into inline data: URLs
@@ -1611,13 +1611,15 @@ async function deleteLocalFiles(paths) {
     const vid = videoIdOf(p);
     const t = library.find(x => x.path === file);
     if (vid) {
+      dlDeclined.delete(vid); // an explicit delete supersedes a past "decline"
       const online = "yt:" + vid;
       if (!onlineIndex.has(online)) onlineIndex.set(online, { path: online, title: t?.title || baseName(file), artist: t?.artist || "Unknown Artist", album: "YouTube", duration_secs: t?.duration_secs || 0, gain: 1, thumbnail: t?.thumbnail || "" });
       PL.replacePath(file, online); // keep it in playlists, now as a stream
+      if (isOnline(p)) suppressedSet.add(vid); // never offer this download again
     }
     library = library.filter(x => x.path !== file);
   }
-  if (removed) { await saveLibrary(); await saveOnline(); }
+  if (removed) { await saveLibrary(); await saveOnline(); saveSuppressed(); }
   return removed;
 }
 
@@ -1659,7 +1661,7 @@ function openContextMenu(x, y) {
     pls.map(p => `<div class="ctx-item" data-add="${p.id}">${ic(IC.note)}${esc(p.name)}</div>`).join("") +
     `<div class="ctx-item" data-add="__new">${ic(IC.plus)}New playlist…</div>`;
   placeCtx(menu, x, y);
-  menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
+  menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline), true); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playInScope(i); closeCtx(); });
   menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
   menu.querySelector("[data-block]")?.addEventListener("click", (e) => {
@@ -1825,8 +1827,11 @@ function openSourceCtx(x, y, folder) {
 // ─── Sources (folders) ───
 function renderSources() {
   const host = $("#sourcesList");
-  if (!folders.length) { host.innerHTML = `<div class="src-empty">No folders yet — add one above.</div>`; return; }
-  host.innerHTML = folders.map(f => {
+  // A source that currently holds no media is hidden from the list — it is
+  // dropped for good on the next save.
+  const shown = folders.filter(f => library.some(t => inFolder(t, f)));
+  if (!shown.length) { host.innerHTML = `<div class="src-empty">No folders yet — add one above.</div>`; return; }
+  host.innerHTML = shown.map(f => {
     const count = library.filter(t => inFolder(t, f)).length;
     const on = active.type === "source" && active.id === f;
     return `<div class="src-row ${on ? "active" : ""}" data-src="${esc(f)}" title="${esc(f)}">
@@ -1875,15 +1880,18 @@ async function diffFolder(folder) {
   const fresh = (diff.new_tracks || []).filter(t => !have.has(t.path)); // belt & braces
   // Keep tracks outside this folder + this folder's tracks that still exist, add new.
   library = library.filter(t => !inFolder(t, folder) || present.has(t.path)).concat(fresh);
+  applySuppressedFilter(); // the diff may have re-adopted a suppressed track
   return fresh.length;
 }
 async function rescanFolder(folder) {
   flash(`Checking ${baseName(folder)}…`);
   const fresh = await diffFolder(folder);
+  pruneEmptySources();      // a folder the diff just emptied leaves the Sources list now
   await saveLibrary();
   renderSources();
-  if (active.type === "source" && active.id === folder) openSource(folder);
-  else if (active.type === "library") showLibrary();
+  const gone = !folders.includes(folder);
+  if (!gone && active.type === "source" && active.id === folder) openSource(folder);
+  else if (gone || active.type === "library") showLibrary();
   flash(fresh ? `${fresh} new track${fresh === 1 ? "" : "s"} in ${baseName(folder)}` : `No new songs in ${baseName(folder)}`);
 }
 
@@ -2937,6 +2945,26 @@ async function loadDlBlock() {
 }
 function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
 
+// Deleted-on-purpose downloads ("suppressed", by videoId): the user erased the
+// local file, so re-imports, folder scans and follow checks must never slide
+// the online entry back in on its own. Explicitly playing/downloading the
+// stream lifts it. Persisted like dlBlock.
+let suppressedSet = new Set();
+async function loadSuppressed() {
+  const raw = await storeLoad("suppressed");
+  if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) suppressedSet = new Set(a); } catch {} }
+}
+function saveSuppressed() { storeSave("suppressed", JSON.stringify([...suppressedSet])); }
+
+// New tracks the user REFUSED in the "Download N new tracks?" prompt: never
+// proposed again (a later explicit download clears the memory).
+let dlDeclined = new Set();
+async function loadDeclined() {
+  const raw = await storeLoad("declined");
+  if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) dlDeclined = new Set(a); } catch {} }
+}
+function saveDeclined() { storeSave("declined", JSON.stringify([...dlDeclined])); }
+
 // ─── Blocked tracks ─────────────────────────────────────────────────────
 // A track can be "blocked" — hidden everywhere and unplayable (skipped in the
 // queue) until unblocked, even if it's saved locally. Keyed by videoId when
@@ -3338,7 +3366,7 @@ function libraryLocalFor(id) {
   }
   return cand;
 }
-function downloadTracks(paths) {
+function downloadTracks(paths, tryLocal = false) {
   if (!IS_NATIVE) { flash("Downloads need the native app"); return; }
   let added = 0, blocked = 0;
   for (const p of paths) {
@@ -3348,6 +3376,15 @@ function downloadTracks(paths) {
     // deleted from disk. The Rust backend's find_existing() does the real
     // filesystem check and will skip if already downloaded.
     if (dlBlock[ytId(p)]) { blocked++; continue; } // known-unavailable: never retried
+    // Declined in the new-tracks prompt ("Not now"): silent batches leave them
+    // alone until the user downloads one explicitly — downloadTracks is only
+    // ever fired by a user action or the explicit accept in checkForNewTracks,
+    // so reaching it is itself the explicit action that clears the memory.
+    dlDeclined.delete(ytId(p));
+    // Suppressed (its downloaded file was deleted on purpose) and nothing on
+    // disk any more: downloading would resurrect exactly what the user erased.
+    // tryLocal lets direct explicit attempts ("Download track locally") through.
+    if (suppressedSet.has(ytId(p))) unsuppressNow(ytId(p));
     const t = onlineIndex.get(p);
     dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", status: "queued", pct: 0 });
     added++;
@@ -3450,6 +3487,10 @@ async function dlPump() {
       try {
         const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "", quality: S().downloadQuality || "best" });
         d.status = "done"; d.pct = 100; ok++; cooldownIdx = 0; consecTransient = 0;
+        // An explicit fresh download settles both memories: the "deleted on
+        // purpose" suppression lifts and the track is never proposed again.
+        if (d.id && suppressedSet.delete(d.id)) saveSuppressed();
+        if (d.id && dlDeclined.delete(d.id)) saveDeclined();
         dir = file.slice(0, file.lastIndexOf("/"));
         PL.replacePath(d.path, file); // playlists now point at the local file
         const meta = onlineIndex.get(d.path) || {};
@@ -3600,6 +3641,7 @@ function adoptPlaylistOnline() {
   for (const pl of PL.getPlaylists()) {
     for (const p of pl.paths) {
       if (!isOnline(p) || have.has(p)) continue;
+      if (suppressedSet.has(ytId(p))) continue; // deleted on purpose — never re-add
       const t = ensureOnlineTrack(p);
       if (!t) continue;
       have.add(p);
@@ -3717,23 +3759,24 @@ function showLibrary() {
 // Rendered as a horizontal card rail pinned above the track list. Fails silent
 // (no rail) when there's nothing to seed from or the network is down.
 let _recoState = { day: "", loaded: false, tracks: [] };
-async function renderRecoRail() {
-  $("#recoRail")?.remove();
-  if (!IS_NATIVE || !S().recoEnabled) return;
-  const today = new Date().toISOString().slice(0, 10);
-  if (_recoState.day === today && _recoState.loaded) { _paintReco(_recoState.tracks); return; }
-  // Seeds: last 3 distinct "artist - title" from history, fallback top played.
-  let seeds = [];
+// Recommendation seeds: last 3 distinct "artist title" from history, falling
+// back to your top-played tracks (so a fresh install still gets a rail/feed).
+function recoSeeds() {
+  const seeds = [];
   for (const h of history2) {
     const t = trackByPath(h.path) || h;
     const s = `${t.artist} ${t.title}`.trim();
     if (s && !seeds.includes(s)) seeds.push(s);
     if (seeds.length >= 3) break;
   }
-  if (!seeds.length) {
-    const agg = [...statsAggWorldwide()].slice(0, 3); // fall through to plays
-    seeds = agg;
-  }
+  return seeds.length ? seeds : statsAggWorldwide();
+}
+async function renderRecoRail() {
+  $("#recoRail")?.remove();
+  if (!IS_NATIVE || !S().recoEnabled) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (_recoState.day === today && _recoState.loaded) { _paintReco(_recoState.tracks); return; }
+  const seeds = recoSeeds();
   if (!seeds.length) return;
   try {
     const tracks = await invoke("yt_recommendations", { seeds });
@@ -3771,6 +3814,125 @@ function _paintReco(tracks) {
     history = [];
     await hardPlay(0);
   }));
+}
+
+// ─── YouTube home feed view ───
+// A dedicated tab ("YouTube" in the top nav) showing a few horizontal card
+// sections below one another: For you (recommendations seeded from listening),
+// Trending, From current track, and a local History replay. Online sections
+// render a skeleton first and fill in lazily; each is cached per day and has a
+// Refresh button. All cards reuse the .track.yt-card markup so the existing
+// play / select / context-menu delegation works untouched — `view` is the
+// concatenation of every track on screen.
+const _feedState = { day: "", forYou: null, trending: null, current: null };
+function ytFeedSections() {
+  const want = String(S().ytFeedSections || "forYou,trending,current,history").split(",").map(s => s.trim()).filter(Boolean);
+  const all = [
+    { id: "forYou", title: "For you", icon: IC.search, local: false },
+    { id: "trending", title: "Trending", icon: IC.chart, local: false },
+    { id: "current", title: "From current track", icon: IC.headphones, local: false },
+    { id: "history", title: "History", icon: IC.clock, local: true },
+  ];
+  return all.filter(d => want.includes(d.id));
+}
+async function _feedData(sec) {
+  const lim = Math.max(1, Math.min(50, Number(S().ytFeedLimit) || 12));
+  if (sec.id === "forYou") {
+    return invoke("yt_recommendations", { seeds: recoSeeds() }).then(rs => (rs || []).map(onlineFromResult));
+  }
+  if (sec.id === "trending") {
+    return invoke("yt_trending", { limit: lim, region: S().ytFeedRegion || null }).then(rs => (rs || []).map(onlineFromResult));
+  }
+  if (sec.id === "current") {
+    const t = curIndex >= 0 ? trackByPath(effectivePath(queue[curIndex]) || queue[curIndex]) : null;
+    const seed = t ? `${t.artist} ${t.title}`.trim() : "";
+    if (!seed) return null; // hide the section: no current track to seed from
+    return invoke("yt_recommendations", { seeds: [seed] }).then(rs => (rs || []).map(onlineFromResult));
+  }
+  if (sec.id === "history") {
+    return history2.slice(0, lim).map(h => trackByPath(h.path) || h).filter(Boolean);
+  }
+  return [];
+}
+function _feedCard(t, i) {
+  const vs = fmtViews(t.views);
+  return `<div class="track yt-card ${curIndex >= 0 && queue[curIndex] === t.path ? "playing" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+    <div class="yc-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}>
+      <span class="yc-dur">${fmtDur(t.duration_secs)}</span>
+      <button class="yc-play" data-play="${i}" title="Play now">${IC.play}</button>
+    </div>
+    <div class="yc-meta">
+      <div class="yc-title" title="${esc(t.title)}">${esc(t.title)}</div>
+      <div class="yc-sub">${esc(t.artist)}${vs ? ` · ${vs}` : ""}</div>
+    </div>
+    <button class="more yc-more" title="More" data-more="${i}">${IC.dots}</button>
+  </div>`;
+}
+function _skeleton(sec) {
+  return Array.from({ length: 6 }, () =>
+    `<div class="track yt-card fs-skel"><div class="yc-thumb fs-skel-t"></div><div class="yc-meta"><div class="fs-skel-l"></div><div class="fs-skel-l short"></div></div></div>`).join("");
+}
+function showYtFeed() {
+  active = { type: "ytfeed", id: "" };
+  markActive();
+  selected.clear();
+  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Your personal feed", actions: "" });
+  const host = $("#trackList");
+  showListChrome(false);
+  host.classList.add("yt-grid");
+  const secs = ytFeedSections();
+  const today = new Date().toISOString().slice(0, 10);
+  if (_feedState.day !== today) { _feedState.day = today; _feedState.forYou = _feedState.trending = _feedState.current = null; }
+  view = [];
+  host.innerHTML = secs.length
+    ? secs.map(sec => `<div class="feed-section" data-sec="${sec.id}">
+        <div class="list-sep"><span class="fs-title">${sec.icon} ${esc(sec.title)}</span><span class="fs-sub" data-sec-sub></span><button class="btn-line sm feed-refresh" data-sec-refresh="${sec.id}" title="Refresh this section">${ic(IC.refresh)} Refresh</button></div>
+        <div class="feed-cards" data-sec-cards="${sec.id}">${sec.local ? "" : _skeleton(sec)}</div>
+      </div>`).join("")
+    : `<div class="empty"><div class="empty-ico">${IC.globe}</div>All feed sections are disabled in Settings → YouTube.</div>`;
+  host.querySelectorAll("[data-sec-refresh]").forEach(btn => btn.addEventListener("click", () => { _feedState[btn.dataset.secRefresh] = null; showYtFeed(); }));
+  secs.forEach(sec => _renderFeedSection(sec, host));
+  proxyCovers(host);
+  fixThumbHeights(host);
+}
+async function _renderFeedSection(sec, host) {
+  const cardsEl = host.querySelector(`[data-sec-cards="${sec.id}"]`);
+  if (!cardsEl) return;
+  // Online sections render a skeleton first; the local History one fills instantly.
+  if (!sec.local && _feedState[sec.id] == null) cardsEl.innerHTML = _skeleton(sec);
+  let tracks = _feedState[sec.id];
+  if (tracks == null) {
+    try { tracks = await _feedData(sec); }
+    catch { tracks = null; } // a failed online section is hidden, never an error
+    if (active.type !== "ytfeed") return; // user navigated away mid-fetch
+    if (sec.id in _feedState) _feedState[sec.id] = tracks;
+  }
+  const section = host.querySelector(`[data-sec="${sec.id}"]`);
+  if (!tracks || !tracks.length) { if (section) section.remove(); _reindexFeed(host); return; }
+  cardsEl.innerHTML = tracks.map(t => _feedCard(t, 0)).join(""); // idx rewritten by _reindexFeed
+  section.querySelector("[data-sec-sub]").textContent = `${tracks.length} track${tracks.length === 1 ? "" : "s"}`;
+  _reindexFeed(host);
+  proxyCovers(cardsEl);
+  fixThumbHeights(cardsEl);
+}
+// `view` is the concatenation of every rendered section's tracks, in display
+// order, deduped on path. After any section (re)fills, realign every card's
+// data-idx / data-play / data-more so the existing delegation resolves the
+// right track. local track objects stay untouched in the library/onlineIndex.
+function _reindexFeed(host) {
+  view = [];
+  for (const s of ytFeedSections()) {
+    const cur = _feedState[s.id];
+    const el = host.querySelector(`[data-sec-cards="${s.id}"]`);
+    if (!el || !Array.isArray(cur)) continue;
+    const cards = el.querySelectorAll(".yt-card");
+    cur.forEach((t, ci) => {
+      let i = view.findIndex(x => x.path === t.path);
+      if (i < 0) { i = view.length; view.push(t); }
+      const c = cards[ci];
+      if (c) { c.dataset.idx = i; c.querySelector("[data-play]")?.setAttribute("data-play", i); c.querySelector("[data-more]")?.setAttribute("data-more", i); }
+    });
+  }
 }
 
 // "Add from URL" for the library. Mirrors addByUrl(), but the destination is
@@ -3941,6 +4103,7 @@ function markActive() {
   $("#navLibrary").classList.toggle("active", active.type === "library");
   $("#navHistory").classList.toggle("active", active.type === "history");
   $("#navStats").classList.toggle("active", active.type === "stats");
+  $("#navYtFeed")?.classList.toggle("active", active.type === "ytfeed");
   renderSources();
   // playlist highlight is refreshed by renderPlaylists on open; refresh to sync
   document.querySelectorAll("#playlistsList .pl-row[data-pl]").forEach(el => el.classList.toggle("active", active.type === "playlist" && active.id === el.dataset.pl));
@@ -4094,6 +4257,10 @@ async function hardPlay(i) {
   _needsStart = false; // a real playback start supersedes any pending resume
   const seq = ++playSeq;
   curIndex = i;
+  // Explicitly chosen for playback while it's still a stream: the user wants it
+  // after all, so forget the earlier "delete = never bring back" memory and put
+  // its online entry back in the library.
+  if (isOnline(queue[i]) && !localFileFor(queue[i])) await unsuppress(ytId(queue[i]));
   const path = effectivePath(queue[i]);
   const t = trackByPath(path) || trackByPath(queue[i]);
   updateNowPlaying(t, path); updatePlayingRow(); // show metadata instantly
@@ -4202,9 +4369,14 @@ let _lastTimeTxt = "", _lastSeekVal = -1;
 function renderSeek(p) {
   const el = $("#seek");
   const max = Number(el.max) || 1;
-  // Never let a runaway wall clock show "345:12" for a 2:57 track: clamp the
-  // displayed position to the track's real duration (ticks also advance it).
-  if (curIndex >= 0 && max > 1) p = Math.min(p, max);
+  // Clamp quand la durée est connue (max>1). Mais le wall clock peut afficher
+  // "345:12" quand duration_secs est inconnu (max=1) : dans ce cas on clamp
+  // sur la durée du morceau si le JS la connaît, sinon on laisse filer (le
+  // ranger est limité par le step=0.1 et la position réelle du wall clock).
+  if (curIndex >= 0) {
+    const cap = max > 1 ? max : (trackByPath(queue[curIndex])?.duration_secs || Infinity);
+    p = Math.min(p, cap);
+  }
   el.value = p;
   el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
   const txt = fmtDur(p);
@@ -4359,6 +4531,7 @@ function initSmoothScroll() {
 function applyUiPrefs() {
   const s = S();
   $("#navHistory").hidden = !(Number(s.historyLimit) > 0);
+  $("#navYtFeed") && ($("#navYtFeed").hidden = !s.ytFeedEnabled);
   // Sources now live in a topbar dropdown — hiding the section hides its button.
   const srcWrap = document.querySelector(".top-drop-wrap");
   if (srcWrap) srcWrap.hidden = !s.uiSources;
@@ -4730,6 +4903,55 @@ async function normalizeLibraryPaths() {
   }
   if (changed) { await saveLibrary(); console.warn("[library] paths normalized / duplicates removed"); }
 }
+// Drop a source folder + its tracks with NO prompt (internal cleanup path for
+// folders that hold no media at all — the interactive path is removeSource).
+function dropSource(folder) {
+  folders = folders.filter(f => f !== folder);
+  library = library.filter(t => !inFolder(t, folder));
+}
+// A folder is a source only while it holds something playable.
+function pruneEmptySources() {
+  let changed = false;
+  for (const f of [...folders]) if (!library.some(t => inFolder(t, f))) { dropSource(f); changed = true; }
+  return changed;
+}
+// Suppressed ids (downloads deleted on purpose): their online entry stays out
+// of the library and every playlist — scans/adoption/relinks would undo the
+// deletion at every launch without this. Returns true when something changed.
+// Ids whose local file turned out to still exist have already been lifted
+// (fs_exists pass in init), so any local path still indexed under the id is
+// a leftover ghost row and goes too.
+function applySuppressedFilter() {
+  if (!suppressedSet.size || !library.length) return false;
+  const hide = new Set();
+  for (const id of suppressedSet) {
+    for (const p of _localIdx.byId.get(id) || []) hide.add(p);
+    hide.add("yt:" + id);
+  }
+  const before = library.length;
+  library = library.filter(t => !hide.has(t.path));
+  let plChanged = false;
+  for (const pl of PL.getPlaylists()) {
+    const n = pl.paths.length;
+    pl.paths = pl.paths.filter(p => !hide.has(p));
+    if (pl.paths.length !== n) plChanged = true;
+  }
+  if (plChanged) PL.persist();
+  return library.length !== before || plChanged;
+}
+// The user explicitly chose the track again (direct play / download): the
+// deletion it came from is forgotten so the normal online↔local flow resumes.
+async function unsuppress(vid) {
+  if (!vid || !suppressedSet.delete(vid)) return;
+  saveSuppressed();
+  if (!library.some(t => t.path === "yt:" + vid)) {
+    const t = ensureOnlineTrack("yt:" + vid);
+    if (t) { library.push(t); await saveLibrary(); await saveOnline(); refreshView(); }
+  }
+}
+// Shed the suppression synchronously (downloadTracks can't await): the set is
+// updated now, the library restore runs in the background.
+function unsuppressNow(vid) { if (vid && suppressedSet.has(vid)) unsuppress(vid); }
 async function addSource(path) {
   if (!path) return;
   // Folder pickers can return an alias of an already-added source (symlinked
@@ -4741,10 +4963,20 @@ async function addSource(path) {
   const found = Array.isArray(tracks) ? tracks : [];
   const seen = new Set(library.map(t => t.path));
   library = library.concat(found.filter(t => !seen.has(t.path)));
-  if (!folders.includes(path)) folders.push(path);
+  applySuppressedFilter(); // a rescan must not resurrect a deleted-on-purpose track
+  if (found.length) {
+    if (!folders.includes(path)) folders.push(path);
+  } else if (folders.includes(path)) {
+    // A source that holds no audio/video file is useless — never keep it.
+    dropSource(path);
+  } else {
+    flash(`Nothing playable in ${baseName(path)} — not added as a source`);
+    return;
+  }
   await saveLibrary();
   renderSources();
-  openSource(path);
+  if (folders.includes(path)) openSource(path);
+  else showLibrary();
   flash(`Added ${baseName(path)} · ${found.length} song${found.length === 1 ? "" : "s"}`);
 }
 async function rescanAll() {
@@ -4756,10 +4988,11 @@ async function rescanAll() {
     taskUpdate(tid, { detail: baseName(list[i]), pct: (i / list.length) * 100 });
     total += await diffFolder(list[i]);
   }
+  pruneEmptySources(); // folders the diffs left empty disappear from Sources now
   await saveLibrary(); renderSources();
   // Refresh the view only if the user is still looking at the library/source.
-  if (active.type === "source") openSource(active.id);
-  else if (active.type === "library") showLibrary();
+  if (active.type === "source" && folders.includes(active.id)) openSource(active.id);
+  else if (active.type === "source" || active.type === "library") showLibrary();
   taskEnd(tid, { detail: total ? `${total} new song${total === 1 ? "" : "s"}` : "up to date", ttl: 6000 });
   flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
@@ -4784,7 +5017,10 @@ async function addManual() { const p = await askText("Add a folder", { placehold
 
 // ─── Settings ───
 function applyAccent() {
-  const [a, b] = SETTINGS.ACCENTS[S().accent] || SETTINGS.ACCENTS.violet;
+  // "custom" = the two Custom accent pickers; anything else comes from ACCENTS.
+  const [a, b] = S().accent === "custom"
+    ? [S().customAccentA || "#8B5CF6", S().customAccentB || "#A78BFA"]
+    : (SETTINGS.ACCENTS[S().accent] || SETTINGS.ACCENTS.violet);
   document.documentElement.style.setProperty("--accent", a);
   document.documentElement.style.setProperty("--accent-2", b);
 }
@@ -4809,6 +5045,7 @@ async function applyTheme() {
   root.setProperty("--r", `${s.radius ?? 12}px`);
   root.setProperty("--topbar-pad", `${s.topbarPad ?? 13}px`);
   root.setProperty("--thumb-size", `${s.thumbSize ?? 12}px`);
+  root.setProperty("--pb-size", `${s.pbPad ?? 17}px`);
   root.setProperty("--side-w", `${s.sideW ?? 268}px`);
   root.setProperty("--np-w", `${s.npW ?? 330}px`);
   document.body.classList.toggle("compact-top", !!s.compactTopbar);
@@ -4966,6 +5203,11 @@ function openSettings() {
       <div class="set-row"><label>UI scale</label><input type="range" id="setScale" min="85" max="125" value="${s.uiScale}"></div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
+      <div class="set-row"><label>Custom accent <span class="set-sub">(normal · hover)</span></label>
+        <span class="color-row">
+          <input type="color" id="setAccA" value="${s.customAccentA}" title="Accent">
+          <input type="color" id="setAccB" value="${s.customAccentB}" title="Accent (hover / highlight)">
+        </span></div>
       <div class="set-row"><label>Background image</label>
         <span class="dir-pick">
           <input type="text" id="setBgImg" class="text-in" placeholder="none — URL or file" value="${esc(s.bgImage)}">
@@ -4986,6 +5228,7 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Top bar &amp; sliders</div>
       <div class="set-row"><label>Compact top bar</label><input type="checkbox" id="setCompactTop" ${s.compactTopbar ? "checked" : ""}></div>
       <div class="set-row"><label>Top bar height</label><input type="range" id="setTopPad" min="4" max="22" value="${s.topbarPad ?? 13}"></div>
+      <div class="set-row"><label>Player icon size</label><input type="range" id="setPbPad" min="13" max="24" value="${s.pbPad ?? 17}"></div>
       <div class="set-row"><label>Slider knob size</label><input type="range" id="setThumbSize" min="8" max="28" value="${s.thumbSize ?? 12}"></div>
       <div class="set-row"><label>Slider knob image <span class="set-sub">(the “dot” on volume / seek)</span></label>
         <span class="dir-pick">
@@ -5070,6 +5313,11 @@ function openSettings() {
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
       <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
       <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
+      <div class="set-row"><label>Home feed tab <span class="set-sub">(“YouTube” in the top navigation)</span></label><input type="checkbox" id="setYtFeedEnabled" ${s.ytFeedEnabled !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Feed sections <span class="set-sub">(comma-separated, in display order)</span></label><input type="text" id="setYtFeedSections" class="text-in" placeholder="forYou,trending,current,history" value="${esc(s.ytFeedSections || "forYou,trending,current,history")}"></div>
+      <div class="set-hint">Available: <b>forYou</b>, <b>trending</b>, <b>current</b> (related to what's playing), <b>history</b>. Remove one to hide that section.</div>
+      <div class="set-row"><label>Feed items per section <span class="set-sub">(online sections · 1–50)</span></label><input type="number" id="setYtFeedLimit" class="num-in" min="1" max="50" step="1" value="${Number(s.ytFeedLimit) || 12}"></div>
+      <div class="set-row"><label>Feed region <span class="set-sub">(trending, empty = global)</span></label><input type="text" id="setYtFeedRegion" class="text-in" placeholder="e.g. US, FR" value="${esc(s.ytFeedRegion || "")}"></div>
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">${ic(IC.refresh)} Run again…</button></div>
     </div>
     </section>
@@ -5089,6 +5337,16 @@ function openSettings() {
       <div class="set-row"><label>Storage cap <span class="set-sub">(max MB of audio per source folder · 0 = unlimited)</span></label><input type="number" id="setStorageCap" class="num-in" min="0" max="1000000" step="500" value="${s.storageCapMb ?? 0}"></div>
       <div class="set-hint" id="setStorageUse">When the download folder reaches this size, new downloads are skipped so it never overflows.</div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
+      <div class="set-row"><label>New tracks in followed playlists</label>
+        <select id="setNewTracks" class="sel sm-sel wide">
+          <option value="ask" ${(s.newTrackBehavior || "ask") === "ask" ? "selected" : ""}>Ask before downloading</option>
+          <option value="auto" ${s.newTrackBehavior === "auto" ? "selected" : ""}>Download automatically</option>
+          <option value="off" ${s.newTrackBehavior === "off" ? "selected" : ""}>Never — manual checks only</option>
+        </select></div>
+      <div class="set-hint">When a check spots new upstream tracks: “ask” proposes them once (declined ones are never proposed again), “auto” downloads with no prompt, “off” leaves everything to you.</div>
+      <div class="set-row"><label>Tracks never proposed again</label><button id="setDeclined" class="btn-line sm">Forget ${dlDeclined.size}</button></div>
+      <div class="set-row"><label>Downloads deleted &amp; suppressed</label><button id="setSuppr" class="btn-line sm">Forget ${suppressedSet.size}</button></div>
+      <div class="set-hint">Deleting a downloaded file from the app tells it to stop bringing that track back. “Forget” clears both memories.</div>
       <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
       <div class="set-hint">Where downloads are saved. Pick any folder with the folder picker. Empty = <b>${IS_ANDROID ? "/storage/emulated/0/Music/MusicPlayer" : "~/Music/MusicPlayer"}</b>. The folder is added as a source automatically after a download.</div>
     </div>
@@ -5288,7 +5546,14 @@ function openSettings() {
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
   $("#setPrefLocal").addEventListener("change", e => SETTINGS.setSetting("preferLocal", e.target.checked));
+  $("#setYtFeedEnabled")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedEnabled", e.target.checked); applyUiPrefs(); });
+  $("#setYtFeedSections")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedSections", e.target.value.trim() || "forYou,trending,current,history"); if (active.type === "ytfeed") showYtFeed(); });
+  $("#setYtFeedLimit")?.addEventListener("change", e => { const v = Math.max(1, Math.min(50, Math.round(Number(e.target.value) || 12))); e.target.value = v; SETTINGS.setSetting("ytFeedLimit", v); _feedState.forYou = _feedState.trending = _feedState.current = null; if (active.type === "ytfeed") showYtFeed(); });
+  $("#setYtFeedRegion")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedRegion", e.target.value.trim()); _feedState.trending = null; if (active.type === "ytfeed") showYtFeed(); });
   $("#setAutoSave").addEventListener("change", e => SETTINGS.setSetting("autoSaveImports", e.target.checked));
+  $("#setNewTracks")?.addEventListener("change", e => SETTINGS.setSetting("newTrackBehavior", e.target.value));
+  $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
+  $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
   $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else storeSave("playback", ""); });
   $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else storeSave("dlqueue", ""); });
   $("#setHist").addEventListener("change", e => {
@@ -5300,6 +5565,15 @@ function openSettings() {
   $("#setRpcDelay").addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
   $("#setRpcPause").addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
   $("#setCompactTop").addEventListener("change", e => { SETTINGS.setSetting("compactTopbar", e.target.checked); document.body.classList.toggle("compact-top", e.target.checked); });
+  for (const [id, key] of [["setAccA", "customAccentA"], ["setAccB", "customAccentB"]]) {
+    // Two pickers make one "custom" accent, applied live; swatch ring drops.
+    $("#" + id).addEventListener("input", e => {
+      SETTINGS.setSetting(key, e.target.value);
+      SETTINGS.setSetting("accent", "custom");
+      applyAccent();
+      body.querySelectorAll(".swatch").forEach(x => x.classList.remove("on"));
+    });
+  }
   $("#setIconOnly")?.addEventListener("change", e => { SETTINGS.setSetting("iconOnly", e.target.value); applyIconOnly(); });
   // Checked = names visible, so the stored flag is the inverse of the box.
   $("#setPlNames")?.addEventListener("change", e => { SETTINGS.setSetting("hidePlNames", !e.target.checked); document.body.classList.toggle("pl-no-names", !e.target.checked); });
@@ -5308,6 +5582,7 @@ function openSettings() {
   $("#setDefSort")?.addEventListener("change", e => { sortMode = e.target.value; SETTINGS.setSetting("sortMode", sortMode); const sel = $("#sortSel"); if (sel) sel.value = sortMode; refreshView(); });
   $("#setTopPad").addEventListener("input", e => { SETTINGS.setSetting("topbarPad", Number(e.target.value)); document.documentElement.style.setProperty("--topbar-pad", `${e.target.value}px`); });
   $("#setThumbSize").addEventListener("input", e => { SETTINGS.setSetting("thumbSize", Number(e.target.value)); document.documentElement.style.setProperty("--thumb-size", `${e.target.value}px`); });
+  $("#setPbPad")?.addEventListener("input", e => { SETTINGS.setSetting("pbPad", Number(e.target.value)); document.documentElement.style.setProperty("--pb-size", `${e.target.value}px`); });
   $("#setThumbImg").addEventListener("change", e => { SETTINGS.setSetting("sliderImage", e.target.value.trim()); applyThumbImage(S()); });
   $("#setThumbPick").addEventListener("click", async () => {
     try {
@@ -5328,7 +5603,7 @@ function openSettings() {
   $("#setRpc").addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
   $("#setRpcId").addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
   $("#setFollowIv").addEventListener("change", e => SETTINGS.setSetting("followInterval", e.target.value));
-  $("#setFollowCheck").addEventListener("click", () => checkFollows(true));
+  $("#setFollowCheck").addEventListener("click", () => checkForNewTracks(true));
   renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
   $("#setUpdCheck").addEventListener("click", () => checkUpdate(true));
@@ -5419,18 +5694,27 @@ async function checkFollow(f, manual = false) {
   const missing = tracks.filter(t => known.has(ytId(t.path)) && !localPathsHas(pl, t.path) && !hasLocal(ytId(t.path)));
   const fresh = [...brandNew, ...missing];
   f.knownIds = [...new Set([...(f.knownIds || []), ...tracks.map(t => ytId(t.path))])];
-  if (!fresh.length) { if (manual) flash(`“${f.title}” — no new tracks`); return 0; }
-  fresh.forEach(t => onlineIndex.set(t.path, t));
-  if (pl) fresh.forEach(t => PL.addToPlaylist(f.playlistId, t.path));
+  // Never resurrect a track deleted on purpose: it leaves the follow's mirror
+  // playlist and its metadata isn't kept. (checkForNewTracks skips them too.)
+  const wanted = fresh.filter(t => !suppressedSet.has(ytId(t.path)));
+  if (!wanted.length) { if (manual) flash(`“${f.title}” — no new tracks`); return 0; }
+  wanted.forEach(t => onlineIndex.set(t.path, t));
+  if (pl) wanted.forEach(t => PL.addToPlaylist(f.playlistId, t.path));
   await saveOnline();
   renderPlaylists(); refreshView();
-  if (f.autoDownload) downloadTracks(fresh.map(t => t.path));
-  const label = brandNew.length && missing.length
-    ? `${brandNew.length} new + ${missing.length} restored`
-    : brandNew.length ? `${brandNew.length} new track${brandNew.length === 1 ? "" : "s"}`
-    : `${missing.length} restored track${missing.length === 1 ? "" : "s"}`;
+  // Auto-download is decided per follow and stands on its own: the checkbox
+  // ("Auto-download new tracks to the library") downloads right away, whatever
+  // the global "new tracks" setting is — that setting gates the batched consent
+  // prompt for follows that did NOT opt in, not this per-follow choice.
+  if (f.autoDownload) downloadTracks(wanted.map(t => t.path));
+  const fb = brandNew.filter(t => !suppressedSet.has(ytId(t.path))).length;
+  const ms = missing.filter(t => !suppressedSet.has(ytId(t.path))).length;
+  const label = fb && ms
+    ? `${fb} new + ${ms} restored`
+    : fb ? `${fb} new track${fb === 1 ? "" : "s"}`
+    : `${ms} restored track${ms === 1 ? "" : "s"}`;
   flash(`${label} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
-  return fresh.length;
+  return wanted.length;
 }
 
 async function checkFollows(manual = false, respectDue = false) {
@@ -5462,6 +5746,71 @@ async function checkFollows(manual = false, respectDue = false) {
     taskEnd(tid, { status: "error", detail: String(e).slice(0, 80) });
     if (manual) flash(`Follow check failed: ${e}`);
   } finally { _followsBusy = false; }
+}
+
+// ─── New-tracks check with consent ───
+// Followed-playlist refreshes (above) adopt new titles into local playlists but
+// must never silently download them. On launch and from the refresh entry point
+// this re-reads the followed playlists once, collects the tracks that are
+// genuinely new (not in the library, not known-unavailable, not deleted on
+// purpose, not previously refused) and applies the "new tracks" setting:
+//   ask  → one confirm for the batch; "Not now" remembers just these ids forever.
+//   auto → enqueue the normal download pipeline straight away, no prompt.
+//   off  → never propose anything (manual "Check all now" still works).
+let _newTracksBusy = false;
+async function checkForNewTracks(manual = false) {
+  if (!IS_NATIVE || _newTracksBusy) return;
+  if (!manual && S().newTrackBehavior === "off") return;
+  if (!follows.some(f => f.enabled !== false)) { if (manual) flash("No followed playlists to check"); return; }
+  _newTracksBusy = true;
+  try {
+    await checkFollows(manual); // refresh the mirrors (adds titles; downloads only when per-follow + "auto" say so)
+    if (!manual && S().newTrackBehavior === "off") return; // switched mid-check: still download nothing
+    const libIds = new Set(library.map(t => videoIdOf(t.path)).filter(Boolean));
+    const plIds = new Set();
+    for (const pl of PL.getPlaylists()) for (const p of pl.paths) { const v = videoIdOf(p); if (v) plIds.add(v); }
+    const cand = [];
+    for (const [p, t] of onlineIndex) {
+      if (!isOnline(p)) continue;
+      const id = ytId(p);
+      if (libIds.has(id) || plIds.has(id) || dlBlock[id] || dlDeclined.has(id) || suppressedSet.has(id)) continue;
+      if (libraryLocalFor(id)) continue; // already downloaded somewhere
+      // Not visible in any followed playlist: proposing it would be a surprise
+      // (manual checks are the user asking, so everything unknown is fair game).
+      const linked = follows.some(f => f.enabled !== false && (f.knownIds || []).includes(id));
+      if (!manual && !linked) continue;
+      cand.push(t);
+    }
+    if (!cand.length) { if (manual) flash("No new tracks at the source"); return; }
+    const mode = manual ? "ask" : S().newTrackBehavior;
+    if (mode === "auto") {
+      flash(`Downloading ${cand.length} new track${cand.length === 1 ? "" : "s"}`);
+      for (const t of cand) dlDeclined.delete(ytId(t.path));
+      saveDeclined();
+      downloadTracks(cand.map(t => t.path));
+      return;
+    }
+    if (mode !== "ask") return;
+    const titles = cand.slice(0, 5).map(t => `• ${t.title || t.path}`).join("\n");
+    const more = cand.length > 5 ? `\n… and ${cand.length - 5} more` : "";
+    const okDl = await askConfirm(
+      `Download ${cand.length} new track${cand.length === 1 ? "" : "s"}?`,
+      `${titles}${more}\n\nFrom your followed playlists. Choosing “Not now” never proposes these again.`,
+      "Download", "Not now");
+    if (okDl === true) {
+      for (const t of cand) dlDeclined.delete(ytId(t.path));
+      saveDeclined();
+      downloadTracks(cand.map(t => t.path));
+    } else if (okDl === false) {
+      for (const t of cand) dlDeclined.add(ytId(t.path));
+      saveDeclined();
+      flash(`${cand.length} track${cand.length === 1 ? "" : "s"} won't be proposed again`);
+    }
+    // Dialog dismissed (Esc / backdrop): leave everything undecided for next time.
+  } catch (e) {
+    console.warn("[new tracks]", e);
+    if (manual) flash(`Check failed: ${e}`);
+  } finally { _newTracksBusy = false; }
 }
 
 // ─── Self-update (binary vs. source-tree version; repo mirrored on GitHub) ───
@@ -5904,9 +6253,30 @@ async function init() {
       targets.forEach(t => ro.observe(t));
     } else window.addEventListener("resize", updateNarrowClasses);
   })();
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked(), loadPlays()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadSuppressed(), loadDeclined(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
+  // A suppressed id whose "deleted" file is actually still there (deleted
+  // elsewhere / restored) gets its memory lifted — health-based, so a ghost
+  // library entry for a truly missing file keeps the id suppressed.
+  if (suppressedSet.size) {
+    let lifted = 0;
+    for (const id of [...suppressedSet]) {
+      for (const p of library.map(t => t.path).filter(x => !isOnline(x) && videoIdOf(x) === id)) {
+        let exists = false;
+        try { exists = !!(await invoke("fs_exists", { path: p })); } catch {}
+        if (exists) { suppressedSet.delete(id); lifted++; break; }
+      }
+    }
+    if (lifted) saveSuppressed();
+  }
+  _rebuildLocalIdx(); // videoId → local paths, for the suppression filter below
+  // Suppressed ids (downloads deleted on purpose): their online entries leave
+  // the library AND every playlist, or scans/adoption would undo the deletion.
+  if (applySuppressedFilter()) await saveLibrary();
+  // Sources saved while empty (no audio/video file at scan time) are dropped —
+  // they only clutter the sidebar. Cheap, library-scoped: no disk scan here.
+  if (pruneEmptySources()) saveLibrary();
   if (IS_ANDROID && !folders.length) {
     // Give the permission dialog a moment, then adopt the shared Music folder.
     setTimeout(() => { addSource(ANDROID_MUSIC_DIR).catch(() => {}); }, 4000);
@@ -5938,6 +6308,7 @@ async function init() {
   $("#navLibrary").addEventListener("click", showLibrary);
   $("#navHistory").addEventListener("click", showHistory);
   $("#navStats").addEventListener("click", showStats);
+  $("#navYtFeed")?.addEventListener("click", showYtFeed);
 
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
@@ -5959,7 +6330,12 @@ async function init() {
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
   $("#seek").addEventListener("change", async () => {
-    const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
+    const s = Number($("#seek").value);
+    // Si invoke("seek") rejette (défaillance moteur/réseau), `seeking` resterait
+    // `true` et la progress loop se figerait définitivement — le try/catch
+    // garantit seeké + barre repartie.
+    try { await invoke("seek", { secs: s }); } catch {}
+    wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
     // Refresh the presence only if one is (or should be) shown: while playing,
     // or while the temporary "Paused" card is still up. Never resurrect a
     // presence that rpcPause/rpcStop already cleared.
@@ -6139,6 +6515,8 @@ async function init() {
   // then periodically according to the configured interval.
   setTimeout(() => checkFollows(), 20000);
   setInterval(() => checkFollows(false, true), 15 * 60 * 1000);
+  // New-tracks consent check (gated on Settings → Downloads → new tracks).
+  setTimeout(() => checkForNewTracks(), 30000);
 
   // Cloud sync: restore tokens, then auto-pull on launch (and periodically).
   await gdriveRestore();
