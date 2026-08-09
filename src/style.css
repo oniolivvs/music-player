@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.92 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.93 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -193,8 +193,9 @@ input[type="range"] {
 }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 4px; border-radius: 2px;
-  /* played portion filled with the accent (JS keeps --fill in sync) */
-  background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--bg-4) var(--fill, 0%));
+  /* played portion filled with the accent (JS keeps --fill in sync); a second
+     band shows how much of an online stream is already buffered (--buf) */
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), rgba(140, 140, 160, .35) var(--fill, 0%), rgba(140, 140, 160, .35) var(--buf, 0%), var(--bg-4) var(--buf, 0%));
 }
 /* Seek bar: clean line, thumb only appears on hover (à la Spotify) */
 .seekbar::-webkit-slider-thumb { opacity: 0; transition: opacity .12s, transform .1s; }

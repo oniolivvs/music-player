@@ -36,6 +36,25 @@ const RETRIES: u32 = 4;
 /// sound came out (the click-to-audio latency on phones and Windows).
 const TAIL_SZ: u64 = 512 * 1024;
 
+/// Bytes buffered ahead of the reader, total across the current stream's shared
+/// window. The audio thread publishes this so the frontend render a real progress
+/// pill ("Loading… N%") instead of faking it from elapsed time.
+static LAST_FETCHED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LAST_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) fn note_fetched(new_total: u64) {
+    LAST_FETCHED.store(new_total, std::sync::atomic::Ordering::Relaxed);
+}
+pub(crate) fn note_total(len: u64) {
+    LAST_TOTAL.store(len, std::sync::atomic::Ordering::Relaxed);
+    LAST_FETCHED.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn last_fetch_head() -> (u64, u64) {
+    (
+        LAST_FETCHED.load(std::sync::atomic::Ordering::Relaxed),
+        LAST_TOTAL.load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
 struct Shared {
     start: u64, // absolute offset of buf[0]
     buf: VecDeque<u8>,
@@ -254,6 +273,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
             // Only append if the window didn't move while we were reading.
             if g.start + g.buf.len() as u64 == from {
                 g.buf.extend(&tmp[..n]);
+                note_fetched(g.start + g.buf.len() as u64);
             }
             cv.notify_all();
         }
@@ -271,6 +291,7 @@ impl HttpStream {
         let mut url = url;
         let (reader, total) = connect_rr(&mut url, 0, 0, &rr)?;
         let len = total.ok_or("server did not report a stream length")?;
+        note_total(len);
         let shared = Arc::new((
             Mutex::new(Shared {
                 start: 0,

@@ -45,6 +45,8 @@ pub struct PlaybackStatus {
     pub finished: bool, // sink is empty
     pub position: f64,  // seconds into the current source (secondary; UI uses a wall clock)
     pub epoch: u64,     // which play/clear command this sink belongs to
+    pub buffered: u64,  // bytes fetched ahead by the current stream (0 for local files)
+    pub total_bytes: u64, // total stream size (0 for local files / unknown)
 }
 
 // The epoch tags each hard start: play() hands it to the frontend and status()
@@ -377,18 +379,23 @@ impl AudioController {
     }
     pub fn status(&self) -> PlaybackStatus {
         let guard = self.sink.lock().unwrap();
+        let (buffered, total_bytes) = crate::stream::last_fetch_head();
         match &guard.1 {
             Some(s) => PlaybackStatus {
                 queued: s.len() as u32,
                 finished: s.empty(),
                 position: s.get_pos().as_secs_f64(),
                 epoch: guard.0,
+                buffered,
+                total_bytes,
             },
             None => PlaybackStatus {
                 queued: 0,
                 finished: true,
                 position: 0.0,
                 epoch: guard.0,
+                buffered,
+                total_bytes,
             },
         }
     }

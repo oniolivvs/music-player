@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.92";
+const SRC_VERSION = "0.22.93";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -4287,6 +4287,10 @@ async function hardPlay(i) {
   updateNowPlaying(t, path); updatePlayingRow(); // show metadata instantly
   if (isOnline(path)) {
     $("#nowSub").textContent += " · loading…";
+    // New stream: zero the backend download counters and the buffer band so
+    // the bar restarts at 0 instead of showing the previous track's tail.
+    invoke("reset_stream_progress").catch(() => {});
+    _bufPct = 0; $("#seek").style.setProperty("--buf", "0%");
     // Streams take a moment to resolve: silence the previous track right away
     // instead of letting it play over the "loading" state.
     try { const se = await invoke("stop"); curEpoch = Number(se) || curEpoch; } catch {}
@@ -4404,6 +4408,29 @@ function renderSeek(p) {
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
   _lastSeekVal = p;
 }
+// Download progress of the current online stream: paints a second band under
+// the played fill (--buf) and reports "Chargement… N%" until playback has
+// really started. Local tracks report buffered/total = 0 and stay untouched.
+let _bufPct = 0;
+function renderBuffer(st) {
+  if (curIndex < 0) return;
+  const online = isOnline(effectivePath(queue[curIndex]) || queue[curIndex]);
+  const total = st.total_bytes || 0;
+  const pct = online && total > 0 ? Math.min(100, (st.buffered || 0) / total * 100) : 0;
+  if (pct !== _bufPct) {
+    _bufPct = pct;
+    $("#seek").style.setProperty("--buf", pct.toFixed(2) + "%");
+  }
+  if (!online) return; // nowSub below is stream-only
+  const sub = $("#nowSub");
+  if (pct >= 95) {
+    // Buffered: restore the plain "artist — album" line.
+    const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
+    if (t) sub.textContent = `${t.artist} — ${t.album}`;
+  } else if (st.position < 0.5) {
+    sub.textContent = sub.textContent.replace(/ · (?:loading|Chargement)….*$/, "") + ` · Chargement… ${Math.floor(pct)}%`;
+  }
+}
   // Le rAF est démarré/arrêté avec la lecture au lieu de tourner à vie : même un
   // rAF dont le corps est un no-op réveille le thread UI 60×/s et maintient le
   // compositeur actif — sur rendu logiciel (WebView2/driver instable), ça
@@ -4445,6 +4472,7 @@ function startPolling() {
       if (_posTick % 14 === 0) savePlayback();   // ~4s: persist resume point while playing
       const st = await invoke("status"); if (!st) return;
     if ((st.epoch || 0) !== curEpoch) return; // stale: previous sink still up while a play/stream starts
+    renderBuffer(st);
     // Re-anchor the wall clock on the engine's real position when they drift
     // (stream connect latency etc.) — kills progress-bar jumps.
     if (queueSettled && st.position > 0.5 && Math.abs(st.position - wallPos()) > 1.5) wallSeek(st.position);

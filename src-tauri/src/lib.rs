@@ -219,6 +219,14 @@ fn preload_direct(url: String, gain: f32, state: State<AppState>) {
     state.audio.preload_url(url, gain, None);
 }
 
+/// Zero the stream download counters when a new stream starts, so the
+/// frontend's buffer bar restarts at 0 instead of showing the previous
+/// track's progress.
+#[tauri::command]
+fn reset_stream_progress() {
+    stream::note_total(0);
+}
+
 #[tauri::command]
 async fn preload_stream(
     id: String,
@@ -886,6 +894,7 @@ pub fn run() {
             gdrive::gdrive_sign_in, gdrive::gdrive_sign_out, gdrive::gdrive_set_tokens, gdrive::gdrive_account, gdrive::gdrive_pull, gdrive::gdrive_push,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
             play_stream, preload_stream, prefetch_stream, play_direct, preload_direct,
+            reset_stream_progress,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_recommendations, youtube::yt_trending,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,
