@@ -646,10 +646,13 @@ body::before {
   content: ""; position: fixed; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;
   filter: blur(var(--app-bg-blur, 18px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
-  /* La promotion GPU (translateZ + will-change) ne tient pas sur software-render
-     (WebKitGTK) → le blur se re-calculait à chaque repaint des panneaux au-dessus,
-     ce qui produisait exactement l'oscillation "correct puis glitché". On laisse
-     le moteur décider seul (pas de layer forcé) ; le blur reste statique. */
+  /* The wallpaper is blurred ONCE and never moves — it MUST be promoted to its
+     own GPU layer (`will-change: filter` hints chromium/WebView2). Without the
+     hint the compositor can fold it back into the main surface and re-run the
+     full-screen blur under every panel repaint (UI glitch oscillation at best,
+     saturated compositor → whole-PC freeze at worst). The layer is also fed a
+     downscaled bitmap (see read_image) so the GPU upload stays cheap. */
+  will-change: filter;
   display: none;
 }
 body.has-bg::before { display: block; }

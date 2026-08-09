@@ -3874,6 +3874,10 @@ function _skeleton(sec) {
 }
 function showYtFeed() {
   active = { type: "ytfeed", id: "" };
+  // Same trap as showStats: this view rewrites #trackList directly, so a stale
+  // _virt from a virtualized list view makes the persistent scroll listener
+  // re-slice the feed markup and wipe it on the first scroll tick.
+  _virt = null;
   markActive();
   selected.clear();
   setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Your personal feed", actions: "" });
@@ -4287,7 +4291,7 @@ async function hardPlay(i) {
   }
   if (seq !== playSeq) return; // superseded by a newer click
   curEpoch = Number(e) || 0;
-  playing = true; wallStart(0); updatePlayingRow();
+  playing = true; wallStart(0); updatePlayingRow(); startProgressLoop();
   rpcTrack(t);            // fresh track → progress bar at 0 (honours rpcDelay)
   recordHistory(t, queue[i]);
   armPlayCount(t, queue[i]);
@@ -4351,7 +4355,7 @@ async function togglePlay() {
       if (st && (st.epoch || 0) === curEpoch && st.position > 0 && Math.abs(st.position - wallPos()) > 0.4) { wallSeek(st.position); renderSeek(st.position); }
     } catch {}
   }
-  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); resumeWithRetry(); }
+  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); resumeWithRetry(); startProgressLoop(); }
   updatePlayingRow(); mediaPlayback();
 }
 async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); return; } history.push(curIndex); await hardPlay(j); }
@@ -4383,36 +4387,46 @@ function renderSeek(p) {
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
   _lastSeekVal = p;
 }
-  // Le rAF tourne en continu, mais en pause/idle il ne fait qu'un no-op (le
-  // rendu s'arrête) : un 60fps qui repeint la barre recalculait le compositing
-  // de tout le panneau, et aidait à déclencher le glitch fluctuant sur fond
-  // translucide. On relance simplement quand la lecture repart.
+  // Le rAF est démarré/arrêté avec la lecture au lieu de tourner à vie : même un
+  // rAF dont le corps est un no-op réveille le thread UI 60×/s et maintient le
+  // compositeur actif — sur rendu logiciel (WebView2/driver instable), ça
+  // contribuait au gel général. On relance à chaque reprise de lecture.
+  let _progRaf = 0;
   function startProgressLoop() {
+    if (_progRaf) return;
     const loop = () => {
-      if (seeking || curIndex < 0 || !playing || document.hidden) { requestAnimationFrame(loop); return; } // idle/pause → no-op
+      if (seeking || curIndex < 0 || !playing || document.hidden) { _progRaf = 0; return; } // idle/pause → stop
       const p = wallPos();
       if (Math.abs(p - _lastSeekVal) > 0.05) renderSeek(p);
-      requestAnimationFrame(loop);
+      _progRaf = requestAnimationFrame(loop);
     };
-    requestAnimationFrame(loop);
+    _progRaf = requestAnimationFrame(loop);
   }
 
 let _posTick = 0;
 let _lastAudioErr = "";
 let _drainSkips = 0; // consecutive instant-drain auto-advances (failing streams)
+let _pollBusy = false; // un tick encore en vol → on saute celui-ci (pas d'empilement d'IPC)
 function startPolling() {
   setInterval(async () => {
-    // Surface silent audio failures (no output device, undecodable stream) so
-    // "no sound" isn't a mystery — the #1 Android symptom.
+    if (_pollBusy) return;
+    _pollBusy = true;
     try {
-      const ae = await invoke("audio_error");
-      if (ae && ae !== _lastAudioErr) { _lastAudioErr = ae; flash("Audio: " + ae); console.error("[audio]", ae); }
-    } catch {}
-    // Paused or idle: nothing can change on its own — poll nothing (CPU).
-    if (curIndex < 0 || !playing) return;
-    if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
-    if (_posTick % 14 === 0) savePlayback();   // ~4s: persist resume point while playing
-    const st = await invoke("status"); if (!st) return;
+      // Surface silent audio failures (no output device, undecodable stream) so
+      // "no sound" isn't a mystery — the #1 Android symptom. Only while playing:
+      // en pause/idle rien ne peut échouer, et l'IPC permanent réveillait le
+      // backend 3×/s à vie (CPU + compositeur).
+      if (playing) {
+        try {
+          const ae = await invoke("audio_error");
+          if (ae && ae !== _lastAudioErr) { _lastAudioErr = ae; flash("Audio: " + ae); console.error("[audio]", ae); }
+        } catch {}
+      }
+      // Paused or idle: nothing can change on its own — poll nothing (CPU).
+      if (curIndex < 0 || !playing) return;
+      if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
+      if (_posTick % 14 === 0) savePlayback();   // ~4s: persist resume point while playing
+      const st = await invoke("status"); if (!st) return;
     if ((st.epoch || 0) !== curEpoch) return; // stale: previous sink still up while a play/stream starts
     // Re-anchor the wall clock on the engine's real position when they drift
     // (stream connect latency etc.) — kills progress-bar jumps.
@@ -4456,6 +4470,7 @@ function startPolling() {
         flash("Playback keeps failing (stream errors) — stopped. Try again in a moment.");
       } else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); } // queue drained → clear the progress bar
     }
+    } finally { _pollBusy = false; }
   }, 300);
 }
 
@@ -5062,7 +5077,11 @@ async function applyTheme() {
   // "dezoom" bug). Use it on desktop only; mobile keeps a 1:1 viewport.
   document.body.style.zoom = IS_ANDROID ? "" : String((s.uiScale ?? 100) / 100);
   applyAccent();
-  root.setProperty("--app-bg-blur", `${s.bgBlur ?? 18}px`);
+  // Blur is capped: a >12px gaussian over a full-screen layer is the single most
+  // expensive paint this app does, and combined with an un-promoted layer it was
+  // what froze the whole desktop on weaker GPUs. The slider still goes to 40;
+  // we just never push more than this into the compositor.
+  root.setProperty("--app-bg-blur", `${Math.min(s.bgBlur ?? 18, 12)}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
   root.setProperty("--panel-alpha", String(s.panelAlpha ?? 85));
   let src = (s.bgImage || "").trim();
@@ -6238,8 +6257,16 @@ async function init() {
   (() => {
     const pl = document.querySelector(".player");
     if (!pl) return;
-    const publish = () => document.documentElement.style.setProperty(
-      "--player-top", Math.round(window.innerHeight - pl.getBoundingClientRect().top) + "px");
+    // Only touch the CSS var when the value actually moved: writing to :root
+    // invalidates style for the whole document, and this fires on every tiny
+    // player height change (track title wrap etc.).
+    let lastTop = -1;
+    const publish = () => {
+      const top = Math.round(window.innerHeight - pl.getBoundingClientRect().top);
+      if (top === lastTop) return;
+      lastTop = top;
+      document.documentElement.style.setProperty("--player-top", top + "px");
+    };
     publish();
     // ResizeObserver catches the player growing (wrapped title, taller layout);
     // the resize listener catches a viewport height change that leaves the

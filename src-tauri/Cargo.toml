@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.22.89"
+version = "0.22.90"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -37,6 +37,10 @@ ureq = { version = "2", features = ["json"] }
 lofty = "0.21"
 walkdir = "2"
 base64 = "0.22"
+# Wallpaper downscale before it reaches the WebView (read_image in src/library.rs):
+# raw 4K+ wallpapers under a big CSS blur buffer choked the compositor (PC freeze).
+# default-features off: no gif ravif / rayon / png exif extras we never use.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 # LAN device sharing (src/share.rs): a tiny sync HTTP server (host) + the ureq
 # client already present. Pure-Rust, cross-compiles to Android.
 tiny_http = "0.12"

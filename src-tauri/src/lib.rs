@@ -721,7 +721,11 @@ async fn latest_release() -> Result<ReleaseInfo, String> {
 async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
     if let Ok(dir) = source_dir() {
         let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
-        let _ = git_out(&dir, &["checkout", "-B", "main", "origin/main"]);
+        // The update must build EXACTLY origin/main, whatever the local tree
+        // holds: `checkout -B main origin/main` only moves the branch pointer,
+        // so existing local edits (stale or experimental) still compiled and
+        // the app restarted on something other than the published release.
+        let _ = git_out(&dir, &["reset", "--hard", "origin/main", "--quiet"]);
         return do_build(&app);
     }
 

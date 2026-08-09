@@ -243,6 +243,32 @@ pub async fn read_image(path: String) -> Result<String, String> {
     if data.len() > 25 * 1024 * 1024 {
         return Err("image too large (max 25 MB)".into());
     }
+    // A wallpaper is shown full-screen, blurred and RE-composited under every
+    // translucent panel repaint. Feeding the raw file (often 4K+) means a huge
+    // decoded bitmap + a huge blur buffer — on software rendering / weak GPU
+    // drivers that saturates the compositor (whole-PC freeze reports). Cap the
+    // bitmap at 1920px: under a >=8px blur the extra detail is invisible anyway.
+    // Below the cap we keep the original bytes untouched (no re-encode).
+    // Everything is best-effort: undecodable/odd files fall back to the raw bytes.
+    let resized = image::load_from_memory(&data).ok().and_then(|img| {
+        let (w, h) = (img.width(), img.height());
+        const MAX_DIM: u32 = 1920;
+        if w.max(h) <= MAX_DIM {
+            return None;
+        }
+        let (nw, nh) = if w >= h {
+            (MAX_DIM, (h as u64 * MAX_DIM as u64 / w as u64).max(1) as u32)
+        } else {
+            ((w as u64 * MAX_DIM as u64 / h as u64).max(1) as u32, MAX_DIM)
+        };
+        let img = img.resize(nw, nh, image::imageops::FilterType::Triangle);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut buf, image::ImageFormat::Jpeg).ok()?;
+        Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(buf.into_inner())))
+    });
+    if let Some(out) = resized {
+        return Ok(out);
+    }
     Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
 }
 
