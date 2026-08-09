@@ -20,13 +20,30 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.88";
+const SRC_VERSION = "0.22.92";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
 const _otaCss = document.getElementById("otaCss");
 const _cssStale = !!_otaCss && _otaCss.textContent.indexOf("MP_CSS " + SRC_VERSION) < 0;
 if (IS_NATIVE && window.__MP_OTA__ && (window.__MP_OTA__ !== SRC_VERSION || _cssStale)) {
+  console.warn("[css] stale OTA CSS detected, forcing refresh", { ota: window.__MP_OTA__, src: SRC_VERSION, stale: _cssStale });
+
+// Watchdog diagnostic: every 2s we check whether the injected OTA stylesheet and
+// a marker custom-property are still present. If they vanish, the next log line
+// tells us whether the node got deleted from the DOM or its CSS rules got dropped.
+let _cssProbeCount = 0;
+setInterval(() => {
+  const has = !!document.getElementById("otaCss");
+  const prop = getComputedStyle(document.documentElement).getPropertyValue("--n-ico-width").trim();
+  if (!has && _cssProbeCount < 3) {
+    console.error("[css] otaCss element GONE after", _cssProbeCount * 2, "s; outerHTML start:", document.head.innerHTML.slice(0, 300));
+    _cssProbeCount++;
+  } else if (has && !prop) {
+    console.error("[css] otaCss present but --n-ico-width missing from computed style — rules dropped");
+  }
+}, 2000);
+
   const k = "mpOtaHealed:" + window.__MP_OTA__ + ":" + SRC_VERSION;
   if (!sessionStorage.getItem(k)) {
     sessionStorage.setItem(k, "1");
