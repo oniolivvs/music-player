@@ -25,10 +25,10 @@ pub const YT_UA: &str = "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linu
 /// address rotates. Re-resolving gets a URL valid for the current address.
 pub type ReResolve = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
-const CAP: usize = 16 * 1024 * 1024; // read-ahead window (16 min à 128 kbps: absorption réseau)
+const CAP: usize = 64 * 1024 * 1024; // read-ahead window (64 Mo ≈ 60 min à 96 kbps)
 const BACK: u64 = 256 * 1024; // kept behind the reader for small back-seeks
 const CHUNK: usize = 64 * 1024; // network read size
-const STALL: Duration = Duration::from_secs(45); // reader gives up after this
+const STALL: Duration = Duration::from_secs(120); // reader gives up after this
 const RETRIES: u32 = 4;
 /// End-of-file zone served from a dedicated one-shot buffer. YouTube m4a puts
 /// the moov atom at the END: the decoder probe seeks there and back, and

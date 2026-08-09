@@ -577,9 +577,14 @@ fn vr_title_artist(v: &serde_json::Value, id: &str) -> (String, String) {
 }
 
 /// Best playable stream URL via the ANDROID_VR client (directly fetchable).
+/// Streaming caps the bitrate at 96 kbps: audiophile formats are a waste here
+/// (the source is a compressed video track) and the higher the bitrate, the
+/// more often the TCP window drains on a mid-range connection — exactly the
+/// "lit, coupe, relance" pattern. 96 kbps AAC is enough for transparent speech
+/// and near-transparent music, and it's 30 % gentler on the network.
 pub async fn stream_url(id: &str) -> Result<String, String> {
     let v = vr_player(id)?;
-    vr_audio_url(&v, None)
+    vr_audio_url(&v, Some(96))
 }
 
 fn safe_filename(s: &str) -> String {

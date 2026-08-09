@@ -3907,7 +3907,7 @@ async function _renderFeedSection(sec, host) {
   let tracks = _feedState[sec.id];
   if (tracks == null) {
     try { tracks = await _feedData(sec); }
-    catch { tracks = null; } // a failed online section is hidden, never an error
+    catch (e) { console.warn("[feed]", sec.id, e); tracks = null; }
     if (active.type !== "ytfeed") return; // user navigated away mid-fetch
     if (sec.id in _feedState) _feedState[sec.id] = tracks;
   }

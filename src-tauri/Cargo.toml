@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.22.90"
+version = "0.22.91"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
