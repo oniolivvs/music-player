@@ -157,7 +157,12 @@ pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
         let code = std::fs::read_to_string(dir.join(name)).ok()?;
         modules.insert(name.clone(), code);
     }
-    let css = std::fs::read_to_string(dir.join(&m.css)).unwrap_or_default();
+    // Same strictness as modules: a truncated/corrupt stylesheet means the whole
+    // bundle is unusable — serve nothing so the bootstrap falls back embedded.
+    let css = std::fs::read_to_string(dir.join(&m.css)).ok()?;
+    if !css.contains("MP_CSS") || css.len() < 1000 {
+        return None;
+    }
     let html = m
         .html
         .as_ref()

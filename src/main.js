@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.93";
+const SRC_VERSION = "0.22.94";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -49,8 +49,12 @@ setInterval(() => {
     sessionStorage.setItem(k, "1");
     T.core.invoke("ota_rollback")
       .then(() => T.core.invoke("ota_apply"))
-      .catch(() => {})
-      .then(() => location.reload());
+      // Reload ONLY on success: downloading can fail (offline, 404, mixed CDN
+      // bundle) and reloading on a half-applied ota/ was THE reason the CSS
+      // vanished ~10s in — the app kept rebooting into a broken state. On
+      // failure we stay on the embedded build instead of chasing the loop.
+      .then(ok => { if (ok) location.reload(); })
+      .catch(() => {});
   }
 }
 // On a touch device a single tap should PLAY the row (like every mobile music

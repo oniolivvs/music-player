@@ -424,11 +424,16 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             doc.body.querySelectorAll("script").forEach(function (x) { x.remove(); });
             document.body.innerHTML = doc.body.innerHTML;
           }
-          if (b.css) {
+          // Only take the OTA stylesheet if it is a real, complete sheet: a
+          // half-written or encoder-broken css dropped the rules silently while
+          // the HTML had already been swapped in, leaving the app styled "HTML,
+          // no CSS". Reject anything that doesn't carry its marker, and KEEP the
+          // embedded <link> so the built-in styles stay as a fallback layer.
+          if (b.css && b.css.indexOf("MP_CSS") >= 0 && b.css.length > 1000) {
             var st = document.createElement("style"); st.id = "otaCss"; st.textContent = b.css;
             document.head.appendChild(st);
             var em = document.getElementById("embCss"); if (em) em.remove();
-          }
+          } else if (b.css) { console.warn("[ota] rejecting malformed stylesheet, keeping embedded"); }
           // Blob-URL ES modules can't resolve "./x.js" relative imports. Import
           // maps would fix that but older Android WebViews (< Chrome 89) don't
           // support them — the OTA would silently fail and the watchdog roll it
