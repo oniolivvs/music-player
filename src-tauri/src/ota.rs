@@ -155,10 +155,12 @@ pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
         // A missing file means a corrupt/partial apply → refuse the whole
         // bundle so the bootstrap falls back to the embedded build.
         let code = std::fs::read_to_string(dir.join(name)).ok()?;
+        // A module that never marks boot is a silently-styled no-UI trap.
+        if name == &m.entry && !code.contains("__MP_BOOTED__") {
+            return None;
+        }
         modules.insert(name.clone(), code);
     }
-    // Same strictness as modules: a truncated/corrupt stylesheet means the whole
-    // bundle is unusable — serve nothing so the bootstrap falls back embedded.
     let css = std::fs::read_to_string(dir.join(&m.css)).ok()?;
     if !css.contains("MP_CSS") || css.len() < 1000 {
         return None;
@@ -167,6 +169,13 @@ pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
         .html
         .as_ref()
         .and_then(|h| std::fs::read_to_string(dir.join(h)).ok());
+    // Sanity: index.html must reference the bootstrap's OTA wait — without it
+    // the body-swap strips its own runner and the OTA never executes.
+    if let Some(h) = &html {
+        if !h.contains("ota_bundle") && !h.contains("__TAURI__") {
+            return None;
+        }
+    }
     Some(OtaBundle {
         version: m.version,
         entry: m.entry,
