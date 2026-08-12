@@ -248,7 +248,12 @@ impl AudioController {
                             new_sink.set_volume(*vol_t.lock().unwrap());
                             append_track(&new_sink, &path, gain, agc_on, &err_t);
                             new_sink.play();
-                            *sink_t.lock().unwrap() = (epoch, Some(new_sink));
+                            // Drop the OLD sink (decoder + its streaming fetcher
+                            // thread) OUTSIDE the mutex — its Drop joins the
+                            // fetcher, and doing it under the lock stalls every
+                            // sync IPC (status/seek/volume) for the duration.
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(new_sink)));
+                            drop(old);
                         }
                         AudioCmd::Preload(path, gain) => {
                             let s = sink_t.lock().unwrap().1.clone();
@@ -267,15 +272,18 @@ impl AudioController {
                             if new_sink.empty() {
                                 if let Some(rr2) = rr.clone() {
                                     if let Ok(fresh) = rr2() {
-                                        if fresh != url {
-                                            eprintln!("[audio] stream append failed — retrying with a fresh URL");
-                                            append_url(&new_sink, &fresh, gain, agc_on, &err_t, rr);
-                                        }
+                                        // Retry even if the resolver handed back the
+                                        // same URL: the transient rejection may be
+                                        // per-connection. Worse case = one wasted
+                                        // reconnect, better than a silent track.
+                                        eprintln!("[audio] stream append failed — retrying with a fresh URL");
+                                        append_url(&new_sink, &fresh, gain, agc_on, &err_t, rr);
                                     }
                                 }
                             }
                             new_sink.play();
-                            *sink_t.lock().unwrap() = (epoch, Some(new_sink));
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(new_sink)));
+                            drop(old);
                         }
                         AudioCmd::PreloadUrl(url, gain, rr) => {
                             let s = sink_t.lock().unwrap().1.clone();
@@ -286,7 +294,8 @@ impl AudioController {
                         AudioCmd::Clear(epoch) => {
                             let s = Arc::new(Sink::connect_new(stream.mixer()));
                             s.set_volume(*vol_t.lock().unwrap());
-                            *sink_t.lock().unwrap() = (epoch, Some(s));
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(s)));
+                            drop(old);
                         }
                     }
                 }));

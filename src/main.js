@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.95";
+const SRC_VERSION = "0.22.97";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -28,22 +28,6 @@ const _otaCss = document.getElementById("otaCss");
 const _cssStale = !!_otaCss && _otaCss.textContent.indexOf("MP_CSS " + SRC_VERSION) < 0;
 if (IS_NATIVE && window.__MP_OTA__ && (window.__MP_OTA__ !== SRC_VERSION || _cssStale)) {
   console.warn("[css] stale OTA CSS detected, forcing refresh", { ota: window.__MP_OTA__, src: SRC_VERSION, stale: _cssStale });
-
-// Watchdog diagnostic: every 2s we check whether the injected OTA stylesheet and
-// a marker custom-property are still present. If they vanish, the next log line
-// tells us whether the node got deleted from the DOM or its CSS rules got dropped.
-let _cssProbeCount = 0;
-setInterval(() => {
-  const has = !!document.getElementById("otaCss");
-  const prop = getComputedStyle(document.documentElement).getPropertyValue("--n-ico-width").trim();
-  if (!has && _cssProbeCount < 3) {
-    console.error("[css] otaCss element GONE after", _cssProbeCount * 2, "s; outerHTML start:", document.head.innerHTML.slice(0, 300));
-    _cssProbeCount++;
-  } else if (has && !prop) {
-    console.error("[css] otaCss present but --n-ico-width missing from computed style — rules dropped");
-  }
-}, 2000);
-
   const k = "mpOtaHealed:" + window.__MP_OTA__ + ":" + SRC_VERSION;
   if (!sessionStorage.getItem(k)) {
     sessionStorage.setItem(k, "1");
@@ -721,6 +705,7 @@ let _lastSavePos = -1;
 function savePlayback() {
   if (!S().resumePlayback) return;
   if (curIndex < 0 || !queue.length) { storeSave("playback", ""); return; }
+  if (playing && !queueSettled) return; // hardPlay in flight: wallPos still carries the previous track
   const pos = Math.round(wallPos());
   if (pos === _lastSavePos && !playing) return; // avoid redundant writes
   _lastSavePos = pos;
@@ -1264,8 +1249,10 @@ function _virtSlice() {
   const host = $("#trackList");
   let padTop = $("#virtTop"), padBot = $("#virtBot"), rowsCont = $("#virtRows");
   if (!padTop || !padBot || !rowsCont) {
-    host.innerHTML = `<div id="virtTop" class="virt-pad"></div><div id="virtRows"></div><div id="virtBot" class="virt-pad"></div>`;
-    padTop = $("#virtTop"); padBot = $("#virtBot"); rowsCont = $("#virtRows");
+    // The view was replaced by a non-list view (YouTube grid, feed, artist…)
+    // without clearing _virt. Rebuilding spacers here would WIPE that view —
+    // the "everything vanishes on scroll" class of bugs. Drop the state instead.
+    _virt = null; return;
   }
   const top = host.scrollTop, vh = host.clientHeight || 600;
   const vpStart = Math.floor(top / v.rowH);
@@ -1427,7 +1414,7 @@ function wireTrackList() {
       _sm.gliding = false;
       _sm.el = host; _sm.target = host.scrollTop; _sm.expect = host.scrollTop;
     }
-    if (!_virt || _virt.raf) return;
+    if (!_virt || _virt.raf) return; // _virtSlice() itself drops _virt if the view is gone
     _virt.raf = requestAnimationFrame(() => { if (_virt) { _virt.raf = 0; _virtSlice(); } });
   }, { passive: true });
   wireReorder(host);
@@ -2253,8 +2240,9 @@ function renderOnlineResults() {
     if (e.target.checked && !onlinePlaylists.length) searchOnline(onlineQuery, ytPage);
     else renderOnlineResults();
   });
-  $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
-  $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
+  const ytPageNow = ytPage;
+  $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPageNow - 1));
+  $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPageNow + 1));
   $("#ytGridBtn")?.addEventListener("click", () => { SETTINGS.setSetting(IS_TOUCH ? "ytViewTouch" : "ytView", "grid"); renderOnlineResults(); });
   $("#ytListBtn")?.addEventListener("click", () => { SETTINGS.setSetting(IS_TOUCH ? "ytViewTouch" : "ytView", "list"); renderOnlineResults(); });
   if (plMode) {
@@ -4309,13 +4297,15 @@ async function hardPlay(i) {
     rpcStop(t); // playback stopped → drop the progress bar
     autoBlockUnplayableTrack(queue[i], String(err));
     const j = nextIndex(i, true);
-    if (j >= 0 && j !== i) {
-      hardPlay(j);
-    }
+    // Bound the cascade like the poll does: without it, ONE play click on a
+    // dead-stream auto-advances (and auto-blocks) through the entire playlist.
+    if (j >= 0 && j !== i && _playFailSkips < 4) { _playFailSkips++; hardPlay(j); }
+    else _playFailSkips = 0;
     return;
   }
   if (seq !== playSeq) return; // superseded by a newer click
   curEpoch = Number(e) || 0;
+  _playFailSkips = 0; _drainSkips = 0; // clean start — any prior failure streak is over
   playing = true; wallStart(0); updatePlayingRow(); startProgressLoop();
   rpcTrack(t);            // fresh track → progress bar at 0 (honours rpcDelay)
   recordHistory(t, queue[i]);
@@ -4366,7 +4356,17 @@ async function togglePlay() {
     // jump to where we left off.
     const pos = _resumePos; _needsStart = false;
     await hardPlay(curIndex);
-    if (pos > 1) { try { await invoke("seek", { secs: pos }); wallSeek(pos); } catch {} }
+    if (pos > 1) {
+      // Only seek once the engine reports a live position: on a stream,
+      // hardPlay returns before yt-dlp resolves the URL, so an immediate seek
+      // lands on a not-yet-existent sink and is silently dropped.
+      for (let k = 0; k < 20 && playing; k++) {
+        const st = await invoke("status").catch(() => null);
+        if (st && (st.epoch || 0) === curEpoch && (st.position > 0 || (st.queued || 0) > 0)) break;
+        await new Promise(r => setTimeout(r, 150));
+      }
+      try { await invoke("seek", { secs: pos }); wallSeek(pos); renderSeek(pos); } catch {}
+    }
     return;
   }
   const cur = trackByPath(queue[curIndex]);
@@ -4380,7 +4380,15 @@ async function togglePlay() {
       if (st && (st.epoch || 0) === curEpoch && st.position > 0 && Math.abs(st.position - wallPos()) > 0.4) { wallSeek(st.position); renderSeek(st.position); }
     } catch {}
   }
-  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); resumeWithRetry(); startProgressLoop(); }
+  else {
+    // Do not resume into a stale sink: if a stream is mid-(re)resolve, `resume`
+    // would wake the PREVIOUS track's sink (wrong song over the new state).
+    try {
+      const st = await invoke("status");
+      if (st && (st.epoch || 0) !== curEpoch) return;
+    } catch {}
+    await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); resumeWithRetry(); startProgressLoop();
+  }
   updatePlayingRow(); mediaPlayback();
 }
 async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); return; } history.push(curIndex); await hardPlay(j); }
@@ -4427,12 +4435,14 @@ function renderBuffer(st) {
   }
   if (!online) return; // nowSub below is stream-only
   const sub = $("#nowSub");
+  const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
+  const base = t ? `${t.artist} — ${t.album}` : "";
   if (pct >= 95) {
-    // Buffered: restore the plain "artist — album" line.
-    const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
-    if (t) sub.textContent = `${t.artist} — ${t.album}`;
+    if (sub.textContent !== base) sub.textContent = base;
   } else if (st.position < 0.5) {
-    sub.textContent = sub.textContent.replace(/ · (?:loading|Chargement)….*$/, "") + ` · Chargement… ${Math.floor(pct)}%`;
+    // Rebuild from scratch every tick: appending/replacing on the running text
+    // leaked a second "Chargement…" suffix whenever some other code touched nowSub.
+    sub.textContent = `${base} · Chargement… ${Math.floor(pct)}%`;
   }
 }
   // Le rAF est démarré/arrêté avec la lecture au lieu de tourner à vie : même un
@@ -4454,6 +4464,7 @@ function renderBuffer(st) {
 let _posTick = 0;
 let _lastAudioErr = "";
 let _drainSkips = 0; // consecutive instant-drain auto-advances (failing streams)
+let _playFailSkips = 0; // consecutive hardPlay() failures in one cascade
 let _pollBusy = false; // un tick encore en vol → on saute celui-ci (pas d'empilement d'IPC)
 function startPolling() {
   setInterval(async () => {
@@ -4517,7 +4528,10 @@ function startPolling() {
         playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
         _drainSkips = 0;
         flash("Playback keeps failing (stream errors) — stopped. Try again in a moment.");
-      } else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); } // queue drained → clear the progress bar
+      } else { // queue drained naturally → stop
+        commitPlay(); wallPause(); savePlayback(); // the last track's played time was being lost (wallPos kept drifting)
+        playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex]));
+      }
     }
     } finally { _pollBusy = false; }
   }, 300);

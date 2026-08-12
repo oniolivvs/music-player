@@ -1,5 +1,5 @@
 {
-  "version": "0.22.95",
+  "version": "0.22.97",
   "entry": "main.js",
   "modules": [
     "main.js",

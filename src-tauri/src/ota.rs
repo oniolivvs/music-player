@@ -132,6 +132,19 @@ fn stored_manifest(app: &tauri::AppHandle) -> Option<OtaManifest> {
 
 /// The frontend version actually running: the applied OTA if it beats the
 /// embedded build, otherwise the embedded build.
+/// OTA delivery can be entirely disabled (useful when the whole channel is
+/// suspected of breaking the UI): kill-switch via env or a marker file.
+pub fn ota_disabled(app: &tauri::AppHandle) -> bool {
+    if std::env::var("MP_NO_OTA").ok().filter(|v| v != "0").is_some() {
+        return true;
+    }
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("NO_OTA").exists())
+        .unwrap_or(false)
+}
+
 fn running_version(app: &tauri::AppHandle) -> String {
     let embedded = env!("CARGO_PKG_VERSION").to_string();
     match stored_manifest(app) {
@@ -145,6 +158,9 @@ fn running_version(app: &tauri::AppHandle) -> String {
 /// APK with a bumped version always wins and a stale OTA is ignored).
 #[tauri::command]
 pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
+    if ota_disabled(&app) {
+        return None;
+    }
     let dir = ota_dir(&app).ok()?;
     let m = stored_manifest(&app)?;
     if ver_cmp(&m.version, env!("CARGO_PKG_VERSION")) <= 0 || !manifest_names_ok(&m) {
@@ -204,6 +220,10 @@ fn native_supports(m: &OtaManifest) -> bool {
 /// Ask the repo whether a newer frontend is available.
 #[tauri::command]
 pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
+    if ota_disabled(&app) {
+        let cur = running_version(&app);
+        return Ok(OtaStatus { available: false, version: cur.clone(), current: cur, notes: "".into() });
+    }
     let raw = get_text(&format!("{RAW_BASE}/ota.json"))?;
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     let current = running_version(&app);
@@ -220,6 +240,9 @@ pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
 /// a half-applied bundle).
 #[tauri::command]
 pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
+    if ota_disabled(&app) {
+        return Err("OTA channel disabled on this install".into());
+    }
     let raw = get_text(&format!("{RAW_BASE}/ota.json"))?;
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     if !targets_this_platform(&m) {

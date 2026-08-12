@@ -33,7 +33,15 @@ pub fn store_load(app: AppHandle, key: String) -> Result<String, String> {
 pub fn store_save(app: AppHandle, key: String, data: String) -> Result<(), String> {
     serde_json::from_str::<serde_json::Value>(&data).map_err(|e| format!("invalid JSON: {e}"))?;
     let path = key_path(&app, &key)?;
-    let tmp = path.with_extension("json.tmp");
+    // Unique temp per write: two concurrent saves of the SAME key (debounced
+    // settings + playback save) must not interleave on one shared .tmp —
+    // write A/write B/rename A/rename B leaves a hybrid or an ENOENT.
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     fs::write(&tmp, data.as_bytes()).map_err(|e| e.to_string())?;
     fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     Ok(())

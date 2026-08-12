@@ -26,10 +26,10 @@ pub const YT_UA: &str = "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linu
 pub type ReResolve = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 const CAP: usize = 64 * 1024 * 1024; // read-ahead window (64 Mo ≈ 60 min à 96 kbps)
-const BACK: u64 = 256 * 1024; // kept behind the reader for small back-seeks
+const BACK: u64 = 1 * 1024 * 1024; // 1 Mo kept behind the reader for small back-seeks (symphonia's moov probes)
 const CHUNK: usize = 64 * 1024; // network read size
 const STALL: Duration = Duration::from_secs(120); // reader gives up after this
-const RETRIES: u32 = 4;
+const RETRIES: u32 = 8;
 /// End-of-file zone served from a dedicated one-shot buffer. YouTube m4a puts
 /// the moov atom at the END: the decoder probe seeks there and back, and
 /// dragging the streaming window along cost two full reconnects before any
@@ -164,6 +164,12 @@ fn connect(url: &str, pos: u64, len: u64) -> Result<(Box<dyn Read + Send>, Optio
     // why streaming failed while the native DOWNLOADER (a plain GET) worked. So
     // fetch the whole stream with a plain GET at pos 0, and for seeks use
     // googlevideo's own `&range=` QUERY parameter instead of the header.
+    if len > 0 && pos >= len {
+        // EOF: a stale `len` or a fetch-at-end retry would build the invalid
+        // range `pos-(len-1)` (start > end), which googlevideo rejects — the
+        // caller would see an error instead of a clean end-of-stream.
+        return Ok((Box::new(io::empty()), Some(len)));
+    }
     let ranged;
     let target = if pos == 0 {
         url
@@ -215,6 +221,11 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                     let drop = (keep_from - g.start) as usize;
                     g.buf.drain(..drop);
                     g.start = keep_from;
+                    // Wake a possibly-waiting reader: `start` just moved, so a
+                    // reader parked in cv.wait must re-evaluate its window NOW
+                    // — otherwise it can sleep out the whole stall budget even
+                    // though its bytes are buffered — the audible "coupure".
+                    cv.notify_all();
                 }
                 let end = g.start + g.buf.len() as u64;
                 if end >= len || g.buf.len() >= CAP {
@@ -243,7 +254,11 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                             cv.notify_all();
                             return;
                         }
-                        thread::sleep(Duration::from_millis(300 * (attempt as u64 + 1)));
+                        // Exponential backoff up to 5s between attempts — the
+                        // previous 300ms×n max (~5 s total) could not outlive a
+                        // 30 s network drop, killing streams the reader-side
+                        // 120 s stall budget would happily have waited out.
+                        thread::sleep(Duration::from_millis((300u64 << attempt).min(5000)));
                         continue;
                     }
                 }
@@ -258,7 +273,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                         cv.notify_all();
                         return;
                     }
-                    thread::sleep(Duration::from_millis(300 * (attempt as u64 + 1)));
+                    thread::sleep(Duration::from_millis((300u64 << attempt).min(5000)));
                 }
                 Ok(n) => {
                     conn.as_mut().unwrap().1 = from + n as u64;
