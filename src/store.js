@@ -12,6 +12,16 @@ export async function storeLoad(key) {
   return localStorage.getItem("mp." + key) || "";
 }
 
+// Same read, but a FAILURE PROPAGATES instead of looking like an empty store.
+// For anything whose emptiness is destructive: coming up with an empty library
+// makes the app rebuild one from the playlists' yt: paths and save that over the
+// real file. Callers that can lose data must use this and refuse to save when it
+// throws; callers with a harmless default can keep using storeLoad.
+export async function storeLoadStrict(key) {
+  if (IS_NATIVE) return await T.core.invoke("store_load", { key });
+  return localStorage.getItem("mp." + key) || "";
+}
+
 export async function storeSave(key, data) {
   if (IS_NATIVE) {
     try { await T.core.invoke("store_save", { key, data }); }

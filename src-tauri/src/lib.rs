@@ -25,6 +25,15 @@ struct AppState {
 // Scans read tags from hundreds of files — async so the UI thread never blocks.
 #[tauri::command]
 async fn scan(paths: Vec<String>) -> Result<Vec<Track>, String> {
+    // An unreachable root must FAIL, not return an empty list: `addSource` drops
+    // an already-registered folder when the scan comes back with nothing, so a
+    // sleeping external drive used to erase the source and all of its tracks.
+    for p in &paths {
+        let c = library::canon(p);
+        if !std::path::Path::new(&c).is_dir() {
+            return Err(format!("source unavailable: {p}"));
+        }
+    }
     Ok(library::scan_library(&paths))
 }
 
@@ -40,12 +49,25 @@ async fn scan_diff(
 /// Ground-truth existence check used to validate library-cache paths: the JS
 /// `libraryLocalFor` trusts the library list blindly, so a deleted/moved/corrupt
 /// file still counts as "downloaded" (ghost) until this prunes it.
+/// Tri-state on purpose: `1` = the file is really there, `0` = it is really
+/// gone, `-1` = could not tell (permission denied, drive offline, sharing
+/// violation, path too long). The old `bool` collapsed the last two, and the
+/// frontend DELETES library rows on a false — so an unavailable download folder
+/// pruned every downloaded track from the library, one 250 ms batch at a time,
+/// with a full re-render on each batch. Never prune on `-1`.
 #[tauri::command]
-fn fs_exists(path: String) -> bool {
+fn fs_exists(path: String) -> i32 {
     let p = std::path::Path::new(&path);
     match std::fs::metadata(p) {
-        Ok(m) => m.is_file() && m.len() > 0,
-        Err(_) => false,
+        Ok(m) => {
+            if m.is_file() && m.len() > 0 {
+                1
+            } else {
+                0
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(_) => -1,
     }
 }
 
@@ -444,13 +466,16 @@ fn platform_asset_match(name: &str) -> bool {
 /// Self-update downloads must come from GitHub (the release host) over HTTPS.
 /// The URL reaches these commands from the webview, so a compromised frontend
 /// must not be able to turn the updater into an arbitrary-file downloader.
+/// Pinned to THIS project's release assets, not to github.com at large.
+/// `download_installer` writes an executable and `run_installer` then launches
+/// it silently with `/S`, so "any github.com URL" meant any GitHub user could
+/// host the payload: an attacker who could make one `invoke` call from the
+/// webview had silent code execution. Restrict it to the one prefix that can
+/// only be written to by this repository's own releases.
 fn github_release_url(url: &str) -> bool {
-    let rest = match url.strip_prefix("https://") {
-        Some(r) => r,
-        None => return false,
-    };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    host == "github.com" || host == "api.github.com" || host.ends_with(".githubusercontent.com")
+    const RELEASES: &str = "https://github.com/oniolivvs/music-player/releases/download/";
+    // No traversal games in the tag/filename segments either.
+    url.starts_with(RELEASES) && !url.contains("..") && !url.contains('\\')
 }
 
 /// `run_installer` only ever launches what `download_installer` saved — refuse
@@ -806,6 +831,17 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
     let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
     // Force-checkout the chosen version: the source tree is only ever a clean
     // checkout, so this is safe and avoids a "dirty tree" dead-end for the user.
+    // `rev` arrives from the webview. Git treats a leading `-` as an OPTION, so
+    // an unvalidated rev turns this into an arbitrary `git checkout` invocation.
+    // Tags and SHAs only need this alphabet; anything else is rejected outright.
+    if rev.is_empty()
+        || rev.len() > 100
+        || rev.starts_with('-')
+        || rev.contains("..")
+        || !rev.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    {
+        return Err("invalid version reference".into());
+    }
     let co = git_out(&dir, &["-c", "advice.detachedHead=false", "checkout", "-f", &rev])
         .map_err(|e| e.to_string())?;
     if !co.status.success() {
@@ -904,7 +940,7 @@ pub fn run() {
             youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::net_image, library::delete_file, library::open_path,
-            library::canon_path, library::canon_paths, library::folder_size,
+            library::canon_path, library::canon_paths, library::folder_size, library::register_roots,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear,
             importer::import_spotify

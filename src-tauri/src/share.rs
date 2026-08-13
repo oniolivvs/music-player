@@ -137,11 +137,22 @@ fn serve(server: Server, shared: Shared) {
     // Brute-force guard: the 6-digit code has 1M combinations, so throttle
     // wrong guesses hard (the loop is single-threaded — the sleep gates every
     // request) and lock the server outright past a count no legit user hits.
+    // The counter DECAYS: without it, 1000 wrong guesses over a whole session
+    // bricked the server for the legitimate user until the app was restarted,
+    // and a passer-by could trigger that deliberately. One token is restored per
+    // minute of clean operation, which keeps brute-forcing hopeless (1M codes)
+    // while letting an honest device recover.
     let mut bad_codes: u32 = 0;
+    let mut last_decay = std::time::Instant::now();
     const LOCK_AFTER: u32 = 1000;
     for request in server.incoming_requests() {
         if shared.stop.load(std::sync::atomic::Ordering::Relaxed) {
             break;
+        }
+        let mins = last_decay.elapsed().as_secs() / 60;
+        if mins > 0 {
+            bad_codes = bad_codes.saturating_sub(mins as u32);
+            last_decay = std::time::Instant::now();
         }
         let url = request.url().to_string();
         let path = url.split('?').next().unwrap_or("").to_string();
@@ -179,7 +190,15 @@ fn serve(server: Server, shared: Shared) {
         }
         if let Some(key) = path.strip_prefix("/file/") {
             match shared.files.get(key) {
-                Some(fpath) => serve_file(request, fpath, &url),
+                // Streaming a track used to run INLINE on the accept loop, so one
+                // peer downloading a file blocked every other request — including
+                // /ping, which is how the other device decides we are alive. Hand
+                // the transfer to its own thread and keep accepting.
+                Some(fpath) => {
+                    let fpath = fpath.clone();
+                    let url = url.clone();
+                    std::thread::spawn(move || serve_file(request, &fpath, &url));
+                }
                 None => {
                     let _ = request.respond(Response::from_string("not found").with_status_code(404));
                 }
@@ -188,6 +207,32 @@ fn serve(server: Server, shared: Shared) {
         }
         let _ = request.respond(Response::from_string("not found").with_status_code(404));
     }
+}
+
+/// A share peer is another copy of this app on the local network, reachable at a
+/// literal private IP. Restricting to those ranges is what makes this command
+/// unusable as an SSRF primitive: no DNS name (so no rebinding), no public host,
+/// and explicitly no 169.254.0.0/16 — that is where cloud instance-metadata
+/// services live, and they are the classic target of a "just fetch this URL" bug.
+fn check_peer_url(url: &str) -> Result<(), String> {
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .ok_or("share downloads must use http(s)")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority);
+    let ip: std::net::Ipv4Addr = host
+        .parse()
+        .map_err(|_| "share downloads only accept a local IP address".to_string())?;
+    let o = ip.octets();
+    let private = o[0] == 10
+        || (o[0] == 172 && (16..=31).contains(&o[1]))
+        || (o[0] == 192 && o[1] == 168)
+        || o[0] == 127;
+    if !private || (o[0] == 169 && o[1] == 254) {
+        return Err("share downloads are restricted to the local network".into());
+    }
+    Ok(())
 }
 
 /// Serve a file with HTTP Range support so the client can stream + seek.
@@ -357,6 +402,11 @@ pub async fn share_download(
     id: String,
 ) -> Result<String, String> {
     use tauri::Emitter;
+    // The peer that hands us this URL is on the LAN, and its address is not a
+    // trusted input: unrestricted, this command fetched ANY URL the frontend (or
+    // a paired device) named — an SSRF probe into the local network and into
+    // cloud metadata endpoints, with the response written to disk.
+    check_peer_url(&url)?;
     let dir = if dir.trim().is_empty() {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
@@ -370,7 +420,15 @@ pub async fn share_download(
         dir
     };
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    crate::library::register_root(&crate::library::canon(&dir));
     let safe: String = name.chars().map(|c| if "/\\:*?\"<>|".contains(c) { '_' } else { c }).collect();
+    // ".." survives the character filter above (no separator in it), and a bare
+    // ".." would make `path` the parent directory itself.
+    let safe = if safe.trim().is_empty() || safe.trim_matches('.').is_empty() {
+        "track".to_string()
+    } else {
+        safe
+    };
     let path = format!("{dir}/{safe}");
     let part = format!("{path}.part");
 
@@ -388,6 +446,14 @@ pub async fn share_download(
         }
         std::io::Write::write_all(&mut out, &buf[..n]).map_err(|e| e.to_string())?;
         done += n as u64;
+        // Hard cap: Content-Length is the peer's claim, not a fact, so an
+        // endless body could otherwise fill the disk.
+        const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+        if done > MAX_BYTES {
+            drop(out);
+            let _ = std::fs::remove_file(&part);
+            return Err("transfer aborted: file exceeds 2 GB".into());
+        }
         if total > 0 {
             let pct = ((done * 100) / total) as i32;
             if pct != last {
@@ -400,4 +466,36 @@ pub async fn share_download(
     drop(out);
     std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod peer_url_tests {
+    use super::check_peer_url;
+
+    #[test]
+    fn accepts_lan_peers() {
+        for u in [
+            "http://192.168.1.24:8080/file/abc",
+            "http://10.0.0.5:5000/file/x",
+            "http://172.16.3.9:1234/file/x",
+            "http://127.0.0.1:9000/file/x",
+        ] {
+            assert!(check_peer_url(u).is_ok(), "should accept {u}");
+        }
+    }
+
+    #[test]
+    fn blocks_ssrf_targets() {
+        for u in [
+            "http://169.254.169.254/latest/meta-data/",  // cloud metadata
+            "http://8.8.8.8/x",                          // public
+            "http://evil.com/x",                         // DNS name (rebinding)
+            "http://localhost:9000/x",                   // name, not a literal IP
+            "http://172.32.0.1/x",                       // just outside 172.16/12
+            "file:///etc/passwd",
+            "ftp://192.168.1.2/x",
+        ] {
+            assert!(check_peer_url(u).is_err(), "must reject {u}");
+        }
+    }
 }

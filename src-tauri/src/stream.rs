@@ -25,7 +25,12 @@ pub const YT_UA: &str = "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linu
 /// address rotates. Re-resolving gets a URL valid for the current address.
 pub type ReResolve = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
-const CAP: usize = 64 * 1024 * 1024; // read-ahead window (64 Mo ≈ 60 min à 96 kbps)
+// Read-ahead window. 8 Mo is still >10 min of audio at the 96 kbps playback cap,
+// which is far more than any stall this needs to ride out. It used to be 64 Mo,
+// and `VecDeque::with_capacity(CAP)` reserved the whole thing UP FRONT — with a
+// preloaded next track that was 128 Mo of resident memory for two audio streams,
+// which Android simply kills the app for.
+const CAP: usize = 8 * 1024 * 1024;
 const BACK: u64 = 1 * 1024 * 1024; // 1 Mo kept behind the reader for small back-seeks (symphonia's moov probes)
 const CHUNK: usize = 64 * 1024; // network read size
 const STALL: Duration = Duration::from_secs(120); // reader gives up after this
@@ -204,7 +209,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
     loop {
         // Decide the next fetch offset under the lock (or wait).
         let from = {
-            let mut g = lock.lock().unwrap();
+            let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
             loop {
                 if g.dead {
                     return;
@@ -231,7 +236,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                 if end >= len || g.buf.len() >= CAP {
                     // Fully buffered (to EOF or capacity) — sleep until poked.
                     cv.notify_all();
-                    g = cv.wait(g).unwrap();
+                    g = cv.wait(g).unwrap_or_else(|e| e.into_inner());
                     continue;
                 }
                 break end;
@@ -249,7 +254,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                     Ok((r, _)) => conn = Some((r, from)),
                     Err(e) => {
                         if attempt == RETRIES {
-                            let mut g = lock.lock().unwrap();
+                            let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                             g.err = Some(e);
                             cv.notify_all();
                             return;
@@ -268,7 +273,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                 Ok(0) | Err(_) => {
                     conn = None; // early EOF or error — reconnect
                     if attempt == RETRIES {
-                        let mut g = lock.lock().unwrap();
+                        let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                         g.err = Some("stream connection lost".into());
                         cv.notify_all();
                         return;
@@ -284,7 +289,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
         }
 
         if let Some(n) = read_n {
-            let mut g = lock.lock().unwrap();
+            let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
             // Only append if the window didn't move while we were reading.
             if g.start + g.buf.len() as u64 == from {
                 g.buf.extend(&tmp[..n]);
@@ -310,7 +315,10 @@ impl HttpStream {
         let shared = Arc::new((
             Mutex::new(Shared {
                 start: 0,
-                buf: VecDeque::with_capacity(CAP),
+                // Grow on demand instead of reserving the whole window: most
+                // tracks never need it, and the allocation was pure resident
+                // memory from the first byte.
+                buf: VecDeque::with_capacity(CHUNK * 64),
                 target: 0,
                 err: None,
                 dead: false,
@@ -365,7 +373,7 @@ impl Read for HttpStream {
             return Ok(n);
         }
         let (lock, cv) = &*self.shared;
-        let mut g = lock.lock().unwrap();
+        let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
         g.target = self.pos;
         cv.notify_all();
         let deadline = Instant::now() + STALL;
@@ -397,7 +405,7 @@ impl Read for HttpStream {
             if remaining.is_zero() {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "stream stalled"));
             }
-            let (ng, _) = cv.wait_timeout(g, remaining).unwrap();
+            let (ng, _) = cv.wait_timeout(g, remaining).unwrap_or_else(|e| e.into_inner());
             g = ng;
         }
     }

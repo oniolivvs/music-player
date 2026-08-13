@@ -480,7 +480,7 @@ static VISITOR: OnceLock<Mutex<Option<(Instant, String)>>> = OnceLock::new();
 
 fn visitor_data() -> Result<String, String> {
     let cell = VISITOR.get_or_init(|| Mutex::new(None));
-    if let Some((at, vd)) = cell.lock().unwrap().as_ref() {
+    if let Some((at, vd)) = cell.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         if at.elapsed() < Duration::from_secs(3 * 3600) {
             return Ok(vd.clone());
         }
@@ -500,7 +500,7 @@ fn visitor_data() -> Result<String, String> {
         .and_then(|(_, r)| r.split_once('"'))
         .map(|(v, _)| v.to_string())
         .ok_or("could not obtain visitorData")?;
-    *cell.lock().unwrap() = Some((Instant::now(), vd.clone()));
+    *cell.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), vd.clone()));
     Ok(vd)
 }
 
@@ -627,7 +627,7 @@ pub async fn download(
 
     let path = format!("{dir}/{} [{id}].m4a", safe_filename(&title));
     let part = format!("{path}.part");
-    dls.canceled.lock().unwrap().remove(id);
+    dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
 
     // A stream URL can occasionally 403 (expired) — re-resolve a fresh player +
     // URL and retry a few times.
@@ -655,7 +655,7 @@ pub async fn download(
     let mut done: u64 = 0;
     let mut last_pct: i32 = -1;
     loop {
-        if dls.canceled.lock().unwrap().remove(id) {
+        if dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).remove(id) {
             drop(out);
             let _ = std::fs::remove_file(&part);
             return Err("canceled".into());

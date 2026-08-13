@@ -49,7 +49,15 @@ fn pkce() -> (String, String) {
         let mut seed = Vec::new();
         seed.extend_from_slice(&now().to_le_bytes());
         seed.extend_from_slice(&std::process::id().to_le_bytes());
-        b.copy_from_slice(&Sha256::digest(&seed)[..32].repeat(2)[..48]);
+        // Two DIFFERENT digests, not one digest repeated: the old
+        // `[..32].repeat(2)[..48]` copied bytes 0..16 into 32..48, so a
+        // 48-byte verifier carried only 32 bytes of entropy.
+        let d1 = Sha256::digest(&seed);
+        let mut seed2 = seed.clone();
+        seed2.push(1);
+        let d2 = Sha256::digest(&seed2);
+        b[..32].copy_from_slice(&d1);
+        b[32..].copy_from_slice(&d2[..16]);
     }
     let v = URL_SAFE_NO_PAD.encode(b);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(v.as_bytes()));
@@ -77,6 +85,13 @@ pub async fn gdrive_sign_in(
         return Err("Enter your Google OAuth Client ID first.".into());
     }
     let (verifier, challenge) = pkce();
+    // CSRF token for the redirect. Without it the loopback handler accepted the
+    // first `code=` from ANY request: while the 3-minute window is open, any
+    // local process — or any web page the user happens to visit, since the port
+    // is guessable — could GET http://127.0.0.1:<port>/?code=<their code> and
+    // silently bind this app to the ATTACKER's Google account. Their sync bundle
+    // (playlists, follows, URLs) would then flow into the user's library.
+    let (state_tok, _) = pkce();
 
     // Loopback server catches ?code=… on 127.0.0.1:<port>.
     let server = tiny_http::Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -85,11 +100,12 @@ pub async fn gdrive_sign_in(
 
     let auth = format!(
         "{AUTH_URL}?client_id={cid}&redirect_uri={redir}&response_type=code&scope={scope}\
-         &code_challenge={ch}&code_challenge_method=S256&access_type=offline&prompt=consent",
+         &code_challenge={ch}&code_challenge_method=S256&access_type=offline&prompt=consent&state={st}",
         cid = urlenc(&client_id),
         redir = urlenc(&redirect),
         scope = urlenc(SCOPE),
         ch = challenge,
+        st = urlenc(&state_tok),
     );
     open_browser(&app, &auth);
 
@@ -100,10 +116,22 @@ pub async fn gdrive_sign_in(
             match server.recv_timeout(std::time::Duration::from_secs(1)) {
                 Ok(Some(req)) => {
                     let url = req.url().to_string();
-                    let code = url
-                        .split_once('?')
-                        .and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("code=")))
-                        .map(|c| c.to_string());
+                    let q = url.split_once('?').map(|(_, q)| q).unwrap_or("");
+                    let field = |k: &str| {
+                        q.split('&').find_map(|kv| {
+                            kv.strip_prefix(k).map(urldec)
+                        })
+                    };
+                    // The state must come back byte-for-byte, or this redirect
+                    // was not the one we started. `code` is percent-decoded:
+                    // Google codes can contain '/' and '+', and the raw form
+                    // broke the exchange for those.
+                    let got_state = field("state=").unwrap_or_default();
+                    let code = if ct_eq_str(&got_state, &state_tok) {
+                        field("code=")
+                    } else {
+                        None
+                    };
                     let body = if code.is_some() {
                         "<h2>Signed in ✔</h2><p>You can close this tab and return to Music Player.</p>"
                     } else {
@@ -133,6 +161,53 @@ pub async fn gdrive_sign_in(
     let tokens = Tokens { email: email.clone(), ..tok };
     *state.0.lock().map_err(|_| "lock")? = tokens.clone();
     Ok(SignInResult { email, tokens })
+}
+
+/// Percent-decoding for the loopback query string (`+` is a space in a query).
+fn urldec(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => {
+                let hex = |c: u8| match c {
+                    b'0'..=b'9' => Some(c - b'0'),
+                    b'a'..=b'f' => Some(c - b'a' + 10),
+                    b'A'..=b'F' => Some(c - b'A' + 10),
+                    _ => None,
+                };
+                match (hex(b[i + 1]), hex(b[i + 2])) {
+                    (Some(h), Some(l)) => {
+                        out.push((h << 4) | l);
+                        i += 3;
+                    }
+                    _ => {
+                        out.push(b[i]);
+                        i += 1;
+                    }
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Constant-time compare for the OAuth state token.
+fn ct_eq_str(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() || a.is_empty() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn urlenc(s: &str) -> String {
@@ -312,7 +387,15 @@ pub async fn gdrive_push(
         }
         None => {
             // Multipart create in appDataFolder (metadata + content in one call).
-            let boundary = "mpsyncboundary1234";
+            // The boundary must not appear in the payload, or the request body
+            // is split in the wrong place and the upload is silently corrupt.
+            // A FIXED boundary made that reachable: a playlist or track title
+            // containing the literal string was enough.
+            let mut boundary = String::from("mpsyncboundary1234");
+            while bundle.contains(&boundary) {
+                boundary = format!("mpsync{}b", now());
+            }
+            let boundary = boundary.as_str();
             let meta = format!("{{\"name\":\"{SYNC_FILE}\",\"parents\":[\"appDataFolder\"]}}");
             let body = format!(
                 "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n\

@@ -92,6 +92,11 @@ fn safe_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && !name.contains("..")
+        // "." passed every other check, and `dir.join(".")` resolves to the
+        // directory itself. Require a real name with an extension.
+        && !name.starts_with('.')
+        && name.contains('.')
+        && !name.ends_with('.')
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
@@ -114,15 +119,36 @@ fn ota_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Semver-ish compare: -1 / 0 / 1, missing components treated as 0.
 fn ver_cmp(a: &str, b: &str) -> i32 {
-    let pa: Vec<i64> = a.split('.').map(|x| x.parse().unwrap_or(0)).collect();
-    let pb: Vec<i64> = b.split('.').map(|x| x.parse().unwrap_or(0)).collect();
+    // Split the pre-release suffix off FIRST. Parsing "1.0.0-beta" component-wise
+    // gave [1, 0, 0] (the "0-beta" segment fell through `unwrap_or(0)`), so a
+    // pre-release compared EQUAL to the stable release of the same number and
+    // the OTA silently refused to move in either direction.
+    let split = |v: &str| -> (Vec<i64>, String) {
+        let (num, pre) = v.split_once('-').unwrap_or((v, ""));
+        (
+            num.split('.').map(|x| x.trim().parse().unwrap_or(0)).collect(),
+            pre.to_string(),
+        )
+    };
+    let (pa, prea) = split(a);
+    let (pb, preb) = split(b);
     for i in 0..pa.len().max(pb.len()) {
         let d = pa.get(i).copied().unwrap_or(0) - pb.get(i).copied().unwrap_or(0);
         if d != 0 {
             return if d < 0 { -1 } else { 1 };
         }
     }
-    0
+    // Same numbers: per semver, a pre-release sorts BELOW its stable release.
+    match (prea.is_empty(), preb.is_empty()) {
+        (true, true) => 0,
+        (true, false) => 1,
+        (false, true) => -1,
+        (false, false) => match prea.cmp(&preb) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Greater => 1,
+            std::cmp::Ordering::Equal => 0,
+        },
+    }
 }
 
 fn stored_manifest(app: &tauri::AppHandle) -> Option<OtaManifest> {
@@ -276,16 +302,37 @@ pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
         files.push((name.clone(), body));
     }
 
+    // Stage into a SIBLING directory and swap it in, so the live `ota/` is never
+    // observed half-written. Writing file-by-file into the live directory with
+    // manifest.json last meant a crash (or a kill) mid-loop left new modules
+    // paired with the old manifest — a mixed bundle that boots broken. The
+    // download loop above is already all-or-nothing; this makes the write so too.
     let dir = ota_dir(&app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let staging = dir.with_extension("new");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     for (name, body) in &files {
-        std::fs::write(dir.join(name), body).map_err(|e| e.to_string())?;
+        std::fs::write(staging.join(name), body).map_err(|e| e.to_string())?;
     }
     std::fs::write(
-        dir.join("manifest.json"),
+        staging.join("manifest.json"),
         serde_json::to_string(&m).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
+    // rename() cannot replace a non-empty directory, so retire the old one first.
+    let retired = dir.with_extension("old");
+    let _ = std::fs::remove_dir_all(&retired);
+    if dir.exists() {
+        std::fs::rename(&dir, &retired).map_err(|e| e.to_string())?;
+    }
+    if let Err(e) = std::fs::rename(&staging, &dir) {
+        // Put the previous bundle back rather than leaving no frontend at all.
+        let _ = std::fs::rename(&retired, &dir);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&retired);
     Ok(m.version)
 }
 
@@ -297,4 +344,36 @@ pub fn ota_rollback(app: tauri::AppHandle) -> Result<(), String> {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::{safe_name, ver_cmp};
+
+    #[test]
+    fn version_ordering() {
+        assert_eq!(ver_cmp("0.22.98", "0.22.97"), 1);
+        assert_eq!(ver_cmp("0.22.97", "0.22.98"), -1);
+        assert_eq!(ver_cmp("0.22.97", "0.22.97"), 0);
+        assert_eq!(ver_cmp("1.0", "1.0.0"), 0); // missing components are 0
+    }
+
+    #[test]
+    fn prerelease_sorts_below_its_release() {
+        // The old component-wise parse made these EQUAL, so the OTA never moved.
+        assert_eq!(ver_cmp("1.0.0-beta", "1.0.0"), -1);
+        assert_eq!(ver_cmp("1.0.0", "1.0.0-beta"), 1);
+        assert_eq!(ver_cmp("1.0.0-alpha", "1.0.0-beta"), -1);
+        assert_eq!(ver_cmp("1.0.1-beta", "1.0.0"), 1); // numbers still win first
+    }
+
+    #[test]
+    fn manifest_names_stay_inside_the_ota_dir() {
+        for good in ["main.js", "style.css", "index.html", "store.js"] {
+            assert!(safe_name(good), "should accept {good}");
+        }
+        for bad in ["", ".", "..", "../x.js", "a/b.js", r"a\b.js", ".hidden", "noext", "trailing."] {
+            assert!(!safe_name(bad), "must reject {bad:?}");
+        }
+    }
 }

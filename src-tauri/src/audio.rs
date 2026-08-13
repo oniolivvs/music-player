@@ -94,7 +94,7 @@ fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool, err: &Arc<Mutex<O
         b.build().map_err(|e| e.to_string())
     }) {
         Ok(dec) => append_source(sink, dec, gain, agc),
-        Err(e) => { let msg = format!("can't play this file: {e}"); eprintln!("[audio] {msg}"); *err.lock().unwrap() = Some(msg); }
+        Err(e) => { let msg = format!("can't play this file: {e}"); eprintln!("[audio] {msg}"); *err.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg); }
     }
 }
 
@@ -117,7 +117,7 @@ fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool, err: &Arc<Mutex<Opti
             let clean = strip_url(&e.to_string());
             let msg = format!("can't play this stream: {clean}");
             eprintln!("[audio] {msg}");
-            *err.lock().unwrap() = Some(msg);
+            *err.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg);
         }
     }
 }
@@ -164,7 +164,7 @@ impl AudioController {
             // Mark that the thread reached here — if the diagnostic ever shows
             // this, the open code below never returned (hang), vs "" = thread
             // never spawned.
-            *info_t.lock().unwrap() = "opening…".to_string();
+            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = "opening…".to_string();
             // The OutputStream must stay alive for the whole thread. The audio
             // system can be briefly unavailable at cold start (esp. Android),
             // so retry a few times before giving up loudly. A custom error
@@ -186,7 +186,7 @@ impl AudioController {
                                 b.with_error_callback(move |e| {
                                     let m = format!("audio output error: {e}");
                                     eprintln!("[audio] {m}");
-                                    *cb_err.lock().unwrap() = Some(m);
+                                    *cb_err.lock().unwrap_or_else(|e| e.into_inner()) = Some(m);
                                 })
                                 .open_stream()
                             })
@@ -199,8 +199,8 @@ impl AudioController {
                                 .or_else(|| p.downcast_ref::<String>().cloned())
                                 .unwrap_or_else(|| "panic".into());
                             eprintln!("[audio] open panicked: {m} (attempt {attempt})");
-                            *info_t.lock().unwrap() = format!("open panicked: {m}");
-                            *err_t.lock().unwrap() = Some(format!("audio panic: {m}"));
+                            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open panicked: {m}");
+                            *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("audio panic: {m}"));
                             thread::sleep(std::time::Duration::from_millis(500));
                             continue;
                         }
@@ -210,10 +210,10 @@ impl AudioController {
                         Err(e) => {
                             let msg = format!("no audio output device: {e}");
                             if attempt % 4 == 0 { eprintln!("[audio] {msg} (attempt {attempt})"); }
-                            *err_t.lock().unwrap() = Some(msg.clone());
+                            *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg.clone());
                             // Show the real reason live in the diagnostic even
                             // while retrying (not only after giving up).
-                            *info_t.lock().unwrap() = format!("open failed: {e}");
+                            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open failed: {e}");
                             thread::sleep(std::time::Duration::from_millis(500));
                         }
                     }
@@ -221,23 +221,23 @@ impl AudioController {
                 match got {
                     Some(v) => {
                         let c = v.config();
-                        *info_t.lock().unwrap() = format!(
+                        *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!(
                             "{:?} · {} ch · {:?}",
                             c.sample_rate(), c.channel_count(), c.sample_format()
                         );
-                        *err_t.lock().unwrap() = None;
+                        *err_t.lock().unwrap_or_else(|e| e.into_inner()) = None;
                         v
                     }
                     None => {
                         // Give up, but expose WHY (the real cpal/AAudio error) so
                         // the "Audio output" diagnostic shows the cause.
-                        let why = err_t.lock().unwrap().clone().unwrap_or_else(|| "unknown".into());
-                        *info_t.lock().unwrap() = format!("open failed: {why}");
+                        let why = err_t.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| "unknown".into());
+                        *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open failed: {why}");
                         return;
                     }
                 }
             };
-            *sink_t.lock().unwrap() = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));
+            *sink_t.lock().unwrap_or_else(|e| e.into_inner()) = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));
 
             while let Ok(cmd) = rx.recv() {
                 let agc_on = agc_t.load(Ordering::Relaxed);
@@ -245,25 +245,25 @@ impl AudioController {
                     match cmd {
                         AudioCmd::Play(path, gain, epoch) => {
                             let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
-                            new_sink.set_volume(*vol_t.lock().unwrap());
+                            new_sink.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
                             append_track(&new_sink, &path, gain, agc_on, &err_t);
                             new_sink.play();
                             // Drop the OLD sink (decoder + its streaming fetcher
                             // thread) OUTSIDE the mutex — its Drop joins the
                             // fetcher, and doing it under the lock stalls every
                             // sync IPC (status/seek/volume) for the duration.
-                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(new_sink)));
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap_or_else(|e| e.into_inner()), (epoch, Some(new_sink)));
                             drop(old);
                         }
                         AudioCmd::Preload(path, gain) => {
-                            let s = sink_t.lock().unwrap().1.clone();
+                            let s = sink_t.lock().unwrap_or_else(|e| e.into_inner()).1.clone();
                             if let Some(s) = s {
                                 append_track(&s, &path, gain, agc_on, &err_t);
                             }
                         }
                         AudioCmd::PlayUrl(url, gain, epoch, rr) => {
                             let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
-                            new_sink.set_volume(*vol_t.lock().unwrap());
+                            new_sink.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
                             append_url(&new_sink, &url, gain, agc_on, &err_t, rr.clone());
                             // A failed append leaves the sink EMPTY → silence with a
                             // "playing" UI (the pause-then-resume bug). Retry once
@@ -282,19 +282,19 @@ impl AudioController {
                                 }
                             }
                             new_sink.play();
-                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(new_sink)));
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap_or_else(|e| e.into_inner()), (epoch, Some(new_sink)));
                             drop(old);
                         }
                         AudioCmd::PreloadUrl(url, gain, rr) => {
-                            let s = sink_t.lock().unwrap().1.clone();
+                            let s = sink_t.lock().unwrap_or_else(|e| e.into_inner()).1.clone();
                             if let Some(s) = s {
                                 append_url(&s, &url, gain, agc_on, &err_t, rr);
                             }
                         }
                         AudioCmd::Clear(epoch) => {
                             let s = Arc::new(Sink::connect_new(stream.mixer()));
-                            s.set_volume(*vol_t.lock().unwrap());
-                            let old = std::mem::replace(&mut *sink_t.lock().unwrap(), (epoch, Some(s)));
+                            s.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
+                            let old = std::mem::replace(&mut *sink_t.lock().unwrap_or_else(|e| e.into_inner()), (epoch, Some(s)));
                             drop(old);
                         }
                     }
@@ -304,7 +304,7 @@ impl AudioController {
                         .or_else(|| p.downcast_ref::<String>().cloned())
                         .unwrap_or_else(|| "decoder panic".into());
                     eprintln!("[audio] command processing panicked: {m}");
-                    *err_t.lock().unwrap() = Some(format!("audio panic: {m}"));
+                    *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("audio panic: {m}"));
                 }
             }
         });
@@ -323,12 +323,12 @@ impl AudioController {
     /// The last silent playback failure (empty if none) — the frontend shows it
     /// so "no sound" isn't a mystery. Reading it clears it.
     pub fn take_error(&self) -> Option<String> {
-        self.last_err.lock().unwrap().take()
+        self.last_err.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     /// Opened audio-device config, or "" if none opened (device diagnostics).
     pub fn info(&self) -> String {
-        self.info.lock().unwrap().clone()
+        self.info.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Toggle automatic loudness normalization (applies to the NEXT queued
@@ -346,7 +346,7 @@ impl AudioController {
         self.next_epoch.fetch_add(1, Ordering::Relaxed) + 1
     }
     fn with_sink<R>(&self, f: impl FnOnce(&Sink) -> R) -> Option<R> {
-        self.sink.lock().unwrap().1.as_ref().map(|s| f(&**s))
+        self.sink.lock().unwrap_or_else(|e| e.into_inner()).1.as_ref().map(|s| f(&**s))
     }
 
     pub fn play(&self, path: String, gain: f32) -> u64 {
@@ -378,7 +378,7 @@ impl AudioController {
     }
     pub fn set_volume(&self, level: f32) {
         let level = level.clamp(0.0, 2.0);
-        *self.vol.lock().unwrap() = level;
+        *self.vol.lock().unwrap_or_else(|e| e.into_inner()) = level;
         self.with_sink(|s| s.set_volume(level));
     }
     pub fn seek(&self, secs: f64) {
@@ -387,7 +387,7 @@ impl AudioController {
         });
     }
     pub fn status(&self) -> PlaybackStatus {
-        let guard = self.sink.lock().unwrap();
+        let guard = self.sink.lock().unwrap_or_else(|e| e.into_inner());
         let (buffered, total_bytes) = crate::stream::last_fetch_head();
         match &guard.1 {
             Some(s) => PlaybackStatus {

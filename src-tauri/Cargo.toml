@@ -40,7 +40,10 @@ base64 = "0.22"
 # Wallpaper downscale before it reaches the WebView (read_image in src/library.rs):
 # raw 4K+ wallpapers under a big CSS blur buffer choked the compositor (PC freeze).
 # default-features off: no gif ravif / rayon / png exif extras we never use.
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# "gif" is needed to DECODE and RE-ENCODE animated backgrounds. Without it a GIF
+# could not be decoded at all, so it bypassed the downscaler entirely and was
+# handed to the webview at full size — which is why only small ones worked.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # LAN device sharing (src/share.rs): a tiny sync HTTP server (host) + the ureq
 # client already present. Pure-Rust, cross-compiles to Android.
 tiny_http = "0.12"

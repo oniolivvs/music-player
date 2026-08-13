@@ -21,3 +21,17 @@ Thumbs.db
 # Private dev notes — never push to GitHub
 CLAUDE.md
 .foreman/
+.claude/
+.graphify/
+.cursor/
+.aider*
+.codex/
+.github/copilot*
+AGENTS.md
+MEMORY.md
+PUSH_LOGS.md
+TODO.md
+MISTAKES_TO_AVOID.md
+WORKFLOW_EXAMPLE.md
+PLUGINS_INSTALLED.md
+_reco_harness_tmp.html

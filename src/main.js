@@ -4,7 +4,7 @@
 
 import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
-import { storeLoad, storeSave } from "./store.js";
+import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
 
 // Signals to the index.html OTA bootstrap that this frontend loaded — its
 // watchdog rolls back to the embedded build if this never runs (broken OTA).
@@ -118,6 +118,10 @@ const IC = {
   play: `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
   list: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
   refresh: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>`,
+  // Referenced by the "For you" rail since it was introduced, but never defined
+  // here — so it silently fell back to a raw ✨ emoji that matched none of the
+  // other icons.
+  sparkle: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg>`,
   x: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>`,
   minus: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>`,
@@ -173,7 +177,18 @@ function wallPos() { const now = clock.pausedAt !== null ? clock.pausedAt : perf
 // ─── helpers ───
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = String(s % 60).padStart(2, "0"); return `${m}:${x}`; }
-function baseName(p) { return String(p || "").split("/").filter(Boolean).pop() || p; }
+// Split on BOTH separators: the Rust side hands back native paths, so on Windows
+// these used to see no "/" at all — baseName returned the whole "D:\...\x.mp3"
+// as a display name, and dirOf's old inline form (slice to lastIndexOf("/") = -1)
+// silently produced "the full path minus its last character". The post-download
+// rescanFolder(dir) therefore scanned a directory that does not exist, which is
+// why downloaded tracks never picked up their real tags on Windows.
+function baseName(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop() || p; }
+function dirOf(p) {
+  const s = String(p || "");
+  const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+  return i > 0 ? s.slice(0, i) : "";
+}
 function inFolder(t, f) {
   // Normalize \ → / (and drop any trailing slash) before comparing: on Windows
   // both the source folder and the scanned track paths are stored with
@@ -578,6 +593,14 @@ function ensureArtObserver() {
 function hydrateCovers() {
   if (!S().showArt) return;
   ensureArtObserver();
+  // Drop the previous targets first. unobserve() above only fires for rows that
+  // actually INTERSECT, and the virtual list destroys its rows on every re-slice
+  // — so every buffered row and everything scrolled past stayed observed, as a
+  // detached node the observer kept alive AND re-tested on every scroll frame.
+  // Scrolling a long list once left thousands of them, and the list got choppier
+  // the longer the session ran. The next line re-observes everything currently
+  // mounted, so nothing is lost.
+  if (artObserver) artObserver.disconnect();
   const arts = document.querySelectorAll("#trackList .art[data-album]:not(.has-cover)");
   if (artObserver) arts.forEach(el => artObserver.observe(el));
   else { const seen = new Set(); for (const t of view.slice(0, 60)) { const k = albumKey(t); if (!seen.has(k)) { seen.add(k); fetchCover(t); } } }
@@ -587,7 +610,16 @@ function refreshView() { if (active.type === "source") openSource(active.id); el
 // The Android WebView won't load external network background-images, so YouTube
 // covers (i.ytimg…) are proxied through the Rust backend into inline data: URLs
 // (which DO render, like local covers). Desktop loads them natively → no-op.
+// Values are base64 data: URLs (tens of KB each), so this must not grow without
+// bound — browsing a few thousand YouTube results used to retain tens of MB of
+// strings for the life of the process, which Android does not forgive. A Map
+// iterates in insertion order, so the first key is the oldest: evict that.
 const _netThumb = new Map();
+const THUMB_CACHE_MAX = 400;
+function _thumbCache(k, v) {
+  if (_netThumb.size >= THUMB_CACHE_MAX) _netThumb.delete(_netThumb.keys().next().value);
+  _netThumb.set(k, v);
+}
 // Only a handful of net_image fetches in flight at once: each call occupies a
 // backend worker, and a 100-card search page firing them all simultaneously
 // used to starve the pool — the first covers painted, the rest never resolved.
@@ -604,7 +636,7 @@ function _thumbPump() {
 async function _thumbFetch(clean) {
   try {
     const d = await invoke("net_image", { url: clean });
-    _netThumb.set(clean, d);
+    _thumbCache(clean, d);
     return d;
   } catch (e) {
     // hq720.jpg only exists for HD uploads (404 otherwise) — mqdefault.jpg
@@ -614,7 +646,7 @@ async function _thumbFetch(clean) {
     const fb = `https://i.ytimg.com/vi/${m[1]}/mqdefault.jpg`;
     if (fb === clean) throw e;
     const d = await invoke("net_image", { url: fb });
-    _netThumb.set(clean, d);
+    _thumbCache(clean, d);
     return d;
   }
 }
@@ -654,7 +686,7 @@ function proxyCovers(root) {
   // form). data: URLs are the one path that provably renders everywhere
   // (local covers, now-playing art). net_image caches per URL, so a page of
   // results costs one fetch per unique thumb.
-  scope.querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
+  scope.querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover, .reco-thumb").forEach(el => {
     const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
     if (!m || el.dataset.proxied === m[1]) return;
     const src = m[1];
@@ -701,22 +733,38 @@ async function loadOnline() {
 // ─── Resume where you left off (Settings → Playback) ───
 // Persist the current queue + track + position so the next launch restores it,
 // PAUSED, at the same spot. Saved on pause / track change / periodically.
-let _lastSavePos = -1;
+let _lastSavePos = -1, _lastQueueSig = "";
 function savePlayback() {
   if (!S().resumePlayback) return;
-  if (curIndex < 0 || !queue.length) { storeSave("playback", ""); return; }
+  if (curIndex < 0 || !queue.length) { storeSave("playback", ""); storeSave("playbackq", ""); _lastQueueSig = ""; return; }
   if (playing && !queueSettled) return; // hardPlay in flight: wallPos still carries the previous track
   const pos = Math.round(wallPos());
   if (pos === _lastSavePos && !playing) return; // avoid redundant writes
   _lastSavePos = pos;
-  storeSave("playback", JSON.stringify({ queue, index: curIndex, position: pos, shuffle }));
+  // The QUEUE is written separately, and only when it actually changes. It used
+  // to ride along in every periodic save: a full-library queue is ~200 KB of
+  // JSON rewritten every ~4 s of playback (~3 MB/min) when the only fields that
+  // moved were `index` and `position`. On phone flash that is a recurring hitch
+  // and pointless wear.
+  const sig = queue.length + "|" + queue[0] + "|" + queue[queue.length - 1];
+  if (sig !== _lastQueueSig) { _lastQueueSig = sig; storeSave("playbackq", JSON.stringify(queue)); }
+  storeSave("playback", JSON.stringify({ index: curIndex, position: pos, shuffle }));
 }
 async function restorePlayback() {
   if (!S().resumePlayback) return;
   const raw = await storeLoad("playback");
   if (!raw) return;
   let st; try { st = JSON.parse(raw); } catch { return; }
-  if (!st || !Array.isArray(st.queue) || !st.queue.length || st.index == null) return;
+  if (!st || st.index == null) return;
+  // Back-compat: older builds stored the queue inside "playback" itself, so an
+  // existing install must still resume from that shape.
+  let q = Array.isArray(st.queue) ? st.queue : null;
+  if (!q) {
+    const rawQ = await storeLoad("playbackq");
+    if (rawQ) { try { const p = JSON.parse(rawQ); if (Array.isArray(p)) q = p; } catch {} }
+  }
+  if (!q || !q.length) return;
+  st.queue = q;
   queue = st.queue;
   curIndex = Math.min(Math.max(0, st.index), queue.length - 1);
   shuffle = !!st.shuffle; $("#shuffleBtn").classList.toggle("active", shuffle);
@@ -1031,6 +1079,11 @@ function flash(msg) {
 
 // ─── View header ───
 function setViewHead({ icon = "", title = "", subtitle = "", actions = "" }) {
+  // The "For you" rail is a SIBLING of #trackList, so a view that only rewrites
+  // the track list leaves it behind — recommendations then sat on top of a
+  // playlist or a search result. Only showLibrary re-adds it (right after this
+  // runs), so clearing it at every view switch is the one reliable place.
+  $("#recoRail")?.remove();
   $("#viewHead").innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>${actions ? `<div class="vh-actions">${actions}</div>` : ""}`;
 }
 
@@ -1088,15 +1141,30 @@ function applyPins(list) {
 // no extra setting to keep in sync.
 let _plSrc = null; // { kind: "playlist"|"library", id, idx: [srcIndexForViewRow0, ...] } | null
 
+// One pass to bucket each path's positions, then O(1) per row. The previous
+// form called paths.indexOf() per visible row: since `nextFrom` is keyed by path
+// and paths are almost always unique, the search restarted from 0 every time —
+// n²/2 comparisons (12.5M on a 5000-track library) on every showLibrary().
+// Same semantics: consecutive duplicates take successive positions, and the
+// mapping must stay strictly increasing or reordering is refused.
 function _computeOrderMap(paths) {
-  const nextFrom = new Map();
+  const pos = new Map();
+  for (let i = 0; i < paths.length; i++) {
+    let a = pos.get(paths[i]);
+    if (!a) pos.set(paths[i], a = []);
+    a.push(i);
+  }
+  const cursor = new Map();
   const idx = [];
   let prev = -1;
   for (const t of view) {
-    const from = nextFrom.get(t.path) || 0;
-    const i = paths.indexOf(t.path, from);
-    if (i < 0 || i <= prev) return null; // unmappable or reordered → no drag
-    nextFrom.set(t.path, i + 1);
+    const list = pos.get(t.path);
+    if (!list) return null; // unmappable → no drag
+    const c = cursor.get(t.path) || 0;
+    if (c >= list.length) return null; // more visible copies than the source has
+    const i = list[c];
+    if (i <= prev) return null; // reordered (sorted/pinned/filtered) → no drag
+    cursor.set(t.path, c + 1);
     idx.push(i);
     prev = i;
   }
@@ -1420,12 +1488,12 @@ function wireTrackList() {
   wireReorder(host);
   host.addEventListener("click", (e) => {
     const playBtn = e.target.closest("[data-play]");
-    if (playBtn) { e.stopPropagation(); playInScope(Number(playBtn.dataset.play)); return; }
+    if (playBtn) { e.stopPropagation(); playInScope(rowIdx(playBtn, playBtn.dataset.play)); return; }
     const more = e.target.closest("[data-more]");
     if (more) {
       e.stopPropagation();
-      const idx = Number(more.dataset.more);
-      ensureSelected(view[idx]?.path, idx);
+      const idx = rowIdx(more, more.dataset.more);
+      ensureSelected(more.closest(".track")?.dataset.path || view[idx]?.path, idx);
       const r = more.getBoundingClientRect();
       openContextMenu(r.left, r.bottom);
       return;
@@ -1433,14 +1501,14 @@ function wireTrackList() {
     const row = e.target.closest(".track");
     if (row) {
       // Touch: tap plays immediately; long-press opens the context menu (below).
-      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playInScope(Number(row.dataset.idx)); return; }
-      rowClick(e, Number(row.dataset.idx), row.dataset.path);
+      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playInScope(rowIdx(row, row.dataset.idx)); return; }
+      rowClick(e, rowIdx(row, row.dataset.idx), row.dataset.path);
     }
   });
   host.addEventListener("dblclick", (e) => {
     if (e.target.closest("[data-more]")) return;
     const row = e.target.closest(".track");
-    if (row) playInScope(Number(row.dataset.idx));
+    if (row) playInScope(rowIdx(row, row.dataset.idx));
   });
   host.addEventListener("contextmenu", (e) => {
     const row = e.target.closest(".track");
@@ -1483,6 +1551,22 @@ function rowClick(e, idx, path) {
 }
 function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected.clear(); selected.add(path); anchorIdx = idx; refreshSelectionUI(); } }
 
+// Resolve a click back to its index in `view`. data-idx/-play/-more are stamped
+// at render time and CAN go stale — a section rendered with placeholder indices
+// that no reindex pass reaches keeps pointing at view[0]. The row's own
+// data-path is the ground truth, so it wins whenever the two disagree; the
+// attribute is only a fast path (and the fallback for grids drawn outside
+// `view`). Without this, a ⋮ on a stale card opened the context menu on someone
+// else's track — and "Download track locally" queued that other track.
+function rowIdx(el, attr) {
+  const i = Number(attr);
+  const path = el?.closest?.(".track")?.dataset.path;
+  if (!path) return i;
+  if (view[i] && view[i].path === path) return i;
+  const j = view.findIndex(x => x.path === path);
+  return j >= 0 ? j : i;
+}
+
 // ─── Context menu ───
 // The on-disk file backing a selected path (the path itself if it's local, or
 // its downloaded twin for an online path), plus the videoId if any.
@@ -1505,7 +1589,17 @@ function trackKey(t) {
   const title = norm(t.title), artist = norm(t.artist);
   if (!title || title === "unknown") return "";
   const dur = Math.round((Number(t.duration_secs) || 0) / 2);
-  return `ta:${title}|${artist}|${dur}`;
+  // A zero duration means UNKNOWN, not "0 seconds". Untagged rips all report 0
+  // and "Unknown Artist" (see read_track's error branch), so with a shared
+  // filename stem two unrelated files collided on one key — and saveLibrary
+  // deletes the loser. No duration, no identity claim: return "" (unkeyable),
+  // which saveLibrary already keeps as-is.
+  if (!dur) return "";
+  // Album included: without it, two DIFFERENT songs that share title + artist +
+  // duration silently deleted each other — an "Intro" on two albums by the same
+  // artist, or a studio and a live take within the ±2 s tolerance.
+  const album = norm(t.album);
+  return `ta:${title}|${artist}|${album}|${dur}`;
 }
 // Richer entry wins when two rows share a key: prefer one with a real local
 // file, then metadata completeness (thumbnail + duration), as rank score.
@@ -1548,22 +1642,43 @@ function probeLocal(path) {
 function _pumpProbes() {
   while (_probeActive < PROBE_PARALLEL && _probeQ.length) {
     const path = _probeQ.shift(); _probeActive++;
-    invoke("fs_exists", { path }).then(ok => {
-      if (ok) _localOk.set(path, true);
-      else { _localOk.delete(path); _pruneRemove(path); }
+    // fs_exists is tri-state: 1 there, 0 gone, -1 could not tell. Pruning on
+    // anything but a definite 0 deleted the whole library whenever the download
+    // folder was momentarily unavailable (drive asleep, permission lapsed, file
+    // locked mid-write). On -1 just forget the cached answer and re-probe later.
+    invoke("fs_exists", { path }).then(st => {
+      if (st === 1 || st === true) _localOk.set(path, true);
+      else if (st === 0 || st === false) { _localOk.delete(path); _pruneRemove(path); }
+      else _localOk.delete(path);
     }).catch(() => _localOk.delete(path))
       .finally(() => { _probeActive--; _pumpProbes(); });
   }
 }
 // videoId → [local paths] index, so libraryLocalFor is O(#candidates), not
 // O(library) with a regex per entry × per rendered row (~the big launch cost).
+// Indexes EVERY [11-char] tag in the filename, not just the trailing one, so the
+// index is a strict superset of what the old whole-library `path.includes(tag)`
+// fallback could find — which is what lets that fallback go away. It used to run
+// on every miss, i.e. for every online track with no local copy (the normal
+// case), scanning the whole library each time: on a 5000-track library a single
+// "open Library" spent hundreds of ms in it before drawing a row.
+// Deliberately scoped to the BASENAME: matching the full path is what let a
+// folder called "[Discography]" masquerade as a video id.
+const VID_TAG_G = /\[([A-Za-z0-9_-]{11})\]/g;
 function _rebuildLocalIdx() {
   _localIdx.byId.clear();
   for (const x of library) {
     if (isOnline(x.path)) continue;
-    const id = x.id || x.videoId || videoIdOf(x.path);
-    if (!id) continue;
-    (_localIdx.byId.get(id) || _localIdx.byId.set(id, []).get(id)).push(x.path);
+    const ids = new Set();
+    if (x.id) ids.add(x.id);
+    if (x.videoId) ids.add(x.videoId);
+    const base = String(x.path).split(/[\\/]/).pop() || "";
+    for (const m of base.matchAll(VID_TAG_G)) ids.add(m[1]);
+    for (const id of ids) {
+      let a = _localIdx.byId.get(id);
+      if (!a) _localIdx.byId.set(id, a = []);
+      a.push(x.path);
+    }
   }
   _localIdx.built = true;
 }
@@ -1600,9 +1715,19 @@ function netSummary(paths) {
 function downloadablePaths(paths) {
   return paths.filter(p => isStreamTrack(p) && !dlBlock[ytId(p)]);
 }
+// The [videoId] tag is part of the FILENAME that yt-dlp writes ("Title [id].mp3"),
+// so it must be matched there and nowhere else. Unanchored, this matched any
+// folder in the path whose name happened to be 11 of [A-Za-z0-9_-] inside
+// brackets — and "[Discography]", "[Compilation]", "[Soundtracks]",
+// "[Collections]" are all exactly 11 characters. Every file under such a folder
+// then shared one fake video id, so trackKey collapsed the entire discography to
+// a single song and saveLibrary DELETED the rest. It also poisoned blocking
+// (block one track, hide the folder) and the suppression filter.
+const VID_TAG = /\[([A-Za-z0-9_-]{11})\](?:\.[A-Za-z0-9]+)?$/;
 function videoIdOf(p) {
   if (isOnline(p)) return ytId(p);
-  const m = String(p).match(/\[([A-Za-z0-9_-]{11})\]/);
+  const base = String(p).split(/[\\/]/).pop() || "";
+  const m = base.match(VID_TAG);
   return m ? m[1] : null;
 }
 // Delete the on-disk files for these paths. Remaining playlist references are
@@ -1884,6 +2009,19 @@ async function diffFolder(folder) {
   const diff = await invoke("scan_diff", { paths: [folder], known }).catch(e => { console.error("[scan]", e); return null; });
   if (!diff) return 0;
   const present = new Set(diff.present || []);
+  // `present` is used as PROOF OF DELETION below, so it may only be trusted when
+  // the walk actually completed. An unplugged drive, a revoked Android
+  // permission or one unreadable subtree used to come back as an empty (or
+  // partial) `present` — indistinguishable from "the user deleted everything" —
+  // and every track under this source was dropped from the library and saved.
+  // Belt & braces: a scan that reports nothing where we had tracks is treated as
+  // unreliable too, even if the backend believed it was complete.
+  const had = library.reduce((n, t) => n + (inFolder(t, folder) ? 1 : 0), 0);
+  if (diff.complete === false || (had && present.size === 0)) {
+    console.warn("[scan] unreliable scan of", folder, "— keeping the cached tracks");
+    flash(`Could not fully read ${baseName(folder)} — its tracks were kept`);
+    return 0;
+  }
   const have = new Set(known);
   const fresh = (diff.new_tracks || []).filter(t => !have.has(t.path)); // belt & braces
   // Keep tracks outside this folder + this folder's tracks that still exist, add new.
@@ -1919,7 +2057,9 @@ async function removeSource(folder) {
 async function plCoverInto(el, pl) {
   if (!el || !pl) return;
   let url = "";
-  if (pl.image) { try { url = await invoke("read_image", { path: pl.image }); } catch {} }
+  // Silent on purpose here (this runs for every playlist card on every render —
+  // flashing per card would be noise), but the reason must still be inspectable.
+  if (pl.image) { try { url = await invoke("read_image", { path: pl.image }); } catch (e) { console.warn("[cover]", pl.image, e); } }
   if (!url && S().showArt) {
     for (const p of pl.paths.slice(0, 15)) {
       const t = trackByPath(p) || onlineIndex.get(p);
@@ -2049,8 +2189,9 @@ async function addByUrl(plId) {
     const tracks = (res.tracks || []).map(onlineFromResult);
     if (!tracks.length) { flash("Nothing found at that URL"); return; }
     tracks.forEach(t => onlineIndex.set(t.path, t));
-    let n = 0;
-    for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) n++; }
+    const added = [];
+    for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) added.push(t); }
+    const n = added.length;
     saveOnline();
     renderPlaylists();
     if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
@@ -2059,7 +2200,9 @@ async function addByUrl(plId) {
     // click "Save locally" for the same intent is one step too many.
     // Only genuinely downloadable tracks are offered — not the ones that
     // already have a local file, nor those already known unavailable.
-    if (n) await offerDownloadNew(tracks.map(t => t.path), "playlist");
+    // Only what was actually ADDED — passing every track at the URL made the
+    // prompt say "Save 50 new tracks" when 49 were already in the playlist.
+    if (n) await offerDownloadNew(added.map(t => t.path), "playlist");
   } catch (e) { flash(`Could not add: ${e}`); }
 }
 
@@ -2319,10 +2462,14 @@ function prependPlaylistList(pls) {
 // keep painting. Pin every thumb to a measured pixel height instead — the
 // fixed-size box is the one recipe that renders on every engine we've met.
 function fixThumbHeights(root) {
-  (root || document).querySelectorAll(".yc-thumb").forEach(el => {
-    const w = el.clientWidth;
-    if (w) el.style.height = Math.round(w * 9 / 16) + "px";
-  });
+  // Read every width FIRST, then write every height. Interleaving them made each
+  // write invalidate layout for the next read — one forced synchronous reflow
+  // per card (~50 of them on a YouTube grid page).
+  const els = [...(root || document).querySelectorAll(".yc-thumb")];
+  const widths = els.map(el => el.clientWidth);
+  for (let i = 0; i < els.length; i++) {
+    if (widths[i]) els[i].style.height = Math.round(widths[i] * 9 / 16) + "px";
+  }
 }
 // ─── Wheel smoothing ───
 // There used to be a second smoother here, smoothWheel(el), bound directly to
@@ -2462,14 +2609,19 @@ function importChannelPlaylist(url) {
   impFetch();
 }
 async function downloadArtistAll() {
-  if (!ytArtist) return;
-  const tid = taskStart(`Listing ${ytArtist.title}`, { detail: "fetching the full track list…" });
+  // Pinned once: listing a big channel takes minutes, and any search started
+  // meanwhile reassigns `ytArtist`. Reading the global after the await named the
+  // WRONG artist in the confirm dialog (while queueing the right one), or threw
+  // on `.title` once a new search had reset it to null.
+  const art = ytArtist;
+  if (!art) return;
+  const tid = taskStart(`Listing ${art.title}`, { detail: "fetching the full track list…" });
   let all;
-  try { all = await invoke("yt_channel_all", { url: ytArtist.url }); }
+  try { all = await invoke("yt_channel_all", { url: art.url }); }
   catch (e) { taskEnd(tid, { status: "error", detail: String(e) }); flash(`Could not list tracks: ${e}`); return; }
   if (!all?.length) { taskEnd(tid, { status: "error", detail: "no videos found" }); flash("No videos found on this channel"); return; }
   taskEnd(tid, { detail: `${all.length} tracks listed`, ttl: 4000 });
-  if (!await askConfirm(`Download everything from ${ytArtist.title}?`, `${all.length} track${all.length === 1 ? "" : "s"} will be queued as mp3 (already-downloaded ones are skipped).`, `Download ${all.length}`)) return;
+  if (!await askConfirm(`Download everything from ${art.title}?`, `${all.length} track${all.length === 1 ? "" : "s"} will be queued as mp3 (already-downloaded ones are skipped).`, `Download ${all.length}`)) return;
   const tracks = all.map(onlineFromResult);
   tracks.forEach(t => onlineIndex.set(t.path, t));
   saveOnline();
@@ -2636,7 +2788,10 @@ function mergeSyncBundle(b) {
   // Blocked: union.
   if (Array.isArray(b.blocked)) { const before = blockedKeys.size; for (const k of b.blocked) blockedKeys.add(k); if (blockedKeys.size !== before) { saveBlocked(); changed = true; } }
   // Follows: union by url.
-  if (Array.isArray(b.follows)) { const urls = new Set(follows.map(f => f.url)); for (const f of b.follows) if (!urls.has(f.url)) { follows.push(f); changed = true; } if (changed) saveFollows(); }
+  // Follows: union by url. autoDownload is deliberately NOT carried over — a
+  // follow created on the phone with "save locally" ticked would otherwise start
+  // filling this machine's disk 20s after launch, with no prompt on this device.
+  if (Array.isArray(b.follows)) { const urls = new Set(follows.map(f => f.url)); for (const f of b.follows) if (!urls.has(f.url)) { follows.push({ ...f, autoDownload: false }); changed = true; } if (changed) saveFollows(); }
   // Settings: apply cloud values (skipping device-specific keys) only if the
   // cloud bundle is newer than our last local change of settings.
   if (b.settings && typeof b.settings === "object") {
@@ -2738,7 +2893,7 @@ async function shareSaveRemote(t) {
   const tid = taskStart("Saving from device", { detail: t.title || name });
   try {
     const file = await invoke("share_download", { url: t._remoteUrl, dir: S().downloadDir || "", name, id: vid || t.path });
-    const dir = file.slice(0, file.lastIndexOf("/"));
+    const dir = dirOf(file);
     // Do NOT silently add the destination folder to Sources — a download should
     // never twist the library's settings. The track list is refreshed by the
     // rescan regardless; whether the folder sticks around is the user's choice.
@@ -2913,10 +3068,12 @@ async function impGo() {
   if (following) {
     // Everything fetched now counts as "known" — only FUTURE additions to the
     // playlist will be auto-added (respecting the tracks the user unticked).
+    const pickedSet = new Set(chosen.map(t => t.path));
     addFollow({
       url: $("#impDest").dataset.url, title: $("#impDest").dataset.title,
       playlistId: dest, autoDownload: $("#impDl").checked,
       knownIds: impTracks.map(t => ytId(t.path)),
+      skipIds: impTracks.filter(t => !pickedSet.has(t.path)).map(t => ytId(t.path)),
     });
   }
   renderPlaylists();
@@ -2932,6 +3089,27 @@ async function impGo() {
 // ─── Download manager (queue + action bar, cancelable) ───
 const dlQueue = []; // {path, id, title, status: queued|active|done|error|canceled, pct, tries, err}
 let dlRunning = false, dlStopAll = false, dlNotice = "";
+
+// Persist + redraw at most once every DL_FLUSH_MS while a batch is running,
+// instead of once per completed track. `flushDlNow` is the drain: called when
+// the pump finishes and before the window closes, so nothing is ever left
+// unsaved. See the call site in the download runner for why this matters.
+const DL_FLUSH_MS = 1500;
+let _dlFlushT = null, _dlFlushPending = false;
+function scheduleDlFlush() {
+  _dlFlushPending = true;
+  if (_dlFlushT) return;
+  _dlFlushT = setTimeout(() => { _dlFlushT = null; flushDlNow(); }, DL_FLUSH_MS);
+}
+async function flushDlNow() {
+  if (_dlFlushT) { clearTimeout(_dlFlushT); _dlFlushT = null; }
+  if (!_dlFlushPending) return;
+  _dlFlushPending = false;
+  await saveLibrary();
+  await saveOnline();
+  renderPlaylists();
+  refreshView();
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // Only these errors are worth retrying: YouTube throttling/bot-check, the
 // format-availability roulette, or network blips. EVERYTHING else (copyright
@@ -2993,13 +3171,28 @@ function setBlocked(paths, on) {
 }
 // Drop blocked tracks from a list unless the user chose to reveal them.
 function filterBlocked(list) {
-  if (S().showBlocked) return list;
+  // Nothing is blocked in the common case — skip the whole pass (it runs a
+  // regex per track, on every render).
+  if (!blockedKeys.size || S().showBlocked) return list;
   return list.filter(t => !isBlocked(t.path));
 }
-function autoBlockUnplayableTrack(path, reason = "") {
+async function autoBlockUnplayableTrack(path, reason = "") {
   if (!path) return;
   if (!isOnline(path)) {
-    // Local file missing or inaccessible on disk: purge from library and revert playlists
+    // "Could not play it" is NOT "the file is gone". An audio device grabbed in
+    // exclusive mode, headphones unplugged mid-track, a decoder hiccup or a file
+    // locked by another program all landed here — and each one permanently
+    // deleted a local track from the library and rewrote its playlist entry to a
+    // yt: stream. Ask the filesystem before destroying anything.
+    if (IS_NATIVE) {
+      let st = -1;
+      try { st = await invoke("fs_exists", { path }); } catch {}
+      if (st !== 0 && st !== false) {
+        flash(reason ? `Playback failed (${reason}) — the file is still there` : "Playback failed — the file is still there");
+        return;
+      }
+    }
+    // Local file really is missing: purge from library and revert playlists.
     library = library.filter(x => x.path !== path);
     saveLibrary();
     const vid = videoIdOf(path);
@@ -3360,12 +3553,9 @@ async function downloadPlaylist(id) {
 function libraryLocalFor(id) {
   if (!id) return null;
   if (!_localIdx.built) _rebuildLocalIdx();
-  let cands = _localIdx.byId.get(id) || [];
-  // Fallback for files whose id isn't in [brackets] (we match on the name tag).
-  if (!cands.length) {
-    const tag = `[${id}]`;
-    for (const x of library) if (!isOnline(x.path) && x.path.includes(tag)) { cands.push(x.path); }
-  }
+  // No fallback scan: _rebuildLocalIdx indexes every [id] tag in the filename,
+  // so an empty bucket genuinely means "no local file for this id".
+  const cands = _localIdx.byId.get(id) || [];
   let cand = null, probed = false;
   for (const path of cands) {
     const st = _localOk.get(path);
@@ -3500,7 +3690,7 @@ async function dlPump() {
         // purpose" suppression lifts and the track is never proposed again.
         if (d.id && suppressedSet.delete(d.id)) saveSuppressed();
         if (d.id && dlDeclined.delete(d.id)) saveDeclined();
-        dir = file.slice(0, file.lastIndexOf("/"));
+        dir = dirOf(file);
         PL.replacePath(d.path, file); // playlists now point at the local file
         const meta = onlineIndex.get(d.path) || {};
         if (!library.some(x => x.path === file)) {
@@ -3514,10 +3704,14 @@ async function dlPump() {
             thumbnail: meta.thumbnail || d.thumbnail || ""
           });
         }
-        await saveLibrary();
-        await saveOnline();
-        renderPlaylists();
-        refreshView();
+        // Coalesced: this used to run per FINISHED TRACK, inside a pool of up to
+        // 4 concurrent downloads. saveLibrary dedupes the whole library and
+        // stringifies megabytes, renderPlaylists is O(playlists × library) and
+        // refreshView redraws everything — so a 200-track batch spent minutes
+        // with the UI frozen, exactly while the user is most likely scrolling.
+        // The in-memory state above (library.push / PL.replacePath) is already
+        // correct and synchronous; only the persist + redraw is deferred.
+        scheduleDlFlush();
       } catch (e) {
         const msg = String(e);
         if (msg.includes("canceled") || dlStopAll) { d.status = "canceled"; }
@@ -3579,6 +3773,9 @@ async function dlPump() {
   // the playlist then keeps its `yt:` path, the track still counts as not
   // downloaded, and vanishes from the filtered view just as it landed on disk.
   // That was the cause of "only the tracks from before the download show up".
+
+  // Settle anything scheduleDlFlush() still owes before reading the library.
+  await flushDlNow();
 
   let relinked = 0;
   for (const d of dlQueue) {
@@ -3805,15 +4002,19 @@ function _paintReco(tracks) {
   const rail = document.createElement("div");
   rail.id = "recoRail";
   rail.className = "reco-rail";
-  rail.innerHTML = `<div class="reco-head"><span class="reco-title">${IC.sparkle || "✨"} For you</span><span class="reco-sub">from your listening</span>
+  rail.innerHTML = `<div class="reco-head"><span class="reco-title">${IC.sparkle} For you</span><span class="reco-sub">from your listening</span>
     <button class="btn-line sm reco-refresh" title="Refresh recommendations">${ic(IC.refresh)} Refresh</button></div>
     <div class="reco-row">` + tracks.slice(0, 20).map((t, i) => `
       <div class="reco-card" data-ri="${i}" title="${esc(t.title)}">
-        <div class="reco-thumb" style="background-image:url('${esc(t.thumbnail)}')"></div>
+        <div class="reco-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}></div>
         <div class="reco-t">${esc(t.title)}</div>
         <div class="reco-a">${esc(t.artist)}</div>
       </div>`).join("") + `</div>`;
   listHost.parentElement.insertBefore(rail, listHost);
+  // Remote thumbnails must go through the Rust proxy like every other cover:
+  // network background-images do not paint on the engines this app runs on, so
+  // without this the cards stay blank even once they are styled.
+  proxyCovers(rail);
   rail.querySelector(".reco-refresh")?.addEventListener("click", () => { _recoState.loaded = false; renderRecoRail(); });
   rail.querySelectorAll(".reco-card").forEach(el => el.addEventListener("click", async () => {
     const t = tracks[Number(el.dataset.ri)];
@@ -3834,6 +4035,14 @@ function _paintReco(tracks) {
 // play / select / context-menu delegation works untouched — `view` is the
 // concatenation of every track on screen.
 const _feedState = { day: "", forYou: null, trending: null, current: null };
+// What each section CURRENTLY has on screen, keyed by section id. Kept apart
+// from _feedState on purpose: _feedState is the per-day cache of the ONLINE
+// sections only, so a local section (History, rebuilt on every render and never
+// cached) had no entry there and _reindexFeed skipped it — its cards kept the
+// placeholder data-idx/data-more="0" and every ⋮ / ▶ on a History card resolved
+// to view[0], i.e. the first "For you" recommendation. Downloading from that
+// menu then queued a recommendation nobody asked for.
+const _feedShown = Object.create(null);
 function ytFeedSections() {
   const want = String(S().ytFeedSections || "forYou,trending,current,history").split(",").map(s => s.trim()).filter(Boolean);
   const all = [
@@ -3897,6 +4106,7 @@ function showYtFeed() {
   const today = new Date().toISOString().slice(0, 10);
   if (_feedState.day !== today) { _feedState.day = today; _feedState.forYou = _feedState.trending = _feedState.current = null; }
   view = [];
+  for (const k of Object.keys(_feedShown)) delete _feedShown[k]; // nothing is on screen yet
   host.innerHTML = secs.length
     ? secs.map(sec => `<div class="feed-section" data-sec="${sec.id}">
         <div class="list-sep"><span class="fs-title">${sec.icon} ${esc(sec.title)}</span><span class="fs-sub" data-sec-sub></span><button class="btn-line sm feed-refresh" data-sec-refresh="${sec.id}" title="Refresh this section">${ic(IC.refresh)} Refresh</button></div>
@@ -3921,8 +4131,9 @@ async function _renderFeedSection(sec, host) {
     if (sec.id in _feedState) _feedState[sec.id] = tracks;
   }
   const section = host.querySelector(`[data-sec="${sec.id}"]`);
-  if (!tracks || !tracks.length) { if (section) section.remove(); _reindexFeed(host); return; }
+  if (!tracks || !tracks.length) { delete _feedShown[sec.id]; if (section) section.remove(); _reindexFeed(host); return; }
   cardsEl.innerHTML = tracks.map(t => _feedCard(t, 0)).join(""); // idx rewritten by _reindexFeed
+  _feedShown[sec.id] = tracks; // must be set BEFORE _reindexFeed, cached or not
   section.querySelector("[data-sec-sub]").textContent = `${tracks.length} track${tracks.length === 1 ? "" : "s"}`;
   _reindexFeed(host);
   proxyCovers(cardsEl);
@@ -3935,7 +4146,7 @@ async function _renderFeedSection(sec, host) {
 function _reindexFeed(host) {
   view = [];
   for (const s of ytFeedSections()) {
-    const cur = _feedState[s.id];
+    const cur = _feedShown[s.id];
     const el = host.querySelector(`[data-sec-cards="${s.id}"]`);
     if (!el || !Array.isArray(cur)) continue;
     const cards = el.querySelectorAll(".yt-card");
@@ -4403,6 +4614,7 @@ async function prev() {
 // position changes (seek from the media widget, engine re-sync on pause) still
 // repaint the bar instead of leaving a stale fill behind the thumb.
 let _lastTimeTxt = "", _lastSeekVal = -1;
+let _seekCap = { path: null, cap: Infinity };
 function renderSeek(p) {
   const el = $("#seek");
   const max = Number(el.max) || 1;
@@ -4411,7 +4623,15 @@ function renderSeek(p) {
   // sur la durée du morceau si le JS la connaît, sinon on laisse filer (le
   // ranger est limité par le step=0.1 et la position réelle du wall clock).
   if (curIndex >= 0) {
-    const cap = max > 1 ? max : (trackByPath(queue[curIndex])?.duration_secs || Infinity);
+    let cap = max;
+    if (max <= 1) {
+      // trackByPath scans the whole library, and this runs on every animation
+      // frame — memoize it per track instead. max<=1 is the normal state for a
+      // freshly resolved stream, so this was the hot path, not the rare one.
+      const path = queue[curIndex];
+      if (path !== _seekCap.path) _seekCap = { path, cap: trackByPath(path)?.duration_secs || Infinity };
+      cap = _seekCap.cap;
+    }
     p = Math.min(p, cap);
   }
   el.value = p;
@@ -4910,6 +5130,9 @@ function rpcStop() { _rpcClearTimers(); clearRPC(); }
 
 // ─── Library (persisted) ───
 async function saveLibrary() {
+  // Never write over a library we failed to read — that turns a transient read
+  // error into permanent data loss.
+  if (_libraryLoadFailed) { console.warn("[library] save refused: this session never loaded it"); return; }
   // Last-line guard: never persist two rows for the SAME SONG, whatever path code
   // inserted them. Identity is musical (trackKey), not path-string — so a
   // "yt:<id>" + its local mp3 (with or without [id]) collapse to ONE entry.
@@ -4937,9 +5160,32 @@ async function saveLibrary() {
   enrichLibrary();
   await storeSave("library", JSON.stringify({ folders, tracks: library }));
 }
+// Set when the library file could not be READ (or was corrupt). While it is on,
+// saveLibrary refuses to write: an unreadable library.json used to surface as
+// "you have no music", adoptPlaylistOnline then refilled `library` with the yt:
+// paths from the playlists, and the first save overwrote the real file with only
+// the online entries. One bad launch, whole local library gone — and that is
+// exactly the "everything is online-only now" report.
+let _libraryLoadFailed = false;
 async function loadLibrary() {
-  const raw = await storeLoad("library");
-  if (raw) { try { const d = JSON.parse(raw); folders = Array.isArray(d.folders) ? d.folders : []; library = Array.isArray(d.tracks) ? d.tracks : []; } catch {} }
+  let raw = "";
+  try { raw = await storeLoadStrict("library"); }
+  catch (e) {
+    _libraryLoadFailed = true;
+    console.error("[library] load failed:", e);
+    flash("Library file unreadable — it will NOT be overwritten this session");
+    return;
+  }
+  if (!raw) return; // genuinely absent (first run, or cleared on purpose)
+  try {
+    const d = JSON.parse(raw);
+    folders = Array.isArray(d.folders) ? d.folders : [];
+    library = Array.isArray(d.tracks) ? d.tracks : [];
+  } catch (e) {
+    _libraryLoadFailed = true;
+    console.error("[library] corrupt JSON:", e);
+    flash("Library file corrupt — it will NOT be overwritten this session");
+  }
 }
 // Heal path aliasing: the SAME file reached through two spellings gives two
 // entries — every track shows up twice. Sources of aliases seen in the wild:
@@ -5151,8 +5397,14 @@ async function applyTheme() {
   if (src && !/^(https?:|data:)/.test(src)) {
     // Local file path → data URL via the backend (cached per path).
     if (_bgCachePath !== src) {
+      // A heavy animated GIF is decoded, downscaled and re-encoded frame by
+      // frame — seconds of work. Say so instead of looking frozen.
+      const heavy = /\.gif$/i.test(src);
+      if (heavy) flash("Preparing the background…");
       try { _bgCacheData = await invoke("read_image", { path: src }); _bgCachePath = src; }
-      catch (e) { console.error("[bg]", e); _bgCacheData = ""; _bgCachePath = src; flash("Background image could not be loaded"); }
+      // Surface the REAL reason: a silent failure here is exactly why an
+      // oversized image looked like "this format isn't supported".
+      catch (e) { console.error("[bg]", e); _bgCacheData = ""; _bgCachePath = src; flash(`Background image: ${e}`); }
     }
     src = _bgCacheData;
   }
@@ -5641,7 +5893,7 @@ function openSettings() {
   $("#setNewTracks")?.addEventListener("change", e => SETTINGS.setSetting("newTrackBehavior", e.target.value));
   $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
   $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
-  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else storeSave("playback", ""); });
+  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else { storeSave("playback", ""); storeSave("playbackq", ""); _lastQueueSig = ""; } });
   $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else storeSave("dlqueue", ""); });
   $("#setHist").addEventListener("change", e => {
     const v = Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0)));
@@ -5751,13 +6003,21 @@ function localPathsHas(pl, ytPath) {
   return !!findInPlaylistLocal(pl, ytId(ytPath));
 }
 
-function addFollow({ url, title, playlistId, autoDownload, knownIds }) {
+// `skipIds` are the tracks the user deliberately left unticked when importing.
+// They must be remembered: they ARE in knownIds (so they don't come back as
+// "brand new"), which made checkFollow classify them as *missing* — known, but
+// absent from the playlist and off disk — and "restore" them, downloading the
+// whole set the user had just declined.
+function addFollow({ url, title, playlistId, autoDownload, knownIds, skipIds }) {
   const dup = follows.find(f => f.url === url);
   if (dup) { // re-following the same URL updates the existing follow
     Object.assign(dup, { title: title || dup.title, playlistId, autoDownload, enabled: true });
     dup.knownIds = [...new Set([...(dup.knownIds || []), ...knownIds])];
+    // A track ticked on a later import is a deliberate opt-in: stop skipping it.
+    const picked = new Set(knownIds || []);
+    dup.skipIds = [...new Set([...(dup.skipIds || []).filter(id => !picked.has(id) || (skipIds || []).includes(id)), ...(skipIds || [])])];
   } else {
-    follows.push({ id: crypto.randomUUID(), url, title: title || "Playlist", playlistId, autoDownload: !!autoDownload, enabled: true, knownIds, lastChecked: Date.now() });
+    follows.push({ id: crypto.randomUUID(), url, title: title || "Playlist", playlistId, autoDownload: !!autoDownload, enabled: true, knownIds, skipIds: skipIds || [], lastChecked: Date.now() });
   }
   saveFollows();
 }
@@ -5770,7 +6030,8 @@ async function checkFollow(f, manual = false) {
   if (res.title) f.title = res.title;
   const tracks = (res.tracks || []).map(onlineFromResult);
   const known = new Set(f.knownIds || []);
-  const brandNew = tracks.filter(t => !known.has(ytId(t.path)));
+  const skip = new Set(f.skipIds || []); // unticked at import — never restore these
+  const brandNew = tracks.filter(t => !known.has(ytId(t.path)) && !skip.has(ytId(t.path)));
   const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
   // A known track is "missing" only if we really don't have it: its local copy
   // replaces its yt: path in the playlist on download, so a raw path check would
@@ -5778,7 +6039,7 @@ async function checkFollow(f, manual = false) {
   // whole playlist on every launch. Test the actual local file / live queue too.
   const inQueue = new Set(dlQueue.filter(d => d.status === "done" || d.status === "queued" || d.status === "active").map(d => ytId(d.path)));
   const hasLocal = id => !!(findInPlaylistLocal(pl, id) || libraryLocalFor(id) || inQueue.has(id));
-  const missing = tracks.filter(t => known.has(ytId(t.path)) && !localPathsHas(pl, t.path) && !hasLocal(ytId(t.path)));
+  const missing = tracks.filter(t => known.has(ytId(t.path)) && !skip.has(ytId(t.path)) && !localPathsHas(pl, t.path) && !hasLocal(ytId(t.path)));
   const fresh = [...brandNew, ...missing];
   f.knownIds = [...new Set([...(f.knownIds || []), ...tracks.map(t => ytId(t.path))])];
   // Never resurrect a track deleted on purpose: it leaves the follow's mirror
@@ -5862,10 +6123,17 @@ async function checkForNewTracks(manual = false) {
       const id = ytId(p);
       if (libIds.has(id) || plIds.has(id) || dlBlock[id] || dlDeclined.has(id) || suppressedSet.has(id)) continue;
       if (libraryLocalFor(id)) continue; // already downloaded somewhere
-      // Not visible in any followed playlist: proposing it would be a surprise
-      // (manual checks are the user asking, so everything unknown is fair game).
+      // Not visible in any followed playlist: proposing it would be a surprise.
+      // This guard used to be skipped for manual checks ("the user is asking, so
+      // everything unknown is fair game") — but onlineIndex is not a list of
+      // things the user wants. It accumulates EVERY YouTube search result, every
+      // previewed import, and the whole index pulled from another device. So
+      // "Check now" offered to download hundreds of titles the user had merely
+      // glanced at, under a dialog that claims "From your followed playlists".
+      // Manual means "check my follows now", not "download my browsing history".
       const linked = follows.some(f => f.enabled !== false && (f.knownIds || []).includes(id));
-      if (!manual && !linked) continue;
+      if (!linked) continue;
+      if (follows.some(f => (f.skipIds || []).includes(id))) continue; // deliberately unticked at import
       cand.push(t);
     }
     if (!cand.length) { if (manual) flash("No new tracks at the source"); return; }
@@ -6358,17 +6626,36 @@ async function init() {
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadSuppressed(), loadDeclined(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
+  // Tell the backend which folders it may delete inside, before anything can
+  // ask it to. delete_file used to accept any media file anywhere on the disk.
+  if (IS_NATIVE) {
+    try { await invoke("register_roots", { paths: [...folders, S().downloadDir || ""].filter(Boolean) }); }
+    catch (e) { console.warn("[roots]", e); }
+  }
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
   // A suppressed id whose "deleted" file is actually still there (deleted
   // elsewhere / restored) gets its memory lifted — health-based, so a ghost
   // library entry for a truly missing file keeps the id suppressed.
   if (suppressedSet.size) {
+    // One pass over the library instead of one per suppressed id: this used to
+    // allocate a fresh copy of every path AND run a regex over the whole library
+    // for each id (50 ids × 5000 tracks = 250k regex runs before first paint).
+    const byId = new Map();
+    for (const t of library) {
+      if (isOnline(t.path)) continue;
+      const v = videoIdOf(t.path);
+      if (!v) continue;
+      let a = byId.get(v);
+      if (!a) byId.set(v, a = []);
+      a.push(t.path);
+    }
     let lifted = 0;
     for (const id of [...suppressedSet]) {
-      for (const p of library.map(t => t.path).filter(x => !isOnline(x) && videoIdOf(x) === id)) {
-        let exists = false;
-        try { exists = !!(await invoke("fs_exists", { path: p })); } catch {}
-        if (exists) { suppressedSet.delete(id); lifted++; break; }
+      for (const p of byId.get(id) || []) {
+        let st = -1;
+        try { st = await invoke("fs_exists", { path: p }); } catch {}
+        // Only a definite "yes" lifts the memory — an unreadable drive must not.
+        if (st === 1 || st === true) { suppressedSet.delete(id); lifted++; break; }
       }
     }
     if (lifted) saveSuppressed();
@@ -6455,8 +6742,19 @@ async function init() {
   });
   $("#seek").addEventListener("pointercancel", () => { seeking = false; });
 
+  // Debounced: each keystroke filters the whole library (a template string +
+  // toLowerCase per track), then re-renders. On desktop that is a few ms; in the
+  // Android WebView it is 25-50 ms per key, which is the "typing lags" feel.
+  // 120 ms is below the perception threshold for a list update and collapses a
+  // burst of typing into one pass.
+  let _searchT = null;
   $("#search").addEventListener("input", e => {
-    const q = e.target.value.trim().toLowerCase();
+    const raw = e.target.value;
+    clearTimeout(_searchT);
+    _searchT = setTimeout(() => runSearch(raw), 120);
+  });
+  function runSearch(raw) {
+    const q = raw.trim().toLowerCase();
     selected.clear();
     if (!q) { refreshView(); return; }
     // Search WITHIN the current view (playlist / folder / library), all words
@@ -6478,15 +6776,18 @@ async function init() {
       const hay = `${t.title} ${t.artist} ${t.album}`.toLowerCase();
       return words.every(w => hay.includes(w));
     });
-    setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” in ${scope} · ${hits.length} match${hits.length === 1 ? "" : "es"} — Enter searches YouTube` });
+    setViewHead({ icon: IC.search, title: "Search", subtitle: `“${raw.trim()}” in ${scope} · ${hits.length} match${hits.length === 1 ? "" : "es"} — Enter searches YouTube` });
     renderTracks(hits);
-  });
+  }
   // Enter: normal search, takes over the view.
   // Ctrl/Cmd+Enter: background search — the view stays put, the result parks in
   // the Activity drawer and opens on click. Several can ripen in parallel while
   // you keep listening.
   $("#search").addEventListener("keydown", e => {
     if (e.key !== "Enter") return;
+    // Drop the pending local filter: otherwise typing fast and hitting Enter let
+    // the debounced local search land AFTER the YouTube view and replace it.
+    clearTimeout(_searchT);
     const q = e.target.value.trim();
     if (!q) return;
     if (e.ctrlKey || e.metaKey) {
@@ -6597,7 +6898,11 @@ async function init() {
   document.addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea")) e.preventDefault(); });
 
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
-  document.addEventListener("scroll", closeCtx, true);
+  // Capture-phase on document = fires for EVERY scroller, including the virtual
+  // list's own high-frequency scroll. Check a cached reference first instead of
+  // running a querySelector on each of those events.
+  const _ctxEl = $("#ctxMenu");
+  document.addEventListener("scroll", () => { if (_ctxEl && !_ctxEl.hidden) closeCtx(); }, true);
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
     if (_dlgResolve) { dlgClose(_dlgHasInput ? null : false); return; }

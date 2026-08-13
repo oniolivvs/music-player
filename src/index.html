@@ -408,7 +408,20 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
        behaves exactly like a normal build. -->
   <script>
   (function () {
-    function embedded() {
+    // `restore` puts the embedded markup back before loading the embedded
+    // main.js. Every fallback below can fire AFTER the OTA body has already been
+    // swapped in, and the embedded main.js then wires itself to a DOM it does
+    // not know: init() is full of unguarded $("#id").addEventListener(...), so
+    // one missing node throws, init() aborts half-way, and the app sits there
+    // partly rendered and partly dead. The watchdog does not catch that either —
+    // main.js DID boot, just against foreign markup.
+    var EMB_BODY = null;
+    function embedded(restore) {
+      if (restore && EMB_BODY !== null) {
+        document.body.innerHTML = EMB_BODY;
+        var bad = document.getElementById("otaCss");
+        if (bad) bad.remove();
+      }
       var s = document.createElement("script");
       s.type = "module"; s.src = "main.js";
       document.body.appendChild(s);
@@ -420,6 +433,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           // Ship DOM changes too: swap in the OTA markup, dropping its scripts
           // (innerHTML never executes them anyway) so this bootstrap stays sole.
           if (b.html) {
+            EMB_BODY = document.body.innerHTML; // keep the embedded markup
             var doc = new DOMParser().parseFromString(b.html, "text/html");
             doc.body.querySelectorAll("script").forEach(function (x) { x.remove(); });
             document.body.innerHTML = doc.body.innerHTML;
@@ -457,7 +471,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
               }
             }
           }
-          if (!urls[b.entry]) { embedded(); return; } // circular/unresolved → safe fallback
+          if (!urls[b.entry]) { embedded(true); return; } // circular/unresolved → safe fallback
           window.__MP_OTA__ = b.version || "?";
           // Watchdog: main.js sets __MP_BOOTED__ once it loads. If a bad OTA
           // build never boots, wipe it and reload into the embedded build.
@@ -469,7 +483,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           }, 7000);
           var s = document.createElement("script"); s.type = "module"; s.src = urls[b.entry];
           document.body.appendChild(s);
-        } catch (e) { embedded(); }
+        } catch (e) { embedded(true); }
       }).catch(function () { embedded(); });
     }
     var n = 0;

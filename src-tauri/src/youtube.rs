@@ -9,6 +9,50 @@ use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 
+/// Every URL that reaches yt-dlp goes through here first.
+///
+/// yt-dlp takes the URL as a POSITIONAL argument, and a positional that starts
+/// with `-` is parsed as an OPTION instead. Options like `--config-locations`,
+/// `--paths`, `--load-info-json` or `--exec` then hand control of the process to
+/// whoever supplied the string. That string is not always the user typing in a
+/// box: Google-Drive sync bundles carry `follows[]`, and each follow's `url` is
+/// fed straight to `yt_playlist` on a timer. Requiring a real YouTube https URL
+/// makes the `-…` shape unrepresentable, and the `--` in the argv lists below is
+/// the second lock on the same door.
+pub fn check_yt_url(url: &str) -> Result<(), String> {
+    const HOSTS: [&str; 6] = [
+        "https://www.youtube.com/",
+        "https://youtube.com/",
+        "https://m.youtube.com/",
+        "https://music.youtube.com/",
+        "https://youtu.be/",
+        "https://www.youtu.be/",
+    ];
+    if url.len() > 2048 {
+        return Err("URL too long".into());
+    }
+    // A control character would let a crafted value break out of a log line or
+    // an argv boundary on some shells; none can appear in a legitimate URL.
+    if url.chars().any(|c| c.is_control()) {
+        return Err("invalid URL".into());
+    }
+    if HOSTS.iter().any(|h| url.starts_with(h)) {
+        Ok(())
+    } else {
+        Err("only YouTube links are supported".into())
+    }
+}
+
+/// yt-dlp video ids are exactly 11 chars of [A-Za-z0-9_-]. Anything else is
+/// either a bug or an attempt to smuggle an option/path through the id.
+pub fn check_yt_id(id: &str) -> Result<(), String> {
+    if id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Ok(())
+    } else {
+        Err("invalid video id".into())
+    }
+}
+
 #[allow(unused_mut)]
 fn sys_cmd(prog: &str) -> Command {
     let mut cmd = Command::new(prog);
@@ -155,7 +199,7 @@ fn detect_bin() -> Option<(String, String)> {
 fn install_bin() -> Result<String, String> {
     use std::sync::OnceLock;
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have installed it while we waited on the lock.
     if let Some((p, _)) = detect_bin() {
         return Ok(p);
@@ -177,7 +221,16 @@ fn install_bin() -> Result<String, String> {
     let dest = std::path::Path::new(&dir).join(dest_name).to_string_lossy().into_owned();
     let tmp = format!("{dest}.part"); // download aside, rename in — never a half file
     dbg_log(&format!("installing yt-dlp from {url}"));
-    let resp = ureq::get(&url).call().map_err(|e| format!("download failed: {e}"))?;
+    // Timeouts are mandatory here: ensure_bin → install_bin sits on the path of
+    // EVERY search, playlist fetch and download, and this runs while holding the
+    // global install lock. A blackholed connection used to hang forever and take
+    // every later YouTube command down with it. (The Windows ffmpeg fetch below
+    // already did this — install_bin was simply never given the same treatment.)
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(120))
+        .build();
+    let resp = agent.get(&url).call().map_err(|e| format!("download failed: {e}"))?;
     {
         let mut reader = resp.into_reader();
         let mut f = std::fs::File::create(&tmp).map_err(|e| format!("cannot write {tmp}: {e}"))?;
@@ -214,7 +267,7 @@ fn find_named(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> 
 fn install_ffmpeg() -> Result<String, String> {
     use std::sync::OnceLock;
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
     // Windows: yt-dlp's own static FFmpeg builds. Landing next to yt-dlp.exe
     // matters — yt-dlp auto-detects binaries in its own folder, so downloads
     // convert to mp3 without any PATH or --ffmpeg-location cooperation.
@@ -355,7 +408,7 @@ fn ensure_ffmpeg(bin: &str) {
 
 fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
     {
-        let guard = cfg.bin.lock().unwrap();
+        let guard = cfg.bin.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(b) = guard.as_ref() {
             if !b.contains('/') || std::path::Path::new(b).exists() {
                 return Ok(b.clone());
@@ -367,7 +420,7 @@ fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
         Some((p, _)) => p,
         None => install_bin()?,
     };
-    *cfg.bin.lock().unwrap() = Some(path.clone());
+    *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
     Ok(path)
 }
 
@@ -440,11 +493,11 @@ pub async fn detect_browsers() -> Vec<BrowserInfo> {
 /// browser. Returns "path (version)" so the UI can show what's active.
 #[tauri::command]
 pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String) -> Result<String, String> {
-    *cfg.cookies.lock().unwrap() = cookies.trim().to_lowercase();
+    *cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()) = cookies.trim().to_lowercase();
     let p = path.trim();
     if !p.is_empty() {
         let v = check_bin(p).map_err(|e| format!("“{p}”: {e}"))?;
-        *cfg.bin.lock().unwrap() = Some(p.to_string());
+        *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(p.to_string());
         return Ok(format!("{p} ({v})"));
     }
     // No explicit path: use a system yt-dlp if present, else download one so the
@@ -457,7 +510,7 @@ pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String) -> 
             (p, v)
         }
     };
-    *cfg.bin.lock().unwrap() = Some(found.clone());
+    *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(found.clone());
     Ok(format!("{found} ({v})"))
 }
 
@@ -467,7 +520,7 @@ pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String) -> 
 pub async fn yt_install(cfg: State<'_, YtCfg>) -> Result<String, String> {
     let path = install_bin()?;
     let v = check_bin(&path).unwrap_or_default();
-    *cfg.bin.lock().unwrap() = Some(path.clone());
+    *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
     // Downloads also need ffmpeg for the mp3 conversion — grab it too so the
     // one button gives a fully working setup. A failure here is non-fatal
     // (search/stream still work), so it's only appended to the status.
@@ -502,7 +555,7 @@ fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<Stri
 
 fn run_ytdlp(cfg: &YtCfg, args: &[&str]) -> Result<String, String> {
     let bin = ensure_bin(cfg)?;
-    let cookies = cfg.cookies.lock().unwrap().clone();
+    let cookies = cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if cookies.is_empty() {
         return run_ytdlp_raw(&bin, args, None);
     }
@@ -544,7 +597,7 @@ fn track_from_json(v: &Value) -> Option<OnlineTrack> {
 fn flat_extract(cfg: &YtCfg, target: &str) -> Result<Vec<Value>, String> {
     // Default player clients: yt-dlp keeps those working; forcing android/web
     // intermittently yields zero formats/entries these days.
-    let out = run_ytdlp(cfg, &["--flat-playlist", "-j", "--no-warnings", target])?;
+    let out = run_ytdlp(cfg, &["--flat-playlist", "-j", "--no-warnings", "--", target])?;
     Ok(out
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
@@ -649,7 +702,7 @@ pub async fn yt_search(
         let range = format!("{}:{}", off + 1, total);
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", &target],
         )?;
         Ok(out
             .lines()
@@ -670,6 +723,7 @@ pub async fn yt_playlist_preview(
     url: String,
     count: Option<u32>,
 ) -> Result<Vec<String>, String> {
+    check_yt_url(url.trim())?;
     let n = count.unwrap_or(3).clamp(1, 6);
     if crate::ytnative::forced() {
         return crate::ytnative::playlist_preview(&url, n).await;
@@ -678,7 +732,7 @@ pub async fn yt_playlist_preview(
         let range = format!("1:{n}");
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, url.trim()],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", url.trim()],
         )?;
         Ok(out
             .lines()
@@ -740,7 +794,7 @@ pub async fn yt_search_playlists(
         let range = format!("{}:{}", off + 1, off + n);
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &page],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", &page],
         )?;
         Ok(out
             .lines()
@@ -815,7 +869,7 @@ pub async fn yt_channel(cfg: State<'_, YtCfg>, query: String) -> Result<Option<C
         );
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:3", &page],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:3", "--", &page],
         )?;
         Ok(out
             .lines()
@@ -851,6 +905,7 @@ pub async fn yt_channel_videos(
     limit: Option<u32>,
     offset: Option<u32>,
 ) -> Result<Vec<OnlineTrack>, String> {
+    check_yt_url(url.trim())?;
     let n = limit.unwrap_or(20).clamp(1, 100);
     let off = offset.unwrap_or(0).min(5000);
     if crate::ytnative::forced() {
@@ -861,7 +916,7 @@ pub async fn yt_channel_videos(
         let range = format!("{}:{}", off + 1, off + n);
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", &target],
         )?;
         Ok(out
             .lines()
@@ -883,6 +938,7 @@ pub async fn yt_channel_playlists(
     limit: Option<u32>,
     offset: Option<u32>,
 ) -> Result<Vec<PlaylistHit>, String> {
+    check_yt_url(url.trim())?;
     let n = limit.unwrap_or(15).clamp(1, 100);
     let off = offset.unwrap_or(0).min(2000);
     if crate::ytnative::forced() {
@@ -893,7 +949,7 @@ pub async fn yt_channel_playlists(
         let range = format!("{}:{}", off + 1, off + n);
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", &target],
         )?;
         Ok(out
             .lines()
@@ -929,6 +985,7 @@ pub async fn yt_channel_playlists(
 /// Every uploaded video of a channel (capped) — feeds the "Download all" action.
 #[tauri::command]
 pub async fn yt_channel_all(cfg: State<'_, YtCfg>, url: String) -> Result<Vec<OnlineTrack>, String> {
+    check_yt_url(url.trim())?;
     if crate::ytnative::forced() {
         return crate::ytnative::channel_all(&url).await;
     }
@@ -936,7 +993,7 @@ pub async fn yt_channel_all(cfg: State<'_, YtCfg>, url: String) -> Result<Vec<On
         let target = format!("{}/videos", url.trim().trim_end_matches('/'));
         let out = run_ytdlp(
             &cfg,
-            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:1000", &target],
+            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:1000", "--", &target],
         )?;
         Ok(out
             .lines()
@@ -961,13 +1018,14 @@ pub async fn yt_playlist_head(
     if url.is_empty() {
         return Err("empty URL".into());
     }
+    check_yt_url(&url)?;
     let n = count.unwrap_or(25).clamp(1, 200);
     if crate::ytnative::forced() {
         return crate::ytnative::playlist_head(&url, n).await;
     }
     let attempt = (|| -> Result<PlaylistImport, String> {
         let range = format!("1:{n}");
-        let out = run_ytdlp(&cfg, &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &url])?;
+        let out = run_ytdlp(&cfg, &["--flat-playlist", "-j", "--no-warnings", "-I", &range, "--", &url])?;
         let entries: Vec<Value> = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect();
         let title = entries.iter().find_map(|v| v["playlist_title"].as_str()).unwrap_or("Playlist").to_string();
         Ok(PlaylistImport { title, tracks: entries.iter().filter_map(track_from_json).collect() })
@@ -984,6 +1042,7 @@ pub async fn yt_playlist(cfg: State<'_, YtCfg>, url: String) -> Result<PlaylistI
     if url.is_empty() {
         return Err("empty URL".into());
     }
+    check_yt_url(&url)?;
     if crate::ytnative::forced() {
         return crate::ytnative::playlist(&url).await;
     }
@@ -1069,12 +1128,16 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     // shared Music folder needs All-Files-Access, which the user may not have
     // granted yet, and create_dir_all can even succeed while writes fail.
     if writable(&resolved) {
-        return Ok(crate::library::canon(&resolved));
+        let c = crate::library::canon(&resolved);
+        crate::library::register_root(&c); // downloads land here → deletable
+        return Ok(c);
     }
     // Fall back to the default location…
     if resolved != default && writable(&default) {
         dbg_log(&format!("download dir '{resolved}' not writable; using '{default}'"));
-        return Ok(crate::library::canon(&default));
+        let c = crate::library::canon(&default);
+        crate::library::register_root(&c);
+        return Ok(c);
     }
     // …and on Android, always land somewhere writable: the app's own external
     // files dir needs NO permission, so downloads work even without All-Files.
@@ -1115,7 +1178,13 @@ pub async fn yt_download(
     dir: String,
     quality: Option<String>,
 ) -> Result<String, String> {
+    check_yt_id(&id)?;
     let dir = resolve_download_dir(&dir)?;
+    // Clearing the cancel flag belongs HERE, once per user-initiated download —
+    // not inside download_attempt. Per-attempt, a cancel that landed between two
+    // player-client retries was wiped by the next attempt on entry, and the
+    // track the user had explicitly cancelled still landed on disk.
+    dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     // "" / "best" = no cap; otherwise an mp3 bitrate in kbps ("128".."320").
     let quality = quality.unwrap_or_default();
     let q = if quality.is_empty() { "best" } else { quality.as_str() };
@@ -1132,7 +1201,7 @@ pub async fn yt_download(
     let attempt = (|| -> Result<String, String> {
         let bin = ensure_bin(&cfg)?;
         ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
-        let cookies = cfg.cookies.lock().unwrap().clone();
+        let cookies = cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if cookies.is_empty() {
             download_clients(&app, &dls, &bin, &id, &dir, None, q)
         } else {
@@ -1186,6 +1255,11 @@ fn download_clients(
     ];
     let mut last = String::from("no download attempt ran");
     for client in CLIENTS {
+        // Re-checked every iteration: a cancel that arrives while attempt N is
+        // dying must stop attempt N+1 from ever starting.
+        if dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).contains(id) {
+            return Err("canceled".into());
+        }
         match download_attempt(app, dls, bin, id, dir, cookies, client, quality) {
             Ok(p) => return Ok(p),
             Err(e) if e == "canceled" => return Err(e),
@@ -1259,7 +1333,10 @@ fn download_attempt(
     // Cap the mp3 bitrate when the user picked a quality; "best" leaves it to
     // the source (yt-dlp's --audio-quality accepts a kbps value).
     if quality != "best" && !quality.is_empty() {
-        cmd.arg("--audio-quality").arg(format!("{quality}K"));
+        // Clamped: `quality` comes from the frontend as a free string, and an
+        // unparseable one only produced an opaque yt-dlp error.
+        let kbps = quality.parse::<u32>().unwrap_or(192).clamp(64, 320);
+        cmd.arg("--audio-quality").arg(format!("{kbps}K"));
     }
     cmd.args([
         "-x",
@@ -1295,12 +1372,13 @@ fn download_attempt(
     let child = Arc::new(Mutex::new(
         cmd.spawn().map_err(|e| format!("cannot run yt-dlp: {e}"))?,
     ));
-    dls.canceled.lock().unwrap().remove(id);
-    dls.procs.lock().unwrap().insert(id.to_string(), child.clone());
+    // NB: the cancel flag is cleared by yt_download before the client loop, not
+    // here — see the comment there.
+    dls.procs.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), child.clone());
 
     // Drain stderr on a side thread (so neither pipe can deadlock) — it holds
     // the actual failure reason when yt-dlp exits non-zero.
-    let stderr = child.lock().unwrap().stderr.take();
+    let stderr = child.lock().unwrap_or_else(|e| e.into_inner()).stderr.take();
     let err_reader = stderr.map(|mut s| {
         std::thread::spawn(move || {
             use std::io::Read;
@@ -1310,7 +1388,7 @@ fn download_attempt(
         })
     });
 
-    let stdout = child.lock().unwrap().stdout.take().ok_or("no stdout")?;
+    let stdout = child.lock().unwrap_or_else(|e| e.into_inner()).stdout.take().ok_or("no stdout")?;
     let mut filepath: Option<String> = None;
     let mut last_pct = -1i32;
     for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -1325,9 +1403,9 @@ fn download_attempt(
             filepath = Some(l.to_string());
         }
     }
-    let status = child.lock().unwrap().wait().map_err(|e| e.to_string());
-    dls.procs.lock().unwrap().remove(id);
-    let was_canceled = dls.canceled.lock().unwrap().remove(id);
+    let status = child.lock().unwrap_or_else(|e| e.into_inner()).wait().map_err(|e| e.to_string());
+    dls.procs.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+    let was_canceled = dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     let err_text = err_reader
         .and_then(|t| t.join().ok())
         .unwrap_or_default();
@@ -1352,9 +1430,18 @@ fn download_attempt(
 /// Kill a running download started by `yt_download`.
 #[tauri::command]
 pub fn yt_cancel(dls: State<DlState>, id: String) {
-    dls.canceled.lock().unwrap().insert(id.clone());
-    if let Some(child) = dls.procs.lock().unwrap().get(&id) {
-        let _ = child.lock().unwrap().kill();
+    dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
+    // Clone the handle out and RELEASE `procs` before touching the child. Held
+    // together, this deadlocked the whole download subsystem: download_attempt
+    // holds the child lock across wait(), so if yt-dlp stopped writing without
+    // exiting, yt_cancel blocked on that child while still holding `procs` — and
+    // every other in-flight download blocked on `procs`. yt_cancel is a sync
+    // command, so it pinned an IPC thread too.
+    let child = dls.procs.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned();
+    if let Some(child) = child {
+        if let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+        }
     }
 }
 
@@ -1381,17 +1468,17 @@ fn resolve_once(cfg: &YtCfg, page: &str, client: Option<&str>) -> Result<String,
 /// format chain ends with itag-18-style full mp4 which the engine can decode.
 /// Fresh cached stream URL, if any (shared by both backends).
 pub fn cached_url(state: &YtState, id: &str) -> Option<String> {
-    let cache = state.cache.lock().unwrap();
+    let cache = state.cache.lock().unwrap_or_else(|e| e.into_inner());
     cache.get(id).and_then(|(at, url)| (at.elapsed() < RESOLVE_TTL).then(|| url.clone()))
 }
 
 /// Store a stream URL in the shared cache (native backend path).
 pub fn cache_url(state: &YtState, id: &str, url: String) {
-    state.cache.lock().unwrap().insert(id.to_string(), (Instant::now(), url));
+    state.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), (Instant::now(), url));
 }
 
 pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String> {
-    if let Some((at, url)) = state.cache.lock().unwrap().get(id) {
+    if let Some((at, url)) = state.cache.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
         if at.elapsed() < RESOLVE_TTL {
             return Ok(url.clone());
         }
@@ -1424,4 +1511,66 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
         .unwrap()
         .insert(id.to_string(), (Instant::now(), url.clone()));
     Ok(url)
+}
+
+#[cfg(test)]
+mod url_guard_tests {
+    use super::{check_yt_id, check_yt_url};
+
+    #[test]
+    fn accepts_real_youtube_links() {
+        for u in [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://music.youtube.com/playlist?list=PL123",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/@channel/videos",
+        ] {
+            assert!(check_yt_url(u).is_ok(), "should accept {u}");
+        }
+    }
+
+    #[test]
+    fn rejects_option_injection() {
+        // These are the shapes that turn a positional URL into a yt-dlp OPTION.
+        for u in [
+            r"--config-locations=C:\Users\x\Downloads\evil.txt",
+            "--exec=calc.exe",
+            "--load-info-json=/tmp/x.json",
+            "-o/tmp/anywhere",
+            "--paths=/tmp",
+        ] {
+            assert!(check_yt_url(u).is_err(), "must reject {u}");
+        }
+    }
+
+    #[test]
+    fn rejects_other_hosts_and_schemes() {
+        for u in [
+            "http://www.youtube.com/watch?v=x",       // not https
+            "https://evil.com/watch?v=x",
+            "https://www.youtube.com.evil.com/x",     // suffix trick
+            "https://notyoutube.com/",
+            "file:///etc/passwd",
+            "",
+        ] {
+            assert!(check_yt_url(u).is_err(), "must reject {u}");
+        }
+    }
+
+    #[test]
+    fn rejects_control_characters_and_overlong() {
+        assert!(check_yt_url("https://www.youtube.com/\nwatch").is_err());
+        let long = format!("https://www.youtube.com/{}", "a".repeat(3000));
+        assert!(check_yt_url(&long).is_err());
+    }
+
+    #[test]
+    fn video_ids_are_exactly_eleven_safe_chars() {
+        assert!(check_yt_id("dQw4w9WgXcQ").is_ok());
+        assert!(check_yt_id("a_b-c1234_9").is_ok());
+        for bad in ["", "short", "dQw4w9WgXcQextra", "dQw4w9WgXc/", "../../etc/pw", "-oevil"] {
+            assert!(check_yt_id(bad).is_err(), "must reject {bad}");
+        }
+    }
 }

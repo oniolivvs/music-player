@@ -1424,3 +1424,53 @@ body.bg-light select,
 body.bg-light .select {
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%233a3d4a' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
 }
+
+/* ─── "For you" recommendation rail (library home) ──────────────────────────
+   These rules were MISSING entirely: the rail's markup shipped without any
+   stylesheet, so it rendered as a tall column of raw text above the library —
+   twenty titles and artists stacked as plain lines, pushing the real track list
+   off screen. That is the "the UI breaks and only shows online music" report.
+   Modelled on .yt-card so the rail reads as the same family of surfaces. */
+.reco-rail {
+  flex: 0 0 auto; /* a flex sibling of .tracklist — must not stretch or shrink */
+  padding: 6px 12px 0; min-width: 0;
+}
+.reco-head {
+  display: flex; align-items: center; gap: 8px; margin: 4px 2px 8px;
+  color: var(--tx-2); font-size: 12px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.reco-title { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* Was butting straight against the title ("For youfrom your listening") because
+   nothing spaced or differentiated the two spans. */
+.reco-sub {
+  text-transform: none; letter-spacing: 0; font-weight: 500; opacity: .75;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.reco-refresh { margin-left: auto; flex-shrink: 0; }
+.reco-row {
+  display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 8px; scrollbar-width: thin;
+}
+.reco-card {
+  flex: 0 0 168px; width: 168px; cursor: pointer;
+  padding: 8px; border-radius: 12px; background: var(--bg-1);
+  border: 1px solid transparent; transition: background .12s, transform .12s;
+}
+.reco-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.reco-thumb {
+  /* A REAL height, never the height:0 + padding-bottom ratio hack — the old
+     Android WebView paints nothing over the padding zone (same trap as
+     .yc-thumb). 152px of inner width at 16:9 = 86px. */
+  height: 86px; border-radius: 9px; margin-bottom: 8px;
+  background-color: var(--bg-3); background-size: cover; background-position: center;
+}
+.reco-t {
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.reco-a {
+  font-size: 12px; color: var(--tx-2); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
