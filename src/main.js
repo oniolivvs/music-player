@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.97";
+const SRC_VERSION = "0.22.98";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -198,7 +198,15 @@ function inFolder(t, f) {
   const tp = norm(t.path), fp = norm(f);
   return tp === fp || tp.startsWith(fp + "/");
 }
-function trackByPath(p) { return library.find(t => t.path === p) || onlineIndex.get(p) || view.find(t => t.path === p) || null; }
+function trackByPath(p) {
+  if (!p) return null;
+  const local = localFileFor(p);
+  if (local) {
+    const t = library.find(x => x.path === local);
+    if (t) return t;
+  }
+  return library.find(t => t.path === p) || onlineIndex.get(p) || view.find(t => t.path === p) || null;
+}
 function gainFor(t) { if (!normalize) return 1.0; const g = t && Number(t.gain); return Number.isFinite(g) && g > 0 ? g : 1.0; }
 function artColor(s) { let h = 0; for (const c of String(s || "?")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 40%)`; }
 function artInitial(t) { const s = (t.album || t.title || "?").trim(); return (s[0] || "♪").toUpperCase(); }
@@ -2174,7 +2182,11 @@ function openPlaylist(id) {
   });
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
-  renderTracks(shownPaths.map(p => byPath.get(p) || ensureOnlineTrack(p)).filter(Boolean));
+  renderTracks(shownPaths.map(p => {
+    const local = localFileFor(p);
+    if (local) return byPath.get(local) || library.find(t => t.path === local) || ensureOnlineTrack(p);
+    return byPath.get(p) || ensureOnlineTrack(p);
+  }).filter(Boolean));
 }
 
 // Add a YouTube video OR playlist by URL straight into this playlist. yt_playlist
@@ -3999,6 +4011,27 @@ function _paintReco(tracks) {
   const listHost = $("#trackList");
   if (!listHost || !tracks?.length) return;
   $("#recoRail")?.remove();
+
+  // Inject fallback styles for recommendation rail if stylesheet missing or stale
+  if (!document.getElementById("recoFallbackStyles")) {
+    const st = document.createElement("style");
+    st.id = "recoFallbackStyles";
+    st.textContent = `
+      .reco-rail { margin: 10px 0 18px 0; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; box-sizing: border-box; }
+      .reco-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .reco-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; color: var(--tx, #fff); }
+      .reco-sub { font-size: 12px; color: var(--t2, #a0a0b0); margin-left: 4px; }
+      .reco-refresh { margin-left: auto; }
+      .reco-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+      .reco-card { flex: 0 0 135px; width: 135px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 8px; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; box-sizing: border-box; }
+      .reco-card:hover { background: rgba(255,255,255,0.09); transform: translateY(-2px); }
+      .reco-thumb { width: 100%; height: 115px; border-radius: 6px; background-size: cover; background-position: center; background-color: rgba(255,255,255,0.05); margin-bottom: 6px; }
+      .reco-t { font-weight: 600; font-size: 12px; color: var(--tx, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+      .reco-a { font-size: 11px; color: var(--t2, #a0a0b0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    `;
+    document.head.appendChild(st);
+  }
+
   const rail = document.createElement("div");
   rail.id = "recoRail";
   rail.className = "reco-rail";
