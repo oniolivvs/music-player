@@ -173,9 +173,9 @@ pub fn ota_disabled(app: &tauri::AppHandle) -> bool {
 
 fn running_version(app: &tauri::AppHandle) -> String {
     let embedded = env!("CARGO_PKG_VERSION").to_string();
-    match stored_manifest(app) {
-        Some(m) if ver_cmp(&m.version, &embedded) > 0 => m.version,
-        _ => embedded,
+    match ota_bundle(app.clone()) {
+        Some(b) => b.version,
+        None => embedded,
     }
 }
 
