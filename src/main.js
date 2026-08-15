@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.100";
+const SRC_VERSION = "0.22.101";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -3965,8 +3965,8 @@ function showLibrary() {
   $("#libUrlBtn")?.addEventListener("click", addUrlToLibrary);
   $("#libDlBtn")?.addEventListener("click", downloadLibraryOnline);
   $("#libDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("library"));
+  $("#recoRail")?.remove();
   renderTracks(library);
-  renderRecoRail(); // async, fills itself in above the list when ready
 }
 
 // ─── "For you" rail on the library home ───
@@ -3991,16 +3991,6 @@ function recoSeeds() {
 }
 async function renderRecoRail() {
   $("#recoRail")?.remove();
-  if (!IS_NATIVE || !S().recoEnabled) return;
-  const today = new Date().toISOString().slice(0, 10);
-  if (_recoState.day === today && _recoState.loaded) { _paintReco(_recoState.tracks); return; }
-  const seeds = recoSeeds();
-  if (!seeds.length) return;
-  try {
-    const tracks = await invoke("yt_recommendations", { seeds });
-    _recoState = { day: today, loaded: true, tracks: tracks || [] };
-    if (active.type === "library") _paintReco(_recoState.tracks);
-  } catch (e) { /* silent — recommendations are a bonus, never an error */ }
 }
 // Top played as recommendation seeds when history is empty.
 function statsAggWorldwide() {
