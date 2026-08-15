@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.99";
+const SRC_VERSION = "0.22.100";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5489,16 +5489,16 @@ function probeLuma(src) {
     img.src = src;
   });
 }
-let _thumbCache = { path: "", data: "" };
+let _sliderThumbCache = { path: "", data: "" };
 async function applyThumbImage(s) {
   const root = document.documentElement.style;
   let src = (s.sliderImage || "").trim();
   if (src && !/^(https?:|data:)/.test(src)) {
-    if (_thumbCache.path !== src) {
-      try { _thumbCache.data = await invoke("read_image", { path: src }); _thumbCache.path = src; }
-      catch { _thumbCache.data = ""; _thumbCache.path = src; }
+    if (_sliderThumbCache.path !== src) {
+      try { _sliderThumbCache.data = await invoke("read_image", { path: src }); _sliderThumbCache.path = src; }
+      catch { _sliderThumbCache.data = ""; _sliderThumbCache.path = src; }
     }
-    src = _thumbCache.data;
+    src = _sliderThumbCache.data;
   }
   root.setProperty("--thumb-img", src ? `url("${src}")` : "none");
   document.body.classList.toggle("has-thumb", !!src);
