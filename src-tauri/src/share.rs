@@ -235,6 +235,23 @@ fn check_peer_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn connect_base(host: &str, port: u16) -> Result<String, String> {
+    if port == 0 {
+        return Err("share port must be greater than zero".into());
+    }
+    let base = format!("http://{}:{}", host.trim(), port);
+    check_peer_url(&format!("{base}/library"))?;
+    Ok(base)
+}
+
+fn check_pairing_code(code: &str) -> Result<(), String> {
+    if code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err("pairing code must contain exactly six digits".into())
+    }
+}
+
 /// Serve a file with HTTP Range support so the client can stream + seek.
 fn serve_file(request: tiny_http::Request, fpath: &str, url: &str) {
     let meta = match std::fs::metadata(fpath) {
@@ -367,7 +384,8 @@ pub struct RemoteData {
 /// Connect to a host: validate the code and pull its library + playlists.
 #[tauri::command]
 pub async fn share_connect(host: String, port: u16, code: String) -> Result<RemoteData, String> {
-    let base = format!("http://{}:{}", host.trim(), port);
+    check_pairing_code(&code)?;
+    let base = connect_base(&host, port)?;
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(8))
         .build();
@@ -470,7 +488,7 @@ pub async fn share_download(
 
 #[cfg(test)]
 mod peer_url_tests {
-    use super::check_peer_url;
+    use super::{check_pairing_code, check_peer_url, connect_base};
 
     #[test]
     fn accepts_lan_peers() {
@@ -496,6 +514,22 @@ mod peer_url_tests {
             "ftp://192.168.1.2/x",
         ] {
             assert!(check_peer_url(u).is_err(), "must reject {u}");
+        }
+    }
+
+    #[test]
+    fn connect_only_accepts_literal_lan_hosts() {
+        assert_eq!(connect_base("192.168.1.24", 38291).unwrap(), "http://192.168.1.24:38291");
+        for host in ["169.254.169.254", "8.8.8.8", "evil.example", "localhost"] {
+            assert!(connect_base(host, 38291).is_err(), "must reject {host}");
+        }
+    }
+
+    #[test]
+    fn pairing_codes_are_exactly_six_digits() {
+        assert!(check_pairing_code("123456").is_ok());
+        for code in ["", "12345", "1234567", "12345x", "123456&admin=1"] {
+            assert!(check_pairing_code(code).is_err(), "must reject {code}");
         }
     }
 }
