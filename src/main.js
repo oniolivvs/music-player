@@ -5,6 +5,7 @@
 import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
+import { createDiagnostics } from "./diagnostics.mjs";
 
 // Signals to the index.html OTA bootstrap that this frontend loaded — its
 // watchdog rolls back to the embedded build if this never runs (broken OTA).
@@ -70,6 +71,13 @@ async function invoke(cmd, args) {
   if (cmd === "play") return 0;
   return null;
 }
+
+const diagnostics = createDiagnostics({
+  nativeInvoke: IS_NATIVE ? (cmd, args) => T.core.invoke(cmd, args) : undefined,
+  consoleRef: console,
+  eventTarget: window,
+});
+diagnostics.start();
 
 // ─── State ───
 let library = [];
@@ -5537,6 +5545,42 @@ async function initVersionSwitcher() {
     } catch (e) { hint.textContent = String(e); go.disabled = false; flash(`Switch failed: ${e}`); }
   };
 }
+let _diagEntries = [];
+function renderDiagnosticsPanel() {
+  const host = $("#diagList");
+  if (!host) return;
+  const level = $("#diagLevel")?.value || "all";
+  const component = ($("#diagComponent")?.value || "").trim().toLowerCase();
+  const entries = _diagEntries.filter(entry =>
+    (level === "all" || entry.level === level)
+    && (!component || String(entry.component || "").toLowerCase().includes(component))
+  );
+  host.replaceChildren();
+  if (!entries.length) {
+    host.textContent = _diagEntries.length ? "No entries match these filters." : "No diagnostic entries yet.";
+    return;
+  }
+  for (const entry of entries) {
+    const line = document.createElement("span");
+    line.className = `diag-line diag-${entry.level || "info"}`;
+    const time = Number(entry.ts_ms) ? new Date(Number(entry.ts_ms)).toLocaleTimeString() : "--:--:--";
+    line.textContent = `${time}  ${(entry.level || "info").toUpperCase().padEnd(5)}  ${entry.component || "app"}/${entry.event || "event"}  ${entry.detail || ""}`;
+    host.append(line, "\n");
+  }
+}
+
+async function loadDiagnosticsPanel() {
+  const host = $("#diagList");
+  if (!host) return;
+  host.textContent = "Loading diagnostics…";
+  try {
+    _diagEntries = await diagnostics.tail(200);
+    renderDiagnosticsPanel();
+  } catch (error) {
+    host.textContent = `Diagnostics unavailable: ${String(error).slice(0, 180)}`;
+  }
+}
+
 function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
@@ -5789,6 +5833,19 @@ function openSettings() {
         </span></div>
       <div class="set-hint" id="setVerHint" hidden>Rebuilds a chosen version from the local source tree before restarting (desktop dev only).</div>
     </div>
+    <div class="set-group"><div class="set-title">Diagnostics</div>
+      <div class="set-hint">Recent application events are stored locally, with secrets removed. Nothing is uploaded automatically.</div>
+      <div class="diag-toolbar">
+        <select id="diagLevel" class="sel sm-sel" aria-label="Diagnostic level">
+          <option value="all">All levels</option><option value="error">Errors</option><option value="warn">Warnings</option><option value="info">Info</option><option value="debug">Debug</option>
+        </select>
+        <input id="diagComponent" class="text-in" type="search" placeholder="Filter component" aria-label="Filter diagnostic component">
+        <button id="diagRefresh" class="btn-line sm" type="button">${ic(IC.refresh)} Refresh</button>
+        <button id="diagExport" class="btn-line sm" type="button">${ic(IC.dl)} Export</button>
+        <button id="diagClear" class="btn-line sm" type="button">${ic(IC.x)} Clear</button>
+      </div>
+      <pre id="diagList" class="diag-list" tabindex="0" aria-live="polite">Open the System tab or press Refresh to load diagnostics.</pre>
+    </div>
     <div class="set-actions"><button id="setReset" class="btn-line">${ic(IC.undo)} Reset to defaults</button></div>
     </section>
     </div>`;
@@ -5800,6 +5857,7 @@ function openSettings() {
     body.querySelectorAll(".set-tab").forEach(x => x.classList.toggle("on", x === tab));
     body.querySelectorAll(".set-pane").forEach(p => p.classList.toggle("on", p.dataset.pane === name));
     body.querySelector(".set-panes").scrollTop = 0;
+    if (name === "system") loadDiagnosticsPanel();
   }));
   // "Launch at login": the autostart plugin owns the real OS state — reflect it
   // on open, and flip it (with rollback on failure) when the box is toggled.
@@ -5969,6 +6027,18 @@ function openSettings() {
   renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
   $("#setUpdCheck").addEventListener("click", () => checkUpdate(true));
+  $("#diagLevel").addEventListener("change", renderDiagnosticsPanel);
+  $("#diagComponent").addEventListener("input", renderDiagnosticsPanel);
+  $("#diagRefresh").addEventListener("click", loadDiagnosticsPanel);
+  $("#diagExport").addEventListener("click", async () => {
+    try { flash(`Diagnostics exported: ${await diagnostics.exportLog()}`); }
+    catch (error) { console.error("[diagnostics] export", error); flash("Diagnostics export failed"); }
+  });
+  $("#diagClear").addEventListener("click", async () => {
+    if (!await askConfirm("Clear diagnostics?", "This removes the local diagnostic history. Export it first if you need it.", "Clear")) return;
+    try { await diagnostics.clear(); _diagEntries = []; renderDiagnosticsPanel(); flash("Diagnostics cleared"); }
+    catch (error) { console.error("[diagnostics] clear", error); flash("Couldn't clear diagnostics"); }
+  });
   $("#updateBtn").addEventListener("click", () => {
     if (updateReady) { invoke("restart_app").catch(e => { console.error("[restart]", e); flash("Restart failed — relaunch manually"); }); return; }
     if (!updateBusy && availableVersion) runUpdate();

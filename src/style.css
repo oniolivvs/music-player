@@ -630,6 +630,18 @@ body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
 .num-in:focus { border-color: var(--accent); }
 body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
 .set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
+.diag-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.diag-toolbar .text-in { flex: 1 1 150px; min-width: 120px; }
+.diag-list {
+  display: block; max-height: 320px; overflow: auto; padding: 12px;
+  border: 1px solid var(--bd-2); border-radius: 9px; background: var(--bg-0);
+  color: var(--tx-2); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text;
+}
+.diag-line { color: var(--tx-2); }
+.diag-error { color: #fb7185; }
+.diag-warn { color: #fbbf24; }
+.diag-debug { color: var(--tx-3); }
 .swatches { display: flex; gap: 8px; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .swatch.on { border-color: var(--tx-1); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor; }

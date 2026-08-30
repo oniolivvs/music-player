@@ -5,7 +5,8 @@
     "main.js",
     "playlists.js",
     "settings.js",
-    "store.js"
+    "store.js",
+    "diagnostics.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
