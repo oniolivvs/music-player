@@ -2,6 +2,7 @@
 //! entry point below) both boot through `run()`.
 
 mod audio;
+mod diagnostics;
 mod importer;
 pub mod library;
 mod mpris;
@@ -856,13 +857,6 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // FORCE-LOG IMMEDIATELY TO PROVE THE APP STARTED
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        let dir = std::path::PathBuf::from(local).join("com.oniolivvs.musicplayer");
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("startup.log"), "APP STARTED IN MAIN\n");
-    }
-
     std::panic::set_hook(Box::new(|info| {
         let dir = if let Ok(local) = std::env::var("LOCALAPPDATA") {
             std::path::PathBuf::from(local).join("com.oniolivvs.musicplayer")
@@ -885,6 +879,7 @@ pub fn run() {
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
             let _ = writeln!(f, "Panic at {location}:\n{msg}\n");
         }
+        let _ = diagnostics::record("error", "app", "panic", &format!("{location}: {msg}"));
     }));
 
     let builder = tauri::Builder::default()
@@ -909,12 +904,15 @@ pub fn run() {
         .manage(share::ShareState::default())
         .manage(gdrive::GDriveState::default())
         .setup(|app| {
+            let app_data = app.path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("musicplayer"));
+            if let Err(error) = diagnostics::init(app_data.clone()) {
+                eprintln!("[diagnostics] init failed: {error}");
+            }
+            let _ = diagnostics::record("info", "app", "start", "Music Player started");
             // Native YouTube engine cache (client versions, visitor data).
-            ytnative::init_storage(
-                app.path()
-                    .app_data_dir()
-                    .unwrap_or_else(|_| std::env::temp_dir().join("musicplayer")),
-            );
+            ytnative::init_storage(app_data);
             // Register on D-Bus right away so desktop media widgets see the player.
             let handle = app.handle();
             if let Err(e) = mpris::init(handle, &app.state::<mpris::MediaState>()) {
@@ -943,7 +941,9 @@ pub fn run() {
             library::canon_path, library::canon_paths, library::folder_size, library::register_roots,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear,
-            importer::import_spotify
+            importer::import_spotify,
+            diagnostics::diag_write, diagnostics::diag_tail,
+            diagnostics::diag_export, diagnostics::diag_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");

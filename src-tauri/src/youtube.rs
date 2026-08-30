@@ -116,6 +116,7 @@ pub struct YtCfg {
 /// Append yt-dlp failures to a persistent log so real error causes can be
 /// inspected after the fact (~/.local/share/com.oniolivvs.musicplayer/yt.log).
 pub fn dbg_log(msg: &str) {
+    let _ = crate::diagnostics::record("error", "youtube", "yt_dlp", msg);
     // HOME || USERPROFILE: without the fallback, Windows never wrote this log,
     // which is exactly where download failures needed to be inspected.
     if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
