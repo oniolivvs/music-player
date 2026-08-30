@@ -5,6 +5,7 @@ import {
   contrastRatio,
   cssVarsForPalette,
   createGenerationGuard,
+  createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
 
 const pixels = groups => new Uint8ClampedArray(groups.flatMap(([rgba, count]) =>
@@ -58,4 +59,40 @@ test("CSS variables are deterministic valid colors", () => {
   assert.match(first["--accent"], /^#[0-9a-f]{6}$/i);
   assert.match(first["--bg-0"], /^#[0-9a-f]{6}$/i);
   assert.match(first["--tx-1"], /^#[0-9a-f]{6}$/i);
+});
+
+test("a slow previous cover cannot overwrite the current cover", async () => {
+  const pending = new Map();
+  const applied = [];
+  const state = createArtworkThemeState({
+    analyze: src => new Promise(resolve => pending.set(src, resolve)),
+    apply: (src, palette) => applied.push([src, palette]),
+    restore: () => applied.push(["manual"]),
+  });
+
+  const first = state.use("first");
+  const second = state.use("second");
+  pending.get("second")({ accent: "blue" });
+  await second;
+  pending.get("first")({ accent: "red" });
+  await first;
+
+  assert.deepEqual(applied, [["second", { accent: "blue" }]]);
+});
+
+test("missing artwork restores the manual theme and invalidates pending work", async () => {
+  let resolve;
+  const applied = [];
+  const state = createArtworkThemeState({
+    analyze: () => new Promise(done => { resolve = done; }),
+    apply: (...args) => applied.push(args),
+    restore: () => applied.push(["manual"]),
+  });
+
+  const pending = state.use("cover");
+  await state.use("");
+  resolve({ accent: "late" });
+  await pending;
+
+  assert.deepEqual(applied, [["manual"]]);
 });

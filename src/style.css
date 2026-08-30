@@ -290,8 +290,8 @@ body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
    names, counts, placeholders). Instead of per-glyph glows (muddy), lift the
    secondary/tertiary text tones toward the scheme's high-contrast end while a
    background is set — a clean, flat contrast boost. */
-body.has-bg { --tx-1: #ffffff; --tx-2: #eef0f5; --tx-3: #d3d7e0; }
-body.bg-light.has-bg { --tx-1: #000000; --tx-2: #16171c; --tx-3: #303138; }
+body.has-bg:not(.artwork-theme) { --tx-1: #ffffff; --tx-2: #eef0f5; --tx-3: #d3d7e0; }
+body.bg-light.has-bg:not(.artwork-theme) { --tx-1: #000000; --tx-2: #16171c; --tx-3: #303138; }
 /* NB: intentionally NO blanket text-shadow on the panels — applied to every row
    of a long list it repaints on each scroll frame and makes the whole UI lag on
    software-rendered WebKitGTK. The brightened --tx-* tones above already carry
@@ -670,6 +670,26 @@ body::before {
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
+body.artwork-theme::before { opacity: 1; transition: opacity .18s ease, filter .18s ease; }
+body.artwork-theme.artwork-switching::before { opacity: .58; }
+body.artwork-theme,
+body.artwork-theme .sidebar,
+body.artwork-theme .main,
+body.artwork-theme .player { transition: background-color .18s ease, color .18s ease, border-color .18s ease; }
+body.no-anim.artwork-theme::before,
+body.no-anim.artwork-theme,
+body.no-anim.artwork-theme .sidebar,
+body.no-anim.artwork-theme .main,
+body.no-anim.artwork-theme .player { transition: none; }
+body.no-anim.artwork-theme.artwork-switching::before { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  body.artwork-theme::before,
+  body.artwork-theme,
+  body.artwork-theme .sidebar,
+  body.artwork-theme .main,
+  body.artwork-theme .player { transition: none; }
+  body.artwork-theme.artwork-switching::before { opacity: 1; }
+}
 /* Every surface — panels, menus AND modals — uses the same panel-alpha
    tint, so the whole UI is uniformly see-through; the Panel opacity slider drives
    all of them at once and the dim slider makes it darker behind. The wallpaper

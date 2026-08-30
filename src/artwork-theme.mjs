@@ -177,3 +177,29 @@ export function createGenerationGuard() {
     isCurrent(token) { return token === generation; },
   };
 }
+
+export function createArtworkThemeState({ analyze, apply, restore }) {
+  const guard = createGenerationGuard();
+  return {
+    async use(src) {
+      const token = guard.next();
+      if (!src) {
+        await restore();
+        return null;
+      }
+      try {
+        const palette = await analyze(src);
+        if (!guard.isCurrent(token)) return null;
+        if (!palette) {
+          await restore();
+          return null;
+        }
+        apply(src, palette);
+        return palette;
+      } catch (error) {
+        if (guard.isCurrent(token)) await restore();
+        throw error;
+      }
+    },
+  };
+}

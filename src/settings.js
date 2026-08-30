@@ -104,6 +104,7 @@ const DEFAULTS = {
   syncAuto: true,        // auto push/pull on changes + launch
   syncAt: 0,             // last successful sync (unix ms)
   bgImage: "",           // custom background: URL or local file path
+  artworkTheme: false,    // derive the wallpaper and colors from Now Playing artwork
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image
   panelAlpha: 85,        // % opacity of panels when a background is set

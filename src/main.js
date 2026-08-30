@@ -6,6 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
+import { paletteFromPixels, cssVarsForPalette, createArtworkThemeState } from "./artwork-theme.mjs";
 
 // Signals to the index.html OTA bootstrap that this frontend loaded — its
 // watchdog rolls back to the embedded build if this never runs (broken OTA).
@@ -78,6 +79,7 @@ const diagnostics = createDiagnostics({
   eventTarget: window,
 });
 diagnostics.start();
+let _themeApplySeq = 0;
 
 // ─── State ───
 let library = [];
@@ -265,6 +267,7 @@ function pickStill(list, token, alive, done) {
 }
 
 function setArtImg(el, url) {
+  if (el.id === "npArt") setCurrentArtwork(url);
   el.style.background = ""; el.textContent = ""; el.classList.add("has-cover");
   // The Now-playing panel is the one place a bigger still is worth fetching.
   if (!IS_ANDROID && el.classList.contains("ov-art") && /^https?:\/\//.test(url)) {
@@ -561,6 +564,7 @@ function seams(diff, n, max) {
 }
 
 function setArtPlaceholder(el, t) {
+  if (el.id === "npArt") setCurrentArtwork("");
   el.classList.remove("has-cover"); el.style.backgroundImage = "";
   el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
   el.dataset.album = albumKey(t);
@@ -677,6 +681,88 @@ async function netThumb(url) {
   if (c) return c;
   return new Promise((res, rej) => { _thumbQ.push({ clean, res, rej }); _thumbPump(); });
 }
+
+const _artworkPaletteCache = new Map();
+let _currentArtworkSrc = "";
+
+function cacheArtworkPalette(src, result) {
+  if (_artworkPaletteCache.has(src)) _artworkPaletteCache.delete(src);
+  _artworkPaletteCache.set(src, result);
+  while (_artworkPaletteCache.size > 64) {
+    _artworkPaletteCache.delete(_artworkPaletteCache.keys().next().value);
+  }
+}
+
+async function analyzeArtwork(src) {
+  if (_artworkPaletteCache.has(src)) {
+    const cached = _artworkPaletteCache.get(src);
+    _artworkPaletteCache.delete(src);
+    _artworkPaletteCache.set(src, cached);
+    return cached;
+  }
+  let imageSrc = src;
+  if (/^https?:\/\//.test(src) && IS_NATIVE) {
+    try { imageSrc = await netThumb(src); }
+    catch { throw new Error("remote artwork proxy failed"); }
+  }
+  const pixels = await new Promise((resolve, reject) => {
+    const img = new Image();
+    if (/^https?:\/\//.test(imageSrc)) img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 24;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("canvas unavailable");
+        context.drawImage(img, 0, 0, 24, 24);
+        resolve(context.getImageData(0, 0, 24, 24).data);
+      } catch { reject(new Error("artwork sampling failed")); }
+    };
+    img.onerror = () => reject(new Error("artwork decode failed"));
+    img.src = imageSrc;
+  });
+  const palette = paletteFromPixels(pixels);
+  const result = palette ? { palette, imageSrc } : null;
+  cacheArtworkPalette(src, result);
+  return result;
+}
+
+function applyArtworkTheme(src, result) {
+  const root = document.documentElement.style;
+  ++_themeApplySeq;
+  for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
+  root.setProperty("--app-bg-image", `url(${JSON.stringify(result.imageSrc)})`);
+  document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
+  const text = result.palette.text;
+  document.body.classList.toggle("bg-light", (text.r + text.g + text.b) / 3 < 80);
+  requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove("artwork-switching")));
+  diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
+}
+
+function restoreManualTheme() {
+  document.body.classList.remove("artwork-theme");
+  return applyTheme(true);
+}
+
+const _artworkThemeState = createArtworkThemeState({
+  analyze: analyzeArtwork,
+  apply: applyArtworkTheme,
+  restore: restoreManualTheme,
+});
+
+function scheduleArtworkTheme(src) {
+  if (!S().artworkTheme) return Promise.resolve(null);
+  return _artworkThemeState.use(src).catch(error => {
+    diagnostics.record("warn", "theme", "artwork_failed", String(error).slice(0, 180));
+    return null;
+  });
+}
+
+function setCurrentArtwork(src) {
+  _currentArtworkSrc = String(src || "");
+  if (S().artworkTheme) scheduleArtworkTheme(_currentArtworkSrc);
+}
+
 function proxyCovers(root) {
   const scope = root || document;
   // Song/video thumbnails are real <img> elements — universal, no WebView
@@ -4429,7 +4515,7 @@ function updateNowPlaying(t, path) {
       if (t.thumbnail) setArtImg(art, t.thumbnail);
       else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
     }
-  }
+  } else setCurrentArtwork("");
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   const sk = $("#seek");
@@ -5395,11 +5481,13 @@ function customTheme(s) {
     "--tx-1": s.customText, "--tx-2": mixHex(s.customText, panelRgb, 0.38), "--tx-3": mixHex(s.customText, panelRgb, 0.62),
   };
 }
-async function applyTheme() {
+async function applyTheme(manualOnly = false) {
+  const themeToken = ++_themeApplySeq;
   const s = S();
   const root = document.documentElement.style;
+  const keepArtwork = !manualOnly && s.artworkTheme && !!_currentArtworkSrc;
   const theme = s.theme === "custom" ? customTheme(s) : (SETTINGS.THEMES[s.theme] || SETTINGS.THEMES.dark);
-  for (const [k, v] of Object.entries(theme)) root.setProperty(k, v);
+  if (!keepArtwork) for (const [k, v] of Object.entries(theme)) root.setProperty(k, v);
   root.setProperty("--r", `${s.radius ?? 12}px`);
   root.setProperty("--topbar-pad", `${s.topbarPad ?? 13}px`);
   root.setProperty("--thumb-size", `${s.thumbSize ?? 12}px`);
@@ -5416,7 +5504,7 @@ async function applyTheme() {
   // units on the Android WebView (content ends up offset / cut off — the
   // "dezoom" bug). Use it on desktop only; mobile keeps a 1:1 viewport.
   document.body.style.zoom = IS_ANDROID ? "" : String((s.uiScale ?? 100) / 100);
-  applyAccent();
+  if (!keepArtwork) applyAccent();
   // Blur is capped: a >12px gaussian over a full-screen layer is the single most
   // expensive paint this app does, and combined with an un-promoted layer it was
   // what froze the whole desktop on weaker GPUs. The slider still goes to 40;
@@ -5424,6 +5512,11 @@ async function applyTheme() {
   root.setProperty("--app-bg-blur", `${Math.min(s.bgBlur ?? 18, 12)}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
   root.setProperty("--panel-alpha", String(s.panelAlpha ?? 85));
+  if (keepArtwork) {
+    scheduleArtworkTheme(_currentArtworkSrc);
+    return;
+  }
+  document.body.classList.remove("artwork-theme");
   let src = (s.bgImage || "").trim();
   if (src && !/^(https?:|data:)/.test(src)) {
     // Local file path → data URL via the backend (cached per path).
@@ -5439,6 +5532,7 @@ async function applyTheme() {
     }
     src = _bgCacheData;
   }
+  if (themeToken !== _themeApplySeq) return;
   root.setProperty("--app-bg-image", src ? `url("${src}")` : "none");
   document.body.classList.toggle("has-bg", !!src);
   // Text/panel scheme on top of the wallpaper. "light" here = light SCHEME =
@@ -5457,6 +5551,7 @@ async function applyTheme() {
       // overlay has already darkened (brightness = 1 − dim). Sampling the raw
       // image ignored both and mis-picked the scheme on mid-tone wallpapers.
       const raw = await probeLuma(src);
+      if (themeToken !== _themeApplySeq) return;
       const dim = Math.min(1, Math.max(0, (s.bgDim ?? 45) / 100));
       const alpha = Math.min(1, Math.max(0, (s.panelAlpha ?? 85) / 100));
       const eff = alpha * 0.04 + (1 - alpha) * (raw * (1 - dim));
@@ -5620,6 +5715,7 @@ function openSettings() {
           <button id="setBgPick" class="btn-line sm" title="Pick an image">${ic(IC.image)}</button>
           <button id="setBgClear" class="btn-line sm" title="Remove background">${IC.x}</button>
         </span></div>
+      <div class="set-row"><label>Use current artwork as background and theme</label><input type="checkbox" id="setArtworkTheme" ${s.artworkTheme ? "checked" : ""}></div>
       <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
       <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
       <div class="set-row"><label>Text on wallpaper</label>
@@ -5899,6 +5995,11 @@ function openSettings() {
     } catch (e) { console.error("[bg pick]", e); }
   });
   $("#setBgClear").addEventListener("click", () => { SETTINGS.setSetting("bgImage", ""); $("#setBgImg").value = ""; applyTheme(); });
+  $("#setArtworkTheme").addEventListener("change", e => {
+    SETTINGS.setSetting("artworkTheme", e.target.checked);
+    if (e.target.checked) scheduleArtworkTheme(_currentArtworkSrc);
+    else _artworkThemeState.use("").catch(error => console.error("[theme] restore", error));
+  });
   $("#setBgBlur").addEventListener("input", e => { SETTINGS.setSetting("bgBlur", Number(e.target.value)); applyTheme(); });
   $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
   $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });
