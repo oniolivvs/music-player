@@ -29,7 +29,7 @@ impl Seek for LogStream {
 
 fn main() {
     let url = std::env::args().nth(1).expect("usage: stream_test <url>");
-    let s = HttpStream::open(url).expect("HttpStream::open failed");
+    let s = HttpStream::open(url, None).expect("HttpStream::open failed");
     let len = s.byte_len();
     let dec = Decoder::builder()
         .with_data(LogStream(s))
