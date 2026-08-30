@@ -6,7 +6,8 @@
     "playlists.js",
     "settings.js",
     "store.js",
-    "diagnostics.mjs"
+    "diagnostics.mjs",
+    "artwork-theme.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
