@@ -4628,7 +4628,7 @@ async function hardPlay(i) {
     // Bound the cascade like the poll does: without it, ONE play click on a
     // dead-stream auto-advances (and auto-blocks) through the entire playlist.
     if (j >= 0 && j !== i && _playFailSkips < 4) { _playFailSkips++; hardPlay(j); }
-    else _playFailSkips = 0;
+    else { _playFailSkips = 0; setCurrentArtwork(""); }
     return;
   }
   if (seq !== playSeq) return; // superseded by a newer click
@@ -4719,7 +4719,7 @@ async function togglePlay() {
   }
   updatePlayingRow(); mediaPlayback();
 }
-async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); return; } history.push(curIndex); await hardPlay(j); }
+async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); setCurrentArtwork(""); return; } history.push(curIndex); await hardPlay(j); }
 async function prev() {
   if (wallPos() > 3) { await invoke("seek", { secs: 0 }); wallSeek(0); return; }
   if (history.length) await hardPlay(history.pop());
@@ -4863,11 +4863,13 @@ function startPolling() {
         }
       } else if (j >= 0) {
         playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
+        setCurrentArtwork("");
         _drainSkips = 0;
         flash("Playback keeps failing (stream errors) — stopped. Try again in a moment.");
       } else { // queue drained naturally → stop
         commitPlay(); wallPause(); savePlayback(); // the last track's played time was being lost (wallPos kept drifting)
         playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex]));
+        setCurrentArtwork("");
       }
     }
     } finally { _pollBusy = false; }
