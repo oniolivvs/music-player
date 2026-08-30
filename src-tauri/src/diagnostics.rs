@@ -277,16 +277,16 @@ fn redact_secrets(value: &str) -> String {
         "ip",
         "password",
     ];
-    let mut result = value.to_string();
+    let mut result = redact_bearer(value);
     for key in KEYS {
         result = redact_key_values(&result, key);
     }
-    redact_bearer(&result)
+    result
 }
 
 fn redact_key_values(value: &str, key: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    let needle = format!("{}=", key.to_ascii_lowercase());
+    let needle = key.to_ascii_lowercase();
     let mut output = String::with_capacity(value.len());
     let mut cursor = 0;
     while let Some(relative) = lower[cursor..].find(&needle) {
@@ -299,12 +299,37 @@ fn redact_key_values(value: &str, key: &str) -> String {
             cursor = start + needle.len();
             continue;
         }
-        let value_start = start + needle.len();
+        let mut separator = start + needle.len();
+        if value.as_bytes().get(separator).is_some_and(|byte| *byte == b'"') {
+            separator += 1;
+        }
+        while value.as_bytes().get(separator).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            separator += 1;
+        }
+        if !value.as_bytes().get(separator).is_some_and(|byte| matches!(*byte, b'=' | b':')) {
+            output.push_str(&value[cursor..start + needle.len()]);
+            cursor = start + needle.len();
+            continue;
+        }
+        let mut value_start = separator + 1;
+        while value.as_bytes().get(value_start).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            value_start += 1;
+        }
+        let quote = value.as_bytes().get(value_start).copied().filter(|byte| matches!(byte, b'"' | b'\''));
+        if quote.is_some() {
+            value_start += 1;
+        }
         output.push_str(&value[cursor..value_start]);
         output.push_str("[redacted]");
         let mut end = value.len();
         for (offset, ch) in value[value_start..].char_indices() {
-            if ch == '&' || ch.is_whitespace() || matches!(ch, '"' | '\'' | ';' | ',' | ']' | ')') {
+            let quoted_end = quote.is_some_and(|byte| ch as u32 == byte as u32);
+            if quoted_end
+                || (quote.is_none()
+                    && (ch == '&'
+                        || ch.is_whitespace()
+                        || matches!(ch, '"' | '\'' | ';' | ',' | ']' | ')')))
+            {
                 end = value_start + offset;
                 break;
             }
@@ -336,12 +361,34 @@ fn redact_bearer(value: &str) -> String {
 }
 
 fn redact_export(value: &str, roots: &[&str]) -> String {
-    roots
+    let paths_redacted = roots
         .iter()
         .filter(|root| !root.is_empty())
         .fold(value.to_string(), |text, root| {
             replace_case_insensitive(&text, root, "<home>")
-        })
+        });
+    redact_urls(&paths_redacted)
+}
+
+fn redact_urls(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let mut output = String::with_capacity(value.len());
+    let mut cursor = 0;
+    while cursor < value.len() {
+        let http = lower[cursor..].find("http://").map(|offset| cursor + offset);
+        let https = lower[cursor..].find("https://").map(|offset| cursor + offset);
+        let Some(start) = [http, https].into_iter().flatten().min() else { break };
+        output.push_str(&value[cursor..start]);
+        output.push_str("<url>");
+        let end = value[start..]
+            .char_indices()
+            .find(|(_, ch)| ch.is_whitespace() || matches!(ch, '"' | '\'' | ']' | ')'))
+            .map(|(offset, _)| start + offset)
+            .unwrap_or(value.len());
+        cursor = end;
+    }
+    output.push_str(&value[cursor..]);
+    output
 }
 
 fn replace_case_insensitive(value: &str, needle: &str, replacement: &str) -> String {
@@ -411,11 +458,32 @@ mod tests {
 
     #[test]
     fn secrets_are_removed_before_local_persistence() {
-        let got = redact_secrets("https://x.test/a?token=abc&sig=xyz cookie=SID=secret");
+        let got = redact_secrets(
+            "https://x.test/a?token=abc&sig=xyz cookie=SID=secret Authorization: Bearer bearer-secret",
+        );
         assert!(!got.contains("abc"));
         assert!(!got.contains("xyz"));
         assert!(!got.contains("secret"));
+        assert!(!got.contains("bearer-secret"));
         assert!(got.contains("[redacted]"));
+    }
+
+    #[test]
+    fn json_secrets_are_removed_from_persisted_events() {
+        let store = test_store(4096, 3);
+        store
+            .record(
+                "error",
+                "oauth",
+                "refresh_failed",
+                r#"{"access_token":"json-access","refresh_token": "json-refresh"}"#,
+            )
+            .unwrap();
+        let detail = &store.tail(1).unwrap()[0].detail;
+        assert!(!detail.contains("json-access"));
+        assert!(!detail.contains("json-refresh"));
+        assert!(detail.contains("[redacted]"));
+        std::fs::remove_dir_all(store.dir()).unwrap();
     }
 
     #[test]
@@ -425,6 +493,15 @@ mod tests {
             &[r#"C:\Users\alice"#, "/home/bob", "/storage/emulated/0"],
         );
         assert_eq!(got, r#"<home>\Music <home>/Music <home>/Music"#);
+    }
+
+    #[test]
+    fn export_hides_urls() {
+        let got = redact_export(
+            "failed at https://media.example/private/file?id=123 then http://10.0.0.2:8080/a",
+            &[],
+        );
+        assert_eq!(got, "failed at <url> then <url>");
     }
 
     #[test]
