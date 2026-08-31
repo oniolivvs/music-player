@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
 import {
   buildCleanupSummary,
   chooseDuplicatePlan,
@@ -740,7 +740,7 @@ function applyArtworkTheme(src, result) {
   const root = document.documentElement.style;
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
-  root.setProperty("--app-bg-image", `url(${JSON.stringify(result.imageSrc)})`);
+  root.setProperty("--app-bg-image", artworkBackgroundStyle(result.imageSrc).image);
   document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
   const text = result.palette.text;
   document.body.classList.toggle("bg-light", (text.r + text.g + text.b) / 3 < 80);
@@ -762,7 +762,7 @@ const _artworkThemeState = createArtworkThemeState({
 function scheduleArtworkTheme(src) {
   if (!S().artworkTheme) return Promise.resolve(null);
   return _artworkThemeState.use(src).catch(error => {
-    diagnostics.record("warn", "theme", "artwork_failed", String(error).slice(0, 180));
+    diagnostics.record("warn", "theme", "artwork_failed", `Artwork background failed; manual theme restored: ${String(error).slice(0, 140)}`);
     return null;
   });
 }
@@ -5946,7 +5946,7 @@ function openSettings() {
           <button id="setBgPick" class="btn-line sm" title="Pick an image">${ic(IC.image)}</button>
           <button id="setBgClear" class="btn-line sm" title="Remove background">${IC.x}</button>
         </span></div>
-      <div class="set-row"><label>Use current artwork as background and theme</label><input type="checkbox" id="setArtworkTheme" ${s.artworkTheme ? "checked" : ""}></div>
+      <div class="set-row"><label>Match background and colors to current artwork <span class="set-sub">Fills the window by cropping when needed; never stretches the cover.</span></label><input type="checkbox" id="setArtworkTheme" ${s.artworkTheme ? "checked" : ""}></div>
       <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
       <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
       <div class="set-row"><label>Text on wallpaper</label>

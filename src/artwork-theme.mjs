@@ -170,6 +170,14 @@ export function cssVarsForPalette(palette) {
   };
 }
 
+export function artworkBackgroundStyle(imageSrc) {
+  return {
+    image: imageSrc ? `url(${JSON.stringify(imageSrc)})` : "none",
+    size: "cover",
+    position: "center",
+  };
+}
+
 export function createGenerationGuard() {
   let generation = 0;
   return {

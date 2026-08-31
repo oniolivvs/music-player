@@ -657,7 +657,7 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 
 [hidden] { display: none !important; }
 
-/* ─── Custom background (image + blur + dim) & translucent panels ─── */
+/* ─── Full-window background (center / cover crops; never stretches) + blur + dim ─── */
 body::before {
   content: ""; position: fixed; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;

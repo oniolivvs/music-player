@@ -4,6 +4,7 @@ import {
   paletteFromPixels,
   contrastRatio,
   cssVarsForPalette,
+  artworkBackgroundStyle,
   createGenerationGuard,
   createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
@@ -65,6 +66,19 @@ test("accent text keeps normal-text contrast on artwork panels", () => {
   const palette = paletteFromPixels(pixels([[[68, 68, 102, 255], 12]]));
   assert.ok(contrastRatio(palette.accent, palette.panel) >= 4.5);
   assert.ok(contrastRatio(palette.accent2, palette.panel) >= 4.5);
+});
+
+test("artwork backgrounds fill the window by cropping instead of stretching", () => {
+  assert.deepEqual(artworkBackgroundStyle("data:image/jpeg;base64,cover"), {
+    image: 'url("data:image/jpeg;base64,cover")',
+    size: "cover",
+    position: "center",
+  });
+  assert.deepEqual(artworkBackgroundStyle(""), {
+    image: "none",
+    size: "cover",
+    position: "center",
+  });
 });
 
 test("a slow previous cover cannot overwrite the current cover", async () => {
