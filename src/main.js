@@ -3401,7 +3401,7 @@ async function deleteBlockedTracks() {
 }
 async function cleanupRoots() {
   const roots = [...folders];
-  const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
+  const downloadRoot = await invoke("yt_cleanup_download_root", { dir: String(S().downloadDir || "") });
   if (downloadRoot) roots.push(downloadRoot);
   const uniqueRoots = [...new Set(roots.filter(Boolean))];
   if (uniqueRoots.length && IS_NATIVE) await invoke("register_roots", { paths: uniqueRoots });

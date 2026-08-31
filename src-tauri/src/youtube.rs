@@ -1081,7 +1081,7 @@ fn find_existing(dir: &str, id: &str) -> Option<String> {
     None
 }
 
-fn resolve_download_dir(dir: &str) -> Result<String, String> {
+fn download_dir_candidates(dir: &str) -> Result<(String, String, Option<String>), String> {
     let dir = dir.trim();
     // Android: $HOME is the app-private sandbox — downloads must land on the
     // shared storage so they show up in the user's Music library (and survive
@@ -1106,6 +1106,15 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     } else {
         dir.to_string()
     };
+    #[cfg(target_os = "android")]
+    let appdir = Some("/storage/emulated/0/Android/data/com.oniolivvs.musicplayer/files/Music".to_string());
+    #[cfg(not(target_os = "android"))]
+    let appdir = None;
+    Ok((resolved, default, appdir))
+}
+
+fn resolve_download_dir(dir: &str) -> Result<String, String> {
+    let (resolved, default, appdir) = download_dir_candidates(dir)?;
     // A dir is only usable if we can actually WRITE there — on Android the
     // shared Music folder needs All-Files-Access, which the user may not have
     // granted yet, and create_dir_all can even succeed while writes fail.
@@ -1123,9 +1132,7 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     }
     // …and on Android, always land somewhere writable: the app's own external
     // files dir needs NO permission, so downloads work even without All-Files.
-    #[cfg(target_os = "android")]
-    {
-        let appdir = "/storage/emulated/0/Android/data/com.oniolivvs.musicplayer/files/Music".to_string();
+    if let Some(appdir) = appdir {
         if writable(&appdir) {
             dbg_log(&format!("using app storage '{appdir}' (no All-Files-Access)"));
             return Ok(crate::library::canon(&appdir));
@@ -1140,6 +1147,32 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
 #[tauri::command]
 pub fn yt_download_root(dir: String) -> Result<String, String> {
     resolve_download_dir(&dir)
+}
+
+fn existing_scannable_dir(dir: &str) -> Option<String> {
+    let metadata = std::fs::metadata(dir).ok()?;
+    if !metadata.is_dir() || std::fs::read_dir(dir).is_err() {
+        return None;
+    }
+    let canonical = crate::library::canon(dir);
+    (!canonical.is_empty()).then_some(canonical)
+}
+
+fn resolve_existing_download_dir(dir: &str) -> Result<Option<String>, String> {
+    let (resolved, default, appdir) = download_dir_candidates(dir)?;
+    for candidate in [Some(resolved.clone()), (resolved != default).then_some(default), appdir] {
+        if let Some(candidate) = candidate.and_then(|path| existing_scannable_dir(&path)) {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
+}
+
+/// Return an already-existing download root that cleanup may scan. Unlike the
+/// download resolver, this command neither creates paths nor registers roots.
+#[tauri::command]
+pub fn yt_cleanup_download_root(dir: String) -> Result<Option<String>, String> {
+    resolve_existing_download_dir(&dir)
 }
 
 /// True if we can create `dir` and write a file into it.
@@ -1505,7 +1538,7 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
 
 #[cfg(test)]
 mod url_guard_tests {
-    use super::{check_yt_id, check_yt_url, yt_download_root};
+    use super::{check_yt_id, check_yt_url, yt_cleanup_download_root, yt_download_root};
     use std::path::PathBuf;
 
     #[test]
@@ -1574,6 +1607,33 @@ mod url_guard_tests {
         let raw = path.to_string_lossy().into_owned();
         let resolved = yt_download_root(raw.clone()).unwrap();
         assert_eq!(resolved, crate::library::canon(&raw));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn cleanup_download_root_does_not_create_a_missing_directory() {
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "music-player-cleanup-root-missing-{}",
+            std::process::id(),
+        ));
+        let raw = path.to_string_lossy().into_owned();
+        assert!(!path.exists());
+        let root = yt_cleanup_download_root(raw.clone()).unwrap();
+        assert!(!path.exists());
+        let missing_root = crate::library::canon(&raw);
+        assert_ne!(root.as_deref(), Some(missing_root.as_str()));
+    }
+
+    #[test]
+    fn cleanup_download_root_returns_the_existing_download_root() {
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "music-player-cleanup-root-existing-{}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        let raw = path.to_string_lossy().into_owned();
+        let download_root = yt_download_root(raw.clone()).unwrap();
+        assert_eq!(yt_cleanup_download_root(raw).unwrap(), Some(download_root));
         std::fs::remove_dir_all(path).unwrap();
     }
 }
