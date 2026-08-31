@@ -277,11 +277,46 @@ fn redact_secrets(value: &str) -> String {
         "ip",
         "password",
     ];
+    let mut keys = KEYS
+        .iter()
+        .map(|key| (*key).to_string())
+        .collect::<Vec<_>>();
+    keys.extend(sensitive_key_names(value));
     let mut result = redact_bearer(value);
-    for key in KEYS {
-        result = redact_key_values(&result, key);
+    for key in keys {
+        result = redact_key_values(&result, &key);
     }
     result
+}
+
+fn sensitive_key_names(value: &str) -> Vec<String> {
+    let bytes = value.as_bytes();
+    let mut names = Vec::new();
+    for (separator, byte) in bytes.iter().enumerate() {
+        if !matches!(*byte, b'=' | b':') {
+            continue;
+        }
+        let mut end = separator;
+        while end > 0
+            && (bytes[end - 1].is_ascii_whitespace() || matches!(bytes[end - 1], b'"' | b'\''))
+        {
+            end -= 1;
+        }
+        let mut start = end;
+        while start > 0
+            && (bytes[start - 1].is_ascii_alphanumeric() || matches!(bytes[start - 1], b'_' | b'-'))
+        {
+            start -= 1;
+        }
+        if start == end {
+            continue;
+        }
+        let name = value[start..end].to_ascii_lowercase();
+        if (name.contains("secret") || name.ends_with("_key")) && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
 }
 
 fn redact_key_values(value: &str, key: &str) -> String {
@@ -300,38 +335,65 @@ fn redact_key_values(value: &str, key: &str) -> String {
             continue;
         }
         let mut separator = start + needle.len();
-        if value.as_bytes().get(separator).is_some_and(|byte| *byte == b'"') {
+        if value
+            .as_bytes()
+            .get(separator)
+            .is_some_and(|byte| *byte == b'"')
+        {
             separator += 1;
         }
-        while value.as_bytes().get(separator).is_some_and(|byte| byte.is_ascii_whitespace()) {
+        while value
+            .as_bytes()
+            .get(separator)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
             separator += 1;
         }
-        if !value.as_bytes().get(separator).is_some_and(|byte| matches!(*byte, b'=' | b':')) {
+        if !value
+            .as_bytes()
+            .get(separator)
+            .is_some_and(|byte| matches!(*byte, b'=' | b':'))
+        {
             output.push_str(&value[cursor..start + needle.len()]);
             cursor = start + needle.len();
             continue;
         }
         let mut value_start = separator + 1;
-        while value.as_bytes().get(value_start).is_some_and(|byte| byte.is_ascii_whitespace()) {
+        while value
+            .as_bytes()
+            .get(value_start)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
             value_start += 1;
         }
-        let quote = value.as_bytes().get(value_start).copied().filter(|byte| matches!(byte, b'"' | b'\''));
+        let quote = value
+            .as_bytes()
+            .get(value_start)
+            .copied()
+            .filter(|byte| matches!(byte, b'"' | b'\''));
         if quote.is_some() {
             value_start += 1;
         }
         output.push_str(&value[cursor..value_start]);
         output.push_str("[redacted]");
         let mut end = value.len();
-        for (offset, ch) in value[value_start..].char_indices() {
-            let quoted_end = quote.is_some_and(|byte| ch as u32 == byte as u32);
-            if quoted_end
-                || (quote.is_none()
-                    && (ch == '&'
-                        || ch.is_whitespace()
-                        || matches!(ch, '"' | '\'' | ';' | ',' | ']' | ')')))
-            {
-                end = value_start + offset;
-                break;
+        if key.eq_ignore_ascii_case("cookie") && quote.is_none() {
+            end = value[value_start..]
+                .find(['\r', '\n'])
+                .map(|offset| value_start + offset)
+                .unwrap_or(value.len());
+        } else {
+            for (offset, ch) in value[value_start..].char_indices() {
+                let quoted_end = quote.is_some_and(|byte| ch as u32 == byte as u32);
+                if quoted_end
+                    || (quote.is_none()
+                        && (ch == '&'
+                            || ch.is_whitespace()
+                            || matches!(ch, '"' | '\'' | ';' | ',' | ']' | ')')))
+                {
+                    end = value_start + offset;
+                    break;
+                }
             }
         }
         cursor = end;
@@ -367,7 +429,47 @@ fn redact_export(value: &str, roots: &[&str]) -> String {
         .fold(value.to_string(), |text, root| {
             replace_case_insensitive(&text, root, "<home>")
         });
-    redact_urls(&paths_redacted)
+    redact_absolute_paths(&redact_urls(&paths_redacted))
+}
+
+fn redact_absolute_paths(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = String::with_capacity(value.len());
+    let mut cursor = 0;
+    while cursor < value.len() {
+        let mut start = None;
+        for index in cursor..bytes.len() {
+            let boundary = index == 0
+                || bytes[index - 1].is_ascii_whitespace()
+                || matches!(bytes[index - 1], b'"' | b'\'' | b'(' | b'[' | b'=' | b':');
+            let windows = boundary
+                && index + 2 < bytes.len()
+                && bytes[index].is_ascii_alphabetic()
+                && bytes[index + 1] == b':'
+                && matches!(bytes[index + 2], b'/' | b'\\');
+            let unix = boundary
+                && bytes[index] == b'/'
+                && bytes
+                    .get(index + 1)
+                    .is_some_and(|next| *next != b'/' && !next.is_ascii_whitespace());
+            if windows || unix {
+                start = Some(index);
+                break;
+            }
+        }
+        let Some(start) = start else {
+            output.push_str(&value[cursor..]);
+            break;
+        };
+        output.push_str(&value[cursor..start]);
+        output.push_str("<path>");
+        let end = value[start..]
+            .find(['\r', '\n'])
+            .map(|offset| start + offset)
+            .unwrap_or(value.len());
+        cursor = end;
+    }
+    output
 }
 
 fn redact_urls(value: &str) -> String {
@@ -375,9 +477,15 @@ fn redact_urls(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut cursor = 0;
     while cursor < value.len() {
-        let http = lower[cursor..].find("http://").map(|offset| cursor + offset);
-        let https = lower[cursor..].find("https://").map(|offset| cursor + offset);
-        let Some(start) = [http, https].into_iter().flatten().min() else { break };
+        let http = lower[cursor..]
+            .find("http://")
+            .map(|offset| cursor + offset);
+        let https = lower[cursor..]
+            .find("https://")
+            .map(|offset| cursor + offset);
+        let Some(start) = [http, https].into_iter().flatten().min() else {
+            break;
+        };
         output.push_str(&value[cursor..start]);
         output.push_str("<url>");
         let end = value[start..]
@@ -487,6 +595,16 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_secret_keys_and_complete_cookie_values_are_removed() {
+        let got = redact_secrets(
+            "client_secret=client-value api_key=api-value cookie=SID=cookie-one; PREF=cookie-two",
+        );
+        for secret in ["client-value", "api-value", "cookie-one", "cookie-two"] {
+            assert!(!got.contains(secret), "leaked {secret}: {got}");
+        }
+    }
+
+    #[test]
     fn export_hides_windows_linux_and_android_user_paths() {
         let got = redact_export(
             r#"C:\Users\alice\Music /home/bob/Music /storage/emulated/0/Music"#,
@@ -502,6 +620,18 @@ mod tests {
             &[],
         );
         assert_eq!(got, "failed at <url> then <url>");
+    }
+
+    #[test]
+    fn export_hides_external_absolute_paths() {
+        let got = redact_export(
+            "delete D:\\Music\\Artist - Track.mp3 failed\nscan /mnt/usb/private/song.flac failed",
+            &[],
+        );
+        for private in ["D:\\Music", "Artist - Track.mp3", "/mnt/usb", "song.flac"] {
+            assert!(!got.contains(private), "leaked {private}: {got}");
+        }
+        assert_eq!(got.matches("<path>").count(), 2);
     }
 
     #[test]

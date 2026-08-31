@@ -113,28 +113,9 @@ pub struct YtCfg {
     cookies: Mutex<String>, // browser name for --cookies-from-browser, "" = off
 }
 
-/// Append yt-dlp failures to a persistent log so real error causes can be
-/// inspected after the fact (~/.local/share/com.oniolivvs.musicplayer/yt.log).
+/// Record yt-dlp failures in the shared, redacted and rotating diagnostics log.
 pub fn dbg_log(msg: &str) {
     let _ = crate::diagnostics::record("error", "youtube", "yt_dlp", msg);
-    // HOME || USERPROFILE: without the fallback, Windows never wrote this log,
-    // which is exactly where download failures needed to be inspected.
-    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-        let dir = format!("{home}/.local/share/com.oniolivvs.musicplayer");
-        let _ = std::fs::create_dir_all(&dir);
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(format!("{dir}/yt.log"))
-        {
-            use std::io::Write;
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let _ = writeln!(f, "[{ts}] {msg}");
-        }
-    }
 }
 
 fn check_bin(path: &str) -> Result<String, String> {

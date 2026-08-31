@@ -858,15 +858,6 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::panic::set_hook(Box::new(|info| {
-        let dir = if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            std::path::PathBuf::from(local).join("com.oniolivvs.musicplayer")
-        } else if let Ok(home) = std::env::var("HOME") {
-            std::path::PathBuf::from(home).join(".local/share/com.oniolivvs.musicplayer")
-        } else {
-            std::path::PathBuf::from(".")
-        };
-        let _ = std::fs::create_dir_all(&dir);
-        let log_path = dir.join("crash.log");
         let msg = match info.payload().downcast_ref::<&'static str>() {
             Some(s) => *s,
             None => match info.payload().downcast_ref::<String>() {
@@ -875,10 +866,6 @@ pub fn run() {
             },
         };
         let location = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
-            let _ = writeln!(f, "Panic at {location}:\n{msg}\n");
-        }
         let _ = diagnostics::record("error", "app", "panic", &format!("{location}: {msg}"));
     }));
 
