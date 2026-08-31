@@ -740,7 +740,10 @@ function applyArtworkTheme(src, result) {
   const root = document.documentElement.style;
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
-  root.setProperty("--app-bg-image", artworkBackgroundStyle(result.imageSrc).image);
+  const background = artworkBackgroundStyle(result.imageSrc);
+  root.setProperty("--app-bg-image", background.image);
+  root.setProperty("--app-bg-size", background.size);
+  root.setProperty("--app-bg-position", background.position);
   document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
   const text = result.palette.text;
   document.body.classList.toggle("bg-light", (text.r + text.g + text.b) / 3 < 80);

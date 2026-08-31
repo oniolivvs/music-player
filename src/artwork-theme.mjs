@@ -206,7 +206,8 @@ export function createArtworkThemeState({ analyze, apply, restore }) {
         apply(src, palette);
         return palette;
       } catch (error) {
-        if (guard.isCurrent(token)) await restore();
+        if (!guard.isCurrent(token)) return null;
+        await restore();
         throw error;
       }
     },

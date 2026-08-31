@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   paletteFromPixels,
   contrastRatio,
@@ -81,6 +82,14 @@ test("artwork backgrounds fill the window by cropping instead of stretching", ()
   });
 });
 
+test("the wallpaper stylesheet consumes centered cover presentation variables", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(
+    stylesheet,
+    /background:\s*var\(--app-bg-image, none\)\s+var\(--app-bg-position, center\)\s*\/\s*var\(--app-bg-size, cover\)\s+no-repeat;/,
+  );
+});
+
 test("a slow previous cover cannot overwrite the current cover", async () => {
   const pending = new Map();
   const applied = [];
@@ -97,6 +106,27 @@ test("a slow previous cover cannot overwrite the current cover", async () => {
   pending.get("first")({ accent: "red" });
   await first;
 
+  assert.deepEqual(applied, [["second", { accent: "blue" }]]);
+});
+
+test("a stale artwork rejection is ignored without restoring the manual theme", async () => {
+  const pending = new Map();
+  const applied = [];
+  const state = createArtworkThemeState({
+    analyze: src => new Promise((resolve, reject) => pending.set(src, { resolve, reject })),
+    apply: (...args) => applied.push(args),
+    restore: () => applied.push(["manual"]),
+  });
+
+  const first = state.use("first");
+  const second = state.use("second");
+  pending.get("first").reject(new Error("stale artwork failed"));
+
+  assert.equal(await first, null);
+  assert.deepEqual(applied, []);
+
+  pending.get("second").resolve({ accent: "blue" });
+  await second;
   assert.deepEqual(applied, [["second", { accent: "blue" }]]);
 });
 
