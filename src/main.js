@@ -2017,7 +2017,7 @@ function openPlaylistCtx(x, y, id) {
     }
     else if (a === "cover") {
       try {
-        const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a cover image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+        const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a cover image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] }] } });
         if (p) { PL.setImage(id, p); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover set"); }
       } catch (e) { console.error("[pl cover]", e); }
     }
@@ -5994,7 +5994,7 @@ function openSettings() {
   $("#setBgImg").addEventListener("change", e => { SETTINGS.setSetting("bgImage", e.target.value.trim()); applyTheme(); });
   $("#setBgPick").addEventListener("click", async () => {
     try {
-      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a background image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a background image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] }] } });
       if (p) { SETTINGS.setSetting("bgImage", p); $("#setBgImg").value = p; applyTheme(); }
     } catch (e) { console.error("[bg pick]", e); }
   });
@@ -6111,7 +6111,7 @@ function openSettings() {
   $("#setThumbImg").addEventListener("change", e => { SETTINGS.setSetting("sliderImage", e.target.value.trim()); applyThumbImage(S()); });
   $("#setThumbPick").addEventListener("click", async () => {
     try {
-      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a slider image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a slider image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] }] } });
       if (p) { SETTINGS.setSetting("sliderImage", p); $("#setThumbImg").value = p; applyThumbImage(S()); }
     } catch (e) { console.error("[thumb pick]", e); }
   });

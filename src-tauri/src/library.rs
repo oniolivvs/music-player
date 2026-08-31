@@ -655,6 +655,15 @@ mod bounded_image_tests {
         out.into_inner()
     }
 
+    fn encoded(width: u32, height: u32, format: image::ImageFormat) -> Vec<u8> {
+        let image = image::RgbImage::from_pixel(width, height, image::Rgb([40, 80, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut out, format)
+            .unwrap();
+        out.into_inner()
+    }
+
     fn decoded_size(url: &str) -> (u32, u32) {
         let encoded = url.split_once(',').unwrap().1;
         let bytes = STANDARD.decode(encoded).unwrap();
@@ -679,6 +688,14 @@ mod bounded_image_tests {
         let out = bounded_image_data_url(&jpeg(320, 180), "image/jpeg").unwrap();
         assert_eq!(decoded_size(&out), (320, 180));
     }
+
+    #[test]
+    fn bmp_is_bounded() {
+        let out = bounded_image_data_url(&encoded(1921, 1, image::ImageFormat::Bmp), "image/bmp")
+            .unwrap();
+        assert_eq!(decoded_size(&out), (1920, 1));
+    }
+
 }
 
 #[cfg(test)]
