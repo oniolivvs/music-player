@@ -73,3 +73,18 @@ export function removeQueuePaths(queue, currentIndex, removed) {
     : queue.slice(0, nextOriginalIndex + 1).filter(path => !removed.has(path)).length - 1;
   return { queue: nextQueue, currentIndex: targetIndex, activeRemoved: true };
 }
+
+export function buildCleanupSummary(items = []) {
+  return items.reduce((summary, item) => {
+    if (item?.failed) {
+      summary.failed++;
+      return summary;
+    }
+    summary.entries++;
+    if (item?.local) {
+      summary.files++;
+      summary.bytes += Number(item.bytes) || 0;
+    }
+    return summary;
+  }, { entries: 0, files: 0, failed: 0, bytes: 0 });
+}

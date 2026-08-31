@@ -7,6 +7,14 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, createArtworkThemeState } from "./artwork-theme.mjs";
+import {
+  buildCleanupSummary,
+  chooseDuplicatePlan,
+  collectBlockedPaths,
+  dedupePlaylistPaths,
+  removeQueuePaths,
+  rewritePaths,
+} from "./cleanup.mjs";
 
 // Signals to the index.html OTA bootstrap that this frontend loaded — its
 // watchdog rolls back to the embedded build if this never runs (broken OTA).
@@ -3276,6 +3284,218 @@ function setBlocked(paths, on) {
   for (const p of paths) { const k = blockKeyOf(p); if (on) blockedKeys.add(k); else blockedKeys.delete(k); }
   saveBlocked();
 }
+
+let cleanupBusy = false;
+function isCleanupLocal(path) { return !isOnline(path) && !String(path || "").startsWith("remote:"); }
+function cleanupItems(paths, failed = new Set(), bytesByPath = new Map()) {
+  return paths.map(path => ({
+    path,
+    local: isCleanupLocal(path),
+    bytes: bytesByPath.get(path) || 0,
+    failed: failed.has(path),
+  }));
+}
+function cleanupButtonsDisabled(on) {
+  document.querySelectorAll("[data-cleanup-action]").forEach(button => { button.disabled = on; });
+}
+async function runCleanup(action) {
+  if (cleanupBusy) return;
+  cleanupBusy = true;
+  cleanupButtonsDisabled(true);
+  try { await action(); }
+  catch (error) {
+    console.error("[cleanup]", error);
+    diagnostics.record("error", "cleanup", "action_failed", error);
+    flash("Cleanup failed — see Diagnostics");
+  } finally {
+    cleanupBusy = false;
+    cleanupButtonsDisabled(false);
+  }
+}
+async function applyCleanupQueue(removed) {
+  const next = removeQueuePaths(queue, curIndex, removed);
+  queue = next.queue;
+  preIndex = -1;
+  expectedQueued = 1;
+  if (next.activeRemoved) {
+    if (next.currentIndex >= 0) await hardPlay(next.currentIndex);
+    else {
+      try { await invoke("stop"); } catch {}
+      curIndex = -1;
+      playing = false;
+      updateNowPlaying(null, "");
+      setPlayIcon(false);
+      updatePlayingRow();
+      mediaPlayback();
+      setCurrentArtwork("");
+      savePlayback();
+    }
+  } else {
+    curIndex = next.currentIndex;
+    savePlayback();
+    if (curIndex >= 0) await schedulePreload();
+  }
+}
+async function deleteBlockedTracks() {
+  const playlists = PL.getPlaylists();
+  const candidates = [
+    ...library.map(track => track.path),
+    ...onlineIndex.keys(),
+    ...playlists.flatMap(playlist => playlist.paths || []),
+    ...queue,
+  ];
+  const blockKeyByPath = new Map(candidates.map(path => [path, blockKeyOf(path)]));
+  const paths = collectBlockedPaths(candidates, blockedKeys, blockKeyByPath);
+  const preview = buildCleanupSummary(cleanupItems(paths));
+  if (!preview.entries) { flash("No blocked tracks to delete"); return; }
+  if (!await askConfirm(
+    "Delete blocked tracks?",
+    `This removes ${preview.entries} blocked entries and ${preview.files} local files permanently.`,
+    "Delete",
+  )) return;
+
+  const removed = new Set();
+  const failed = new Set();
+  for (const path of paths) {
+    if (!isCleanupLocal(path)) { removed.add(path); continue; }
+    try {
+      await invoke("delete_file", { path });
+      removed.add(path);
+    } catch (error) {
+      failed.add(path);
+      console.error("[cleanup] blocked delete", path, error);
+      diagnostics.record("error", "cleanup", "blocked_delete_failed", error);
+    }
+  }
+
+  const libraryBefore = library.length;
+  library = library.filter(track => !removed.has(track.path));
+  const libraryChanged = library.length !== libraryBefore;
+  let onlineChanged = false;
+  for (const path of removed) if (onlineIndex.delete(path)) onlineChanged = true;
+  let playlistsChanged = false;
+  for (const playlist of playlists) {
+    const nextPaths = playlist.paths.filter(path => !removed.has(path));
+    if (nextPaths.length !== playlist.paths.length) {
+      playlist.paths = nextPaths;
+      playlistsChanged = true;
+    }
+  }
+  const failedKeys = new Set([...failed].map(blockKeyOf));
+  const blockedBefore = blockedKeys.size;
+  for (const key of blockedKeys) if (!failedKeys.has(key)) blockedKeys.delete(key);
+  const blockedChanged = blockedKeys.size !== blockedBefore;
+
+  if (libraryChanged) await saveLibrary();
+  if (onlineChanged) await saveOnline();
+  if (playlistsChanged) PL.persist();
+  if (blockedChanged) saveBlocked();
+  if (removed.size) await applyCleanupQueue(removed);
+  renderPlaylists();
+  refreshView();
+  const summary = buildCleanupSummary(cleanupItems(paths, failed));
+  flash(`Removed ${summary.entries} blocked entr${summary.entries === 1 ? "y" : "ies"} · ${summary.failed} failed`);
+}
+async function cleanupRoots() {
+  const roots = [...folders];
+  const downloadRoot = String(S().downloadDir || "").trim();
+  if (downloadRoot) {
+    let resolved = downloadRoot;
+    try { resolved = await invoke("canon_path", { path: downloadRoot }) || downloadRoot; } catch {}
+    roots.push(resolved);
+  }
+  const uniqueRoots = [...new Set(roots.filter(Boolean))];
+  if (uniqueRoots.length && IS_NATIVE) await invoke("register_roots", { paths: uniqueRoots });
+  return uniqueRoots;
+}
+async function deleteDuplicateFiles() {
+  const roots = await cleanupRoots();
+  if (!roots.length) { flash("No registered music folders to scan"); return; }
+  const groups = await invoke("find_duplicate_files", { roots });
+  const plan = chooseDuplicatePlan(groups || [], PL.getPlaylists());
+  const removable = plan.flatMap(group => group.remove);
+  if (!removable.length) { flash("No exact duplicate files found"); return; }
+  const bytesByPath = new Map();
+  for (const group of groups || []) for (const path of group.paths || []) bytesByPath.set(path, Number(group.bytes) || 0);
+  const preview = buildCleanupSummary(cleanupItems(removable, new Set(), bytesByPath));
+  if (!await askConfirm(
+    "Delete duplicate files?",
+    `${plan.length} duplicate groups contain ${preview.files} removable files (${preview.bytes} bytes).`,
+    "Delete",
+  )) return;
+
+  const replacements = new Map();
+  const failed = new Set();
+  for (const group of plan) {
+    for (const path of group.remove) {
+      try {
+        await invoke("delete_file", { path });
+        replacements.set(path, group.keep);
+      } catch (error) {
+        failed.add(path);
+        console.error("[cleanup] duplicate delete", path, error);
+        diagnostics.record("error", "cleanup", "duplicate_delete_failed", error);
+      }
+    }
+  }
+  if (replacements.size) {
+    const removed = new Set();
+    const activePath = curIndex >= 0 && curIndex < queue.length ? queue[curIndex] : undefined;
+    queue = rewritePaths(queue, replacements, removed);
+    const playlists = PL.getPlaylists();
+    let playlistsChanged = false;
+    for (const playlist of playlists) {
+      const nextPaths = rewritePaths(playlist.paths, replacements, removed);
+      if (nextPaths.length !== playlist.paths.length || nextPaths.some((path, index) => path !== playlist.paths[index])) {
+        playlist.paths = nextPaths;
+        playlistsChanged = true;
+      }
+    }
+    let libraryChanged = false;
+    library = library.map(track => {
+      const path = replacements.get(track.path);
+      if (!path) return track;
+      libraryChanged = true;
+      return { ...track, path };
+    });
+    _localOk.clear();
+    _localIdx.built = false;
+    if (playlistsChanged) PL.persist();
+    if (libraryChanged) await saveLibrary();
+    if (activePath !== undefined) {
+      curIndex = queue.indexOf(replacements.get(activePath) || activePath);
+      savePlayback();
+      if (curIndex >= 0) await schedulePreload();
+    }
+  }
+  renderPlaylists();
+  refreshView();
+  const summary = buildCleanupSummary(cleanupItems(removable, failed, bytesByPath));
+  flash(`Removed ${summary.files} duplicate file${summary.files === 1 ? "" : "s"} (${summary.bytes} bytes) · ${summary.failed} failed`);
+}
+async function removePlaylistDuplicates() {
+  const selectedPlaylist = $("#setCleanupPlaylist")?.value || "__all";
+  const playlists = selectedPlaylist === "__all"
+    ? PL.getPlaylists()
+    : PL.getPlaylists().filter(playlist => playlist.id === selectedPlaylist);
+  let removed = 0;
+  for (const playlist of playlists) {
+    const identityByPath = new Map();
+    for (const path of playlist.paths) {
+      const track = trackByPath(path);
+      identityByPath.set(path, trackKey(track) || blockKeyOf(path) || path);
+    }
+    const deduped = dedupePlaylistPaths(playlist.paths, identityByPath);
+    if (deduped.removed) {
+      playlist.paths = deduped.paths;
+      removed += deduped.removed;
+    }
+  }
+  if (removed) PL.persist();
+  renderPlaylists();
+  refreshView();
+  flash(`Removed ${removed} playlist duplicate${removed === 1 ? "" : "s"}`);
+}
 // Drop blocked tracks from a list unless the user chose to reveal them.
 function filterBlocked(list) {
   // Nothing is blocked in the common case — skip the whole pass (it runs a
@@ -5856,11 +6076,6 @@ function openSettings() {
       <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
       <div class="set-hint">Where downloads are saved. Pick any folder with the folder picker. Empty = <b>${IS_ANDROID ? "/storage/emulated/0/Music/MusicPlayer" : "~/Music/MusicPlayer"}</b>. The folder is added as a source automatically after a download.</div>
     </div>
-    <div class="set-group"><div class="set-title">Blocked tracks</div>
-      <div class="set-row"><label>Show blocked tracks <span class="set-sub">(greyed instead of hidden)</span></label><input type="checkbox" id="setShowBlocked" ${s.showBlocked ? "checked" : ""}></div>
-      <div class="set-row"><label>Blocked</label><button id="setUnblockAll" class="btn-line sm">Unblock ${blockedKeys.size}</button></div>
-      <div class="set-hint">Right-click a track → <b>Block</b> to hide it and stop it from ever playing (even if it's saved locally), until you unblock it.</div>
-    </div>
     </section>
     <section class="set-pane" data-pane="integrations">
     <div class="set-group"><div class="set-title">Account &amp; cloud sync</div>
@@ -5901,6 +6116,16 @@ function openSettings() {
       <div id="setFollowList"></div>
       <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">${ic(IC.repeat)}Check all now</button></div>
       <div class="set-hint">Follow a playlist from <b>Import from URL…</b> (tick “Follow”). New upstream tracks land in the linked playlist; with the download option they are also downloaded to the library. Checks also run on launch.</div>
+    </div>
+    <div class="set-group"><div class="set-title">Cleanup</div>
+      <div class="set-row"><label>Show blocked tracks <span class="set-sub">(greyed instead of hidden)</span></label><input type="checkbox" id="setShowBlocked" ${s.showBlocked ? "checked" : ""}></div>
+      <div class="cleanup-actions">
+        <button id="setDeleteBlocked" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete blocked tracks (${blockedKeys.size})</button>
+        <button id="setDeleteDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete duplicate files</button>
+        <select id="setCleanupPlaylist" class="sel sm-sel wide"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>
+        <button id="setRemovePlaylistDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.list)}Remove playlist duplicates</button>
+      </div>
+      <div class="set-hint">Blocked entries are deleted from the app; local files are removed only after the confirmation. Duplicate-file cleanup keeps the playlist-preferred copy.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="system">
@@ -6059,6 +6284,9 @@ function openSettings() {
   $("#setDlConcurrency")?.addEventListener("change", e => SETTINGS.setSetting("dlConcurrency", Math.max(1, Math.min(4, Number(e.target.value) || 3))));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
   $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
+  $("#setDeleteBlocked")?.addEventListener("click", () => runCleanup(deleteBlockedTracks));
+  $("#setDeleteDuplicates")?.addEventListener("click", () => runCleanup(deleteDuplicateFiles));
+  $("#setRemovePlaylistDuplicates")?.addEventListener("click", () => runCleanup(removePlaylistDuplicates));
   // Account & cloud sync
   $("#setGdId")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientId", e.target.value.trim()));
   $("#setGdSecret")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientSecret", e.target.value.trim()));
@@ -6066,7 +6294,6 @@ function openSettings() {
   $("#setSignOut")?.addEventListener("click", accountSignOut);
   $("#setSyncNow")?.addEventListener("click", syncNow);
   $("#setSyncAuto")?.addEventListener("change", e => SETTINGS.setSetting("syncAuto", e.target.checked));
-  $("#setUnblockAll")?.addEventListener("click", () => { blockedKeys.clear(); saveBlocked(); $("#setUnblockAll").textContent = "Unblock 0"; refreshView(); flash("All tracks unblocked"); });
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));

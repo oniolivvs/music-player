@@ -6,7 +6,24 @@ import {
   dedupePlaylistPaths,
   collectBlockedPaths,
   removeQueuePaths,
+  buildCleanupSummary,
 } from "../src/cleanup.mjs";
+
+test("cleanup summary counts successful entries, local files, failures and bytes", () => {
+  const items = [
+    { path: "D:/Music/a.mp3", local: true, bytes: 80, failed: false },
+    { path: "yt:streamed", local: false, bytes: 0, failed: false },
+    { path: "D:/Music/locked.mp3", local: true, bytes: 20, failed: true },
+    { path: "yt:unavailable", local: false, bytes: 0, failed: true },
+  ];
+
+  assert.deepEqual(buildCleanupSummary(items), {
+    entries: 2,
+    files: 1,
+    failed: 2,
+    bytes: 80,
+  });
+});
 
 test("duplicate keeper is the most referenced path", () => {
   const groups = [{ paths: ["D:/Music/a.mp3", "D:/Copy/a.mp3"], bytes: 100 }];
