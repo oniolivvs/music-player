@@ -1158,14 +1158,19 @@ fn existing_scannable_dir(dir: &str) -> Option<String> {
     (!canonical.is_empty()).then_some(canonical)
 }
 
+fn first_existing_scannable_dir(candidates: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    candidates
+        .into_iter()
+        .find_map(|candidate| candidate.and_then(|path| existing_scannable_dir(&path)))
+}
+
 fn resolve_existing_download_dir(dir: &str) -> Result<Option<String>, String> {
     let (resolved, default, appdir) = download_dir_candidates(dir)?;
-    for candidate in [Some(resolved.clone()), (resolved != default).then_some(default), appdir] {
-        if let Some(candidate) = candidate.and_then(|path| existing_scannable_dir(&path)) {
-            return Ok(Some(candidate));
-        }
-    }
-    Ok(None)
+    Ok(first_existing_scannable_dir([
+        Some(resolved.clone()),
+        (resolved != default).then_some(default),
+        appdir,
+    ]))
 }
 
 /// Return an already-existing download root that cleanup may scan. Unlike the
@@ -1538,8 +1543,31 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
 
 #[cfg(test)]
 mod url_guard_tests {
-    use super::{check_yt_id, check_yt_url, yt_cleanup_download_root, yt_download_root};
-    use std::path::PathBuf;
+    use super::{
+        check_yt_id, check_yt_url, first_existing_scannable_dir, yt_cleanup_download_root,
+        yt_download_root,
+    };
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static CLEANUP_TEST_ROOT_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+    fn cleanup_test_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "music-player-cleanup-root-{name}-{}-{}",
+            std::process::id(),
+            CLEANUP_TEST_ROOT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ))
+    }
+
+    fn remove_managed_test_root(root: &str) {
+        crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|managed| managed != root);
+    }
 
     #[test]
     fn accepts_real_youtube_links() {
@@ -1600,40 +1628,100 @@ mod url_guard_tests {
 
     #[test]
     fn download_root_uses_the_download_resolver_for_a_writable_directory() {
-        let path: PathBuf = std::env::temp_dir().join(format!(
-            "music-player-download-root-test-{}",
-            std::process::id(),
-        ));
+        let path = cleanup_test_root("provisioned");
         let raw = path.to_string_lossy().into_owned();
         let resolved = yt_download_root(raw.clone()).unwrap();
         assert_eq!(resolved, crate::library::canon(&raw));
+        remove_managed_test_root(&resolved);
         std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
     fn cleanup_download_root_does_not_create_a_missing_directory() {
-        let path: PathBuf = std::env::temp_dir().join(format!(
-            "music-player-cleanup-root-missing-{}",
-            std::process::id(),
-        ));
+        let path = cleanup_test_root("missing");
         let raw = path.to_string_lossy().into_owned();
         assert!(!path.exists());
+        let missing_root = crate::library::canon(&raw);
+        let managed = crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let before = managed.clone();
+        assert!(!before.contains(&missing_root));
         let root = yt_cleanup_download_root(raw.clone()).unwrap();
         assert!(!path.exists());
-        let missing_root = crate::library::canon(&raw);
+        assert_eq!(*managed, before);
+        assert!(!managed.contains(&missing_root));
         assert_ne!(root.as_deref(), Some(missing_root.as_str()));
     }
 
     #[test]
     fn cleanup_download_root_returns_the_existing_download_root() {
-        let path: PathBuf = std::env::temp_dir().join(format!(
-            "music-player-cleanup-root-existing-{}",
-            std::process::id(),
-        ));
+        let path = cleanup_test_root("existing");
         std::fs::create_dir_all(&path).unwrap();
         let raw = path.to_string_lossy().into_owned();
         let download_root = yt_download_root(raw.clone()).unwrap();
-        assert_eq!(yt_cleanup_download_root(raw).unwrap(), Some(download_root));
+        assert_eq!(
+            yt_cleanup_download_root(raw).unwrap(),
+            Some(download_root.clone())
+        );
+        remove_managed_test_root(&download_root);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn cleanup_root_precedence_prefers_existing_configured_root() {
+        let base = cleanup_test_root("configured-precedence");
+        let configured = base.join("configured");
+        let default = base.join("default");
+        let app = base.join("app");
+        std::fs::create_dir_all(&configured).unwrap();
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+        assert_eq!(
+            first_existing_scannable_dir([
+                Some(configured.to_string_lossy().into_owned()),
+                Some(default.to_string_lossy().into_owned()),
+                Some(app.to_string_lossy().into_owned()),
+            ]),
+            Some(crate::library::canon(&configured.to_string_lossy()))
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn cleanup_root_precedence_prefers_existing_default_root() {
+        let base = cleanup_test_root("default-precedence");
+        let configured = base.join("missing-configured");
+        let default = base.join("default");
+        let app = base.join("app");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+        assert_eq!(
+            first_existing_scannable_dir([
+                Some(configured.to_string_lossy().into_owned()),
+                Some(default.to_string_lossy().into_owned()),
+                Some(app.to_string_lossy().into_owned()),
+            ]),
+            Some(crate::library::canon(&default.to_string_lossy()))
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn cleanup_root_precedence_uses_existing_app_fallback() {
+        let base = cleanup_test_root("app-precedence");
+        let configured = base.join("missing-configured");
+        let default = base.join("missing-default");
+        let app = base.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        assert_eq!(
+            first_existing_scannable_dir([
+                Some(configured.to_string_lossy().into_owned()),
+                Some(default.to_string_lossy().into_owned()),
+                Some(app.to_string_lossy().into_owned()),
+            ]),
+            Some(crate::library::canon(&app.to_string_lossy()))
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
