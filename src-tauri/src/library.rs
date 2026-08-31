@@ -173,10 +173,147 @@ pub async fn folder_size(path: String) -> u64 {
     total
 }
 
-fn sha256_file(path: &std::path::Path) -> Result<[u8; 32], String> {
-    use sha2::{Digest, Sha256};
+struct DuplicateRoot {
+    path: String,
+    dir: cap_std::fs::Dir,
+}
 
-    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+struct DuplicateCandidate {
+    path: String,
+    bytes: u64,
+    file: std::fs::File,
+}
+
+fn open_capability_component(
+    dir: &cap_std::fs::Dir,
+    component: &std::path::Path,
+    maybe_dir: bool,
+) -> Result<cap_std::fs::File, String> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
+
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .maybe_dir(maybe_dir);
+    dir.open_with(component, &options)
+        .map_err(|error| error.to_string())
+}
+
+fn open_duplicate_root(path: String) -> Result<DuplicateRoot, String> {
+    use cap_std::ambient_authority;
+    use cap_std::fs::Dir;
+
+    let root = std::path::Path::new(&path);
+    if !root.is_absolute() {
+        return Err("duplicate scan root must be absolute".into());
+    }
+
+    // Ambient authority is used only for the filesystem anchor (for example
+    // `/`, `C:\\`, or a UNC share root). Every user-mutable component below
+    // that anchor is then opened relative to the preceding held directory
+    // handle with symlink/reparse-point following disabled.
+    let mut anchor = std::path::PathBuf::new();
+    let mut names = Vec::new();
+    for component in root.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => anchor.push(prefix.as_os_str()),
+            std::path::Component::RootDir if names.is_empty() => {
+                anchor.push(component.as_os_str())
+            }
+            std::path::Component::Normal(name) => names.push(name.to_owned()),
+            _ => return Err("duplicate scan root contains an unsafe path component".into()),
+        }
+    }
+    if anchor.as_os_str().is_empty() {
+        return Err("duplicate scan root has no filesystem anchor".into());
+    }
+
+    let mut dir = Dir::open_ambient_dir(&anchor, ambient_authority())
+        .map_err(|error| error.to_string())?;
+    for name in names {
+        let opened = open_capability_component(&dir, std::path::Path::new(&name), true)?;
+        let metadata = opened.metadata().map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("duplicate scan root traverses a symlink or non-directory".into());
+        }
+        dir = Dir::from_std_file(opened.into_std());
+    }
+    if !dir
+        .dir_metadata()
+        .map_err(|error| error.to_string())?
+        .is_dir()
+    {
+        return Err("duplicate scan root is not a regular directory".into());
+    }
+    Ok(DuplicateRoot { path, dir })
+}
+
+fn open_duplicate_candidate(
+    root: &DuplicateRoot,
+    path: &std::path::Path,
+) -> Result<DuplicateCandidate, String> {
+    let relative = path
+        .strip_prefix(std::path::Path::new(&root.path))
+        .map_err(|_| "duplicate candidate escaped its root".to_string())?;
+    let extension = relative
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !AUDIO_EXTS.contains(&extension.as_str()) {
+        return Err(format!("refusing duplicate candidate with unsupported extension .{extension}"));
+    }
+
+    let mut components = relative.components().peekable();
+    let mut current = root.dir.try_clone().map_err(|error| error.to_string())?;
+    let mut final_component = None;
+    while let Some(component) = components.next() {
+        let name = match component {
+            std::path::Component::Normal(name) => name,
+            _ => return Err("duplicate candidate contains an unsafe path component".into()),
+        };
+        if components.peek().is_none() {
+            final_component = Some(name.to_owned());
+            break;
+        }
+        let opened = open_capability_component(&current, std::path::Path::new(name), true)?;
+        let metadata = opened.metadata().map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("duplicate candidate traverses a symlink or non-directory".into());
+        }
+        current = cap_std::fs::Dir::from_std_file(opened.into_std());
+    }
+
+    let final_component = final_component
+        .ok_or_else(|| "duplicate candidate must be below its root".to_string())?;
+    let opened = open_capability_component(
+        &current,
+        std::path::Path::new(&final_component),
+        false,
+    )?;
+    let metadata = opened.metadata().map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("duplicate candidate is a symlink or non-regular file".into());
+    }
+
+    Ok(DuplicateCandidate {
+        path: std::path::Path::new(&root.path)
+            .join(relative)
+            .to_string_lossy()
+            .into_owned(),
+        bytes: metadata.len(),
+        file: opened.into_std(),
+    })
+}
+
+fn sha256_file(file: &std::fs::File) -> Result<[u8; 32], String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Seek, SeekFrom};
+
+    let mut file = file;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -189,9 +326,17 @@ fn sha256_file(path: &std::path::Path) -> Result<[u8; 32], String> {
     Ok(digest.finalize().into())
 }
 
-fn files_equal(first: &std::path::Path, second: &std::path::Path) -> Result<bool, String> {
-    let mut first = std::fs::File::open(first).map_err(|error| error.to_string())?;
-    let mut second = std::fs::File::open(second).map_err(|error| error.to_string())?;
+fn files_equal(first: &std::fs::File, second: &std::fs::File) -> Result<bool, String> {
+    use std::io::{Seek, SeekFrom};
+
+    let mut first = first;
+    let mut second = second;
+    first
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
+    second
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
     let mut first_buffer = [0_u8; 64 * 1024];
     let mut second_buffer = [0_u8; 64 * 1024];
 
@@ -214,28 +359,28 @@ fn files_equal(first: &std::path::Path, second: &std::path::Path) -> Result<bool
     }
 }
 
-fn duplicate_groups(paths: Vec<std::path::PathBuf>) -> Result<Vec<DuplicateFileGroup>, String> {
-    let mut by_size: BTreeMap<u64, Vec<std::path::PathBuf>> = BTreeMap::new();
-    for path in paths {
-        let bytes = std::fs::metadata(&path)
-            .map_err(|error| error.to_string())?
-            .len();
-        by_size.entry(bytes).or_default().push(path);
+fn duplicate_groups(candidates: Vec<DuplicateCandidate>) -> Result<Vec<DuplicateFileGroup>, String> {
+    let mut by_size: BTreeMap<u64, Vec<DuplicateCandidate>> = BTreeMap::new();
+    for candidate in candidates {
+        by_size.entry(candidate.bytes).or_default().push(candidate);
     }
 
     let mut groups = Vec::new();
     for (bytes, same_size) in by_size.into_iter().filter(|(_, paths)| paths.len() > 1) {
-        let mut by_hash: BTreeMap<[u8; 32], Vec<std::path::PathBuf>> = BTreeMap::new();
-        for path in same_size {
-            by_hash.entry(sha256_file(&path)?).or_default().push(path);
+        let mut by_hash: BTreeMap<[u8; 32], Vec<DuplicateCandidate>> = BTreeMap::new();
+        for candidate in same_size {
+            by_hash
+                .entry(sha256_file(&candidate.file)?)
+                .or_default()
+                .push(candidate);
         }
 
         for same_hash in by_hash.into_values().filter(|paths| paths.len() > 1) {
-            let mut exact_groups: Vec<Vec<std::path::PathBuf>> = Vec::new();
+            let mut exact_groups: Vec<Vec<DuplicateCandidate>> = Vec::new();
             for candidate in same_hash {
                 let mut matching_group = None;
                 for (index, exact_group) in exact_groups.iter().enumerate() {
-                    if files_equal(&exact_group[0], &candidate)? {
+                    if files_equal(&exact_group[0].file, &candidate.file)? {
                         matching_group = Some(index);
                         break;
                     }
@@ -249,7 +394,7 @@ fn duplicate_groups(paths: Vec<std::path::PathBuf>) -> Result<Vec<DuplicateFileG
             for exact_group in exact_groups.into_iter().filter(|paths| paths.len() > 1) {
                 let mut paths: Vec<String> = exact_group
                     .into_iter()
-                    .map(|path| path.to_string_lossy().into_owned())
+                    .map(|candidate| candidate.path)
                     .collect();
                 paths.sort();
                 groups.push(DuplicateFileGroup { paths, bytes });
@@ -265,6 +410,7 @@ fn duplicate_groups(paths: Vec<std::path::PathBuf>) -> Result<Vec<DuplicateFileG
     Ok(groups)
 }
 
+#[cfg(test)]
 fn safe_duplicate_input(path: &std::path::Path, roots: &[String]) -> bool {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -315,20 +461,22 @@ pub async fn find_duplicate_files(roots: Vec<String>) -> Result<Vec<DuplicateFil
             }
             requested_roots.insert(canonical);
         }
-        let requested_roots: Vec<String> = requested_roots.into_iter().collect();
+        let requested_roots: Vec<DuplicateRoot> = requested_roots
+            .into_iter()
+            .map(open_duplicate_root)
+            .collect::<Result<_, _>>()?;
 
-        let mut paths = BTreeSet::new();
+        let mut candidates = BTreeMap::new();
         for root in &requested_roots {
-            for entry in WalkDir::new(root).follow_links(false) {
+            for entry in WalkDir::new(&root.path).follow_links(false) {
                 let entry = entry.map_err(|error| error.to_string())?;
-                if safe_duplicate_input(entry.path(), &requested_roots) {
-                    paths.insert(std::path::PathBuf::from(canon(
-                        &entry.path().to_string_lossy(),
-                    )));
+                if entry.file_type().is_file() {
+                    let candidate = open_duplicate_candidate(root, entry.path())?;
+                    candidates.entry(candidate.path.clone()).or_insert(candidate);
                 }
             }
         }
-        duplicate_groups(paths.into_iter().collect())
+        duplicate_groups(candidates.into_values().collect())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1018,13 +1166,17 @@ mod img_cache_tests {
 
 #[cfg(test)]
 mod duplicate_file_tests {
-    use super::{duplicate_groups, files_equal, safe_duplicate_input};
+    use super::{
+        canon, duplicate_groups, files_equal, open_duplicate_candidate, open_duplicate_root,
+        safe_duplicate_input,
+    };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
     fn temp_dir(label: &str) -> PathBuf {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("music-player-{label}-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1041,10 +1193,17 @@ mod duplicate_file_tests {
         std::fs::write(&copy, b"same-audio-bytes").unwrap();
         std::fs::write(&different, b"other-audio-byte").unwrap();
 
-        let groups = duplicate_groups(vec![first.clone(), copy.clone(), different]).unwrap();
+        let root = open_duplicate_root(canon(&dir.to_string_lossy())).unwrap();
+        let groups = duplicate_groups(vec![
+            open_duplicate_candidate(&root, &first).unwrap(),
+            open_duplicate_candidate(&root, &copy).unwrap(),
+            open_duplicate_candidate(&root, &different).unwrap(),
+        ])
+        .unwrap();
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].paths.len(), 2);
         assert_eq!(groups[0].bytes, 16);
+        drop(root);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1061,7 +1220,80 @@ mod duplicate_file_tests {
         std::fs::write(&first, b"same-audio-bytes").unwrap();
         std::fs::write(&different, b"other-audio-byte").unwrap();
 
-        assert!(!files_equal(&first, &different).unwrap());
+        let root = open_duplicate_root(canon(&dir.to_string_lossy())).unwrap();
+        let first = open_duplicate_candidate(&root, &first).unwrap();
+        let different = open_duplicate_candidate(&root, &different).unwrap();
+        assert!(!files_equal(&first.file, &different.file).unwrap());
+        drop(first);
+        drop(different);
+        drop(root);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validated_handles_survive_or_block_path_replacement() {
+        let dir = temp_dir("duplicate-handle-race");
+        let first = dir.join("first.mp3");
+        let copy = dir.join("copy.mp3");
+        let outside = dir.parent().unwrap().join(format!(
+            "music-player-outside-{}-{}.mp3",
+            std::process::id(),
+            NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&first, b"same-audio-bytes").unwrap();
+        std::fs::write(&copy, b"same-audio-bytes").unwrap();
+        std::fs::write(&outside, b"other-audio-byte").unwrap();
+
+        let root = open_duplicate_root(canon(&dir.to_string_lossy())).unwrap();
+        let first_candidate = open_duplicate_candidate(&root, &first).unwrap();
+        let copy_candidate = open_duplicate_candidate(&root, &copy).unwrap();
+
+        let removed = std::fs::remove_file(&first).is_ok();
+        if removed {
+            #[cfg(unix)]
+            let replaced = std::os::unix::fs::symlink(&outside, &first).is_ok();
+            #[cfg(windows)]
+            let replaced = std::os::windows::fs::symlink_file(&outside, &first).is_ok();
+            if replaced {
+                assert!(open_duplicate_candidate(&root, &first).is_err());
+            }
+        } else {
+            assert!(first.is_file(), "open handle must be what blocked replacement");
+        }
+
+        let groups = duplicate_groups(vec![first_candidate, copy_candidate]).unwrap();
+        assert_eq!(groups.len(), 1, "hashing must use the validated handles");
+
+        drop(root);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn root_capability_rejects_a_symlinked_ancestor() {
+        let dir = temp_dir("duplicate-root-ancestor");
+        let target = dir.join("target");
+        let nested = target.join("music");
+        let alias = dir.join("alias");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        #[cfg(unix)]
+        let symlink_created = std::os::unix::fs::symlink(&target, &alias).is_ok();
+        #[cfg(windows)]
+        let symlink_created = std::os::windows::fs::symlink_dir(&target, &alias).is_ok()
+            || std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&alias)
+                .arg(&target)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false);
+        if symlink_created {
+            assert!(open_duplicate_root(alias.join("music").to_string_lossy().into_owned()).is_err());
+        }
+
+        #[cfg(windows)]
+        let _ = std::fs::remove_dir(&alias);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1091,6 +1323,9 @@ mod duplicate_file_tests {
         let symlink_created = std::os::windows::fs::symlink_file(&regular, &symlink).is_ok();
         if symlink_created {
             assert!(!safe_duplicate_input(&symlink, &roots));
+            let capability_root = open_duplicate_root(canon(&root.to_string_lossy())).unwrap();
+            assert!(open_duplicate_candidate(&capability_root, &symlink).is_err());
+            drop(capability_root);
         }
 
         std::fs::remove_dir_all(dir).unwrap();

@@ -36,6 +36,10 @@ ureq = { version = "2", features = ["json"] }
 # at the top of src/library.rs (documented there).
 lofty = "0.21"
 walkdir = "2"
+# Capability-relative opens keep duplicate hashing tied to already-open roots
+# and reject every symlink/reparse component without pathname TOCTOU gaps.
+cap-std = "4.0"
+cap-fs-ext = "4.0"
 base64 = "0.22"
 # Wallpaper downscale before it reaches the WebView (read_image in src/library.rs):
 # raw 4K+ wallpapers under a big CSS blur buffer choked the compositor (PC freeze).
