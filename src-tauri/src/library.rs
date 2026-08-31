@@ -470,7 +470,13 @@ pub async fn find_duplicate_files(roots: Vec<String>) -> Result<Vec<DuplicateFil
         for root in &requested_roots {
             for entry in WalkDir::new(&root.path).follow_links(false) {
                 let entry = entry.map_err(|error| error.to_string())?;
-                if entry.file_type().is_file() {
+                let extension = entry
+                    .path()
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if entry.file_type().is_file() && AUDIO_EXTS.contains(&extension.as_str()) {
                     let candidate = open_duplicate_candidate(root, entry.path())?;
                     candidates.entry(candidate.path.clone()).or_insert(candidate);
                 }
@@ -1167,8 +1173,8 @@ mod img_cache_tests {
 #[cfg(test)]
 mod duplicate_file_tests {
     use super::{
-        canon, duplicate_groups, files_equal, open_duplicate_candidate, open_duplicate_root,
-        safe_duplicate_input,
+        canon, duplicate_groups, files_equal, find_duplicate_files, open_duplicate_candidate,
+        open_duplicate_root, register_root, safe_duplicate_input,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1294,6 +1300,29 @@ mod duplicate_file_tests {
 
         #[cfg(windows)]
         let _ = std::fs::remove_dir(&alias);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn production_scan_skips_non_media_and_returns_audio_duplicates() {
+        let dir = temp_dir("duplicate-production-filter");
+        let first = dir.join("first.mp3");
+        let copy = dir.join("copy.mp3");
+        std::fs::write(&first, b"same-audio-bytes").unwrap();
+        std::fs::write(&copy, b"same-audio-bytes").unwrap();
+        std::fs::write(dir.join("cover.jpg"), b"cover").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"notes").unwrap();
+
+        let root = canon(&dir.to_string_lossy());
+        register_root(&root);
+        let groups = tauri::async_runtime::block_on(find_duplicate_files(vec![root])).unwrap();
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].bytes, 16);
+        assert_eq!(groups[0].paths.len(), 2);
+        assert!(groups[0].paths.iter().any(|path| path.ends_with("first.mp3")));
+        assert!(groups[0].paths.iter().any(|path| path.ends_with("copy.mp3")));
+
         std::fs::remove_dir_all(dir).unwrap();
     }
 
