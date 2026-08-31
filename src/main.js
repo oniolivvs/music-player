@@ -3312,16 +3312,19 @@ async function runCleanup(action) {
     cleanupButtonsDisabled(false);
   }
 }
-async function applyCleanupQueue(removed) {
+function applyCleanupQueue(removed) {
   const next = removeQueuePaths(queue, curIndex, removed);
   queue = next.queue;
   preIndex = -1;
   expectedQueued = 1;
+  curIndex = next.currentIndex;
+  return next;
+}
+async function settleCleanupQueue(next) {
   if (next.activeRemoved) {
     if (next.currentIndex >= 0) await hardPlay(next.currentIndex);
     else {
       try { await invoke("stop"); } catch {}
-      curIndex = -1;
       playing = false;
       updateNowPlaying(null, "");
       setPlayIcon(false);
@@ -3331,7 +3334,6 @@ async function applyCleanupQueue(removed) {
       savePlayback();
     }
   } else {
-    curIndex = next.currentIndex;
     savePlayback();
     if (curIndex >= 0) await schedulePreload();
   }
@@ -3385,12 +3387,13 @@ async function deleteBlockedTracks() {
   const blockedBefore = blockedKeys.size;
   for (const key of blockedKeys) if (!failedKeys.has(key)) blockedKeys.delete(key);
   const blockedChanged = blockedKeys.size !== blockedBefore;
+  const queueState = removed.size ? applyCleanupQueue(removed) : null;
 
   if (libraryChanged) await saveLibrary();
   if (onlineChanged) await saveOnline();
   if (playlistsChanged) PL.persist();
   if (blockedChanged) saveBlocked();
-  if (removed.size) await applyCleanupQueue(removed);
+  if (queueState) await settleCleanupQueue(queueState);
   renderPlaylists();
   refreshView();
   const summary = buildCleanupSummary(cleanupItems(paths, failed));
@@ -3398,12 +3401,8 @@ async function deleteBlockedTracks() {
 }
 async function cleanupRoots() {
   const roots = [...folders];
-  const downloadRoot = String(S().downloadDir || "").trim();
-  if (downloadRoot) {
-    let resolved = downloadRoot;
-    try { resolved = await invoke("canon_path", { path: downloadRoot }) || downloadRoot; } catch {}
-    roots.push(resolved);
-  }
+  const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
+  if (downloadRoot) roots.push(downloadRoot);
   const uniqueRoots = [...new Set(roots.filter(Boolean))];
   if (uniqueRoots.length && IS_NATIVE) await invoke("register_roots", { paths: uniqueRoots });
   return uniqueRoots;
@@ -3478,6 +3477,7 @@ async function removePlaylistDuplicates() {
   const playlists = selectedPlaylist === "__all"
     ? PL.getPlaylists()
     : PL.getPlaylists().filter(playlist => playlist.id === selectedPlaylist);
+  const changes = [];
   let removed = 0;
   for (const playlist of playlists) {
     const identityByPath = new Map();
@@ -3487,11 +3487,18 @@ async function removePlaylistDuplicates() {
     }
     const deduped = dedupePlaylistPaths(playlist.paths, identityByPath);
     if (deduped.removed) {
-      playlist.paths = deduped.paths;
+      changes.push({ playlist, paths: deduped.paths });
       removed += deduped.removed;
     }
   }
-  if (removed) PL.persist();
+  if (!removed) { flash("No playlist duplicates to remove"); return; }
+  if (!await askConfirm(
+    "Remove playlist duplicates?",
+    `This removes ${removed} duplicate playlist entr${removed === 1 ? "y" : "ies"}.`,
+    "Remove",
+  )) return;
+  for (const change of changes) change.playlist.paths = change.paths;
+  PL.persist();
   renderPlaylists();
   refreshView();
   flash(`Removed ${removed} playlist duplicate${removed === 1 ? "" : "s"}`);

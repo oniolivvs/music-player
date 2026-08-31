@@ -1134,6 +1134,14 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     Err(format!("cannot write to a download folder (grant All-Files-Access, or pick a writable folder). Tried: {resolved}"))
 }
 
+/// Resolve the same writable download root used by `yt_download`, including its
+/// platform defaults and fallback locations. Cleanup uses this command before
+/// duplicate scanning so it cannot drift from the destination downloads use.
+#[tauri::command]
+pub fn yt_download_root(dir: String) -> Result<String, String> {
+    resolve_download_dir(&dir)
+}
+
 /// True if we can create `dir` and write a file into it.
 fn writable(dir: &str) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
@@ -1497,7 +1505,8 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
 
 #[cfg(test)]
 mod url_guard_tests {
-    use super::{check_yt_id, check_yt_url};
+    use super::{check_yt_id, check_yt_url, yt_download_root};
+    use std::path::PathBuf;
 
     #[test]
     fn accepts_real_youtube_links() {
@@ -1554,5 +1563,17 @@ mod url_guard_tests {
         for bad in ["", "short", "dQw4w9WgXcQextra", "dQw4w9WgXc/", "../../etc/pw", "-oevil"] {
             assert!(check_yt_id(bad).is_err(), "must reject {bad}");
         }
+    }
+
+    #[test]
+    fn download_root_uses_the_download_resolver_for_a_writable_directory() {
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "music-player-download-root-test-{}",
+            std::process::id(),
+        ));
+        let raw = path.to_string_lossy().into_owned();
+        let resolved = yt_download_root(raw.clone()).unwrap();
+        assert_eq!(resolved, crate::library::canon(&raw));
+        std::fs::remove_dir_all(path).unwrap();
     }
 }
