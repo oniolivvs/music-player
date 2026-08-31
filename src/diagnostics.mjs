@@ -54,10 +54,16 @@ export function createDiagnostics({ nativeInvoke, consoleRef = console, eventTar
   function enqueue(entry) {
     if (typeof nativeInvoke !== "function" || pendingNative >= MAX_PENDING) return;
     pendingNative++;
-    chain = chain
-      .then(() => nativeInvoke("diag_write", entry))
+    const operation = chain.then(() => nativeInvoke("diag_write", entry));
+    chain = operation
       .catch(() => {})
       .finally(() => { pendingNative--; });
+  }
+
+  function enqueueCommand(command, args) {
+    const operation = chain.then(() => nativeInvoke(command, args));
+    chain = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   function record(level, component, event, detail) {
@@ -120,12 +126,12 @@ export function createDiagnostics({ nativeInvoke, consoleRef = console, eventTar
 
   async function exportLog() {
     if (typeof nativeInvoke !== "function") return "Browser diagnostics stay in memory";
-    return nativeInvoke("diag_export");
+    return enqueueCommand("diag_export");
   }
 
   async function clear() {
     memory.length = 0;
-    if (typeof nativeInvoke === "function") await nativeInvoke("diag_clear");
+    if (typeof nativeInvoke === "function") await enqueueCommand("diag_clear");
   }
 
   return {

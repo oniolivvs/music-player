@@ -61,6 +61,12 @@ test("CSS variables are deterministic valid colors", () => {
   assert.match(first["--tx-1"], /^#[0-9a-f]{6}$/i);
 });
 
+test("accent text keeps normal-text contrast on artwork panels", () => {
+  const palette = paletteFromPixels(pixels([[[68, 68, 102, 255], 12]]));
+  assert.ok(contrastRatio(palette.accent, palette.panel) >= 4.5);
+  assert.ok(contrastRatio(palette.accent2, palette.panel) >= 4.5);
+});
+
 test("a slow previous cover cannot overwrite the current cover", async () => {
   const pending = new Map();
   const applied = [];
@@ -95,4 +101,21 @@ test("missing artwork restores the manual theme and invalidates pending work", a
   await pending;
 
   assert.deepEqual(applied, [["manual"]]);
+});
+
+test("cancelling artwork prevents a pending palette from being applied", async () => {
+  let resolve;
+  const applied = [];
+  const state = createArtworkThemeState({
+    analyze: () => new Promise(done => { resolve = done; }),
+    apply: (...args) => applied.push(args),
+    restore: () => {},
+  });
+
+  const pending = state.use("cover");
+  state.cancel();
+  resolve({ accent: "late" });
+  await pending;
+
+  assert.deepEqual(applied, []);
 });

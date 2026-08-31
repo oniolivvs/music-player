@@ -728,6 +728,7 @@ async function analyzeArtwork(src) {
 }
 
 function applyArtworkTheme(src, result) {
+  if (!S().artworkTheme) return;
   const root = document.documentElement.style;
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
@@ -5599,6 +5600,7 @@ async function applyThumbImage(s) {
   document.body.classList.toggle("has-thumb", !!src);
 }
 function applySettings() {
+  if (!S().artworkTheme) _artworkThemeState.cancel();
   applyTheme();
   applyUiPrefs();
   document.body.classList.toggle("compact", S().compactRows);

@@ -78,11 +78,11 @@ function shiftedAccent(color, lightSurface) {
 }
 
 function readableAccent(color, panel, lightSurface) {
-  if (contrastRatio(color, panel) >= 3) return color;
+  if (contrastRatio(color, panel) >= 4.5) return color;
   const target = lightSurface ? rgb(10, 12, 16) : rgb(250, 250, 252);
   for (const weight of [0.2, 0.35, 0.5, 0.65]) {
     const candidate = blend(color, target, weight);
-    if (contrastRatio(candidate, panel) >= 3) return candidate;
+    if (contrastRatio(candidate, panel) >= 4.5) return candidate;
   }
   return target;
 }
@@ -181,6 +181,7 @@ export function createGenerationGuard() {
 export function createArtworkThemeState({ analyze, apply, restore }) {
   const guard = createGenerationGuard();
   return {
+    cancel() { guard.next(); },
     async use(src) {
       const token = guard.next();
       if (!src) {

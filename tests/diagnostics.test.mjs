@@ -81,3 +81,32 @@ test("browser fallback retains only the newest 200 entries", async () => {
   assert.equal(entries[0].detail, "event-20");
   assert.equal(entries[199].detail, "event-219");
 });
+
+test("export waits for pending writes", async () => {
+  const commands = [];
+  const diagnostics = createDiagnostics({
+    nativeInvoke: async command => { commands.push(command); return "export.jsonl"; },
+    consoleRef: { error() {}, warn() {} },
+    eventTarget: new EventTarget(),
+  });
+
+  diagnostics.record("info", "test", "before_export", "latest event");
+  assert.equal(await diagnostics.exportLog(), "export.jsonl");
+
+  assert.deepEqual(commands, ["diag_write", "diag_export"]);
+});
+
+test("clear runs after pending writes and does not recreate the log", async () => {
+  const commands = [];
+  const diagnostics = createDiagnostics({
+    nativeInvoke: async command => commands.push(command),
+    consoleRef: { error() {}, warn() {} },
+    eventTarget: new EventTarget(),
+  });
+
+  diagnostics.record("warn", "test", "before_clear", "remove me");
+  await diagnostics.clear();
+  await diagnostics.flush();
+
+  assert.deepEqual(commands, ["diag_write", "diag_clear"]);
+});
