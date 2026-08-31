@@ -6132,7 +6132,7 @@ function openSettings() {
       <div class="cleanup-actions">
         <button id="setDeleteBlocked" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete blocked tracks (${blockedKeys.size})</button>
         <button id="setDeleteDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete duplicate files</button>
-        <select id="setCleanupPlaylist" class="sel sm-sel wide"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>
+        <select id="setCleanupPlaylist" class="sel sm-sel wide" aria-label="Playlist to clean"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>
         <button id="setRemovePlaylistDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.list)}Remove playlist duplicates</button>
       </div>
       <div class="set-hint">Blocked entries are deleted from the app; local files are removed only after the confirmation. Duplicate-file cleanup keeps the playlist-preferred copy.</div>

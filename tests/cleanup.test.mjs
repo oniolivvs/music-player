@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   chooseDuplicatePlan,
   rewritePaths,
@@ -8,6 +9,13 @@ import {
   removeQueuePaths,
   buildCleanupSummary,
 } from "../src/cleanup.mjs";
+
+test("cleanup playlist selector has an accessible name", async () => {
+  const source = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const selector = source.match(/<select id="setCleanupPlaylist"[^>]*>/)?.[0];
+  assert.ok(selector);
+  assert.match(selector, /\baria-label="Playlist to clean"/);
+});
 
 test("cleanup summary counts successful entries, local files, failures and bytes", () => {
   const items = [
