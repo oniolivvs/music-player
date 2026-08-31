@@ -20,11 +20,16 @@ use lofty::tag::ItemKey;
 /// async: reads a file — must never block the main (UI) thread.
 #[tauri::command]
 pub async fn cover(path: String) -> Option<String> {
-    let tagged = read_from_path(&path).ok()?;
-    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-    let pic = tag.pictures().first()?;
-    let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
-    Some(format!("data:{};base64,{}", mime, STANDARD.encode(pic.data())))
+    tauri::async_runtime::spawn_blocking(move || {
+        let tagged = read_from_path(&path).ok()?;
+        let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+        let pic = tag.pictures().first()?;
+        let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
+        cover_data_url(pic.data(), mime).ok()
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[derive(Serialize, Clone)]
@@ -296,6 +301,48 @@ const IMG_MAX_BYTES: u64 = 192 * 1024 * 1024;
 /// Above this, re-encode even if the dimensions are already fine: the result
 /// becomes a base64 data: URL held as a JS string, so the webview pays ~4/3 of it.
 const IMG_PASSTHROUGH_BYTES: usize = 8 * 1024 * 1024;
+const STILL_MAX_DIM: u32 = 1920;
+
+fn resize_still(data: &[u8]) -> Result<Option<(Vec<u8>, &'static str)>, String> {
+    let image = image::load_from_memory(data).map_err(|error| error.to_string())?;
+    let (width, height) = (image.width(), image.height());
+    if width.max(height) <= STILL_MAX_DIM && data.len() <= IMG_PASSTHROUGH_BYTES {
+        return Ok(None);
+    }
+    let scale = STILL_MAX_DIM as f64 / width.max(height) as f64;
+    let next_width = ((width as f64 * scale).round() as u32).max(1).min(width);
+    let next_height = ((height as f64 * scale).round() as u32).max(1).min(height);
+    let resized = image.resize(next_width, next_height, image::imageops::FilterType::Lanczos3);
+    let mut output = std::io::Cursor::new(Vec::new());
+    resized
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
+    Ok(Some((output.into_inner(), "image/png")))
+}
+
+fn bounded_image_data_url(data: &[u8], mime: &str) -> Result<String, String> {
+    if mime.eq_ignore_ascii_case("image/gif") {
+        let bytes = gif_downscale(data)?.unwrap_or_else(|| data.to_vec());
+        return Ok(format!("data:image/gif;base64,{}", STANDARD.encode(bytes)));
+    }
+    let (bytes, output_mime) = match resize_still(data)? {
+        Some((bytes, mime)) => (bytes, mime),
+        None => (data.to_vec(), mime),
+    };
+    Ok(format!("data:{output_mime};base64,{}", STANDARD.encode(bytes)))
+}
+
+fn cover_data_url(data: &[u8], mime: &str) -> Result<String, String> {
+    bounded_image_data_url(data, mime)
+}
+
+fn local_image_data_url(data: &[u8], mime: &str) -> Result<String, String> {
+    bounded_image_data_url(data, mime)
+}
+
+fn remote_image_data_url(data: &[u8], mime: &str) -> Result<String, String> {
+    bounded_image_data_url(data, mime)
+}
 
 /// Decoded results, keyed by (path, mtime, len) so an edited file is re-read.
 /// Essential now that GIFs are re-encoded: `plCoverInto` calls `read_image` for
@@ -363,47 +410,7 @@ fn read_image_uncached(path: String) -> Result<String, String> {
         ));
     }
     let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-
-    // Animated GIFs need their OWN path: the still-image branch below decodes a
-    // single frame and re-encodes to JPEG, which would silently freeze the
-    // animation. Downscale every frame instead and re-encode as a GIF.
-    if ext == "gif" {
-        match gif_downscale(&data) {
-            Ok(Some(out)) => return Ok(format!("data:image/gif;base64,{}", STANDARD.encode(out))),
-            Ok(None) => {} // already small enough — fall through to raw passthrough
-            // Best-effort, like the still path: an odd/truncated GIF is handed
-            // to the webview untouched rather than refused outright.
-            Err(e) => eprintln!("[image] gif re-encode failed for {path}: {e}"),
-        }
-        return Ok(format!("data:image/gif;base64,{}", STANDARD.encode(data)));
-    }
-    // A wallpaper is shown full-screen, blurred and RE-composited under every
-    // translucent panel repaint. Feeding the raw file (often 4K+) means a huge
-    // decoded bitmap + a huge blur buffer — on software rendering / weak GPU
-    // drivers that saturates the compositor (whole-PC freeze reports). Cap the
-    // bitmap at 1920px: under a >=8px blur the extra detail is invisible anyway.
-    // Below the cap we keep the original bytes untouched (no re-encode).
-    // Everything is best-effort: undecodable/odd files fall back to the raw bytes.
-    let resized = image::load_from_memory(&data).ok().and_then(|img| {
-        let (w, h) = (img.width(), img.height());
-        const MAX_DIM: u32 = 1920;
-        if w.max(h) <= MAX_DIM {
-            return None;
-        }
-        let (nw, nh) = if w >= h {
-            (MAX_DIM, (h as u64 * MAX_DIM as u64 / w as u64).max(1) as u32)
-        } else {
-            ((w as u64 * MAX_DIM as u64 / h as u64).max(1) as u32, MAX_DIM)
-        };
-        let img = img.resize(nw, nh, image::imageops::FilterType::Triangle);
-        let mut buf = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut buf, image::ImageFormat::Jpeg).ok()?;
-        Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(buf.into_inner())))
-    });
-    if let Some(out) = resized {
-        return Ok(out);
-    }
-    Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
+    local_image_data_url(&data, mime)
 }
 
 /// Re-encode an animated GIF small enough to be used as a live background.
@@ -524,7 +531,7 @@ pub async fn net_image(url: String) -> Result<String, String> {
         if bytes.is_empty() {
             return Err("empty image".into());
         }
-        Ok(format!("data:{};base64,{}", mime, STANDARD.encode(&bytes)))
+        remote_image_data_url(&bytes, &mime)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -631,6 +638,80 @@ fn read_track(path: &std::path::Path) -> Track {
             duration_secs: 0,
             gain: 1.0,
         },
+    }
+}
+
+#[cfg(test)]
+mod bounded_image_tests {
+    use super::bounded_image_data_url;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    fn jpeg(width: u32, height: u32) -> Vec<u8> {
+        let image = image::RgbImage::from_pixel(width, height, image::Rgb([40, 80, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut out, image::ImageFormat::Jpeg)
+            .unwrap();
+        out.into_inner()
+    }
+
+    fn decoded_size(url: &str) -> (u32, u32) {
+        let encoded = url.split_once(',').unwrap().1;
+        let bytes = STANDARD.decode(encoded).unwrap();
+        let image = image::load_from_memory(&bytes).unwrap();
+        (image.width(), image.height())
+    }
+
+    #[test]
+    fn landscape_is_capped_without_changing_ratio() {
+        let out = bounded_image_data_url(&jpeg(3000, 1500), "image/jpeg").unwrap();
+        assert_eq!(decoded_size(&out), (1920, 960));
+    }
+
+    #[test]
+    fn portrait_is_capped_without_changing_ratio() {
+        let out = bounded_image_data_url(&jpeg(1000, 2000), "image/jpeg").unwrap();
+        assert_eq!(decoded_size(&out), (960, 1920));
+    }
+
+    #[test]
+    fn small_image_is_not_upscaled() {
+        let out = bounded_image_data_url(&jpeg(320, 180), "image/jpeg").unwrap();
+        assert_eq!(decoded_size(&out), (320, 180));
+    }
+}
+
+#[cfg(test)]
+mod image_source_tests {
+    use super::{cover_data_url, local_image_data_url, remote_image_data_url};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    fn jpeg(width: u32, height: u32) -> Vec<u8> {
+        let image = image::RgbImage::from_pixel(width, height, image::Rgb([40, 80, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut out, image::ImageFormat::Jpeg)
+            .unwrap();
+        out.into_inner()
+    }
+
+    fn decoded_size(url: &str) -> (u32, u32) {
+        let encoded = url.split_once(',').unwrap().1;
+        let bytes = STANDARD.decode(encoded).unwrap();
+        let image = image::load_from_memory(&bytes).unwrap();
+        (image.width(), image.height())
+    }
+
+    #[test]
+    fn every_artwork_source_caps_still_images() {
+        let image = jpeg(2400, 1200);
+        for out in [
+            cover_data_url(&image, "image/jpeg"),
+            local_image_data_url(&image, "image/jpeg"),
+            remote_image_data_url(&image, "image/jpeg"),
+        ] {
+            assert_eq!(decoded_size(&out.unwrap()), (1920, 960));
+        }
     }
 }
 
