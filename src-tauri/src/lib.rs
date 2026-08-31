@@ -926,6 +926,7 @@ pub fn run() {
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::net_image, library::delete_file, library::open_path,
             library::canon_path, library::canon_paths, library::folder_size, library::register_roots,
+            library::find_duplicate_files,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear,
             importer::import_spotify,
