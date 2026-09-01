@@ -116,6 +116,19 @@ test("the wallpaper stylesheet consumes centered cover presentation variables", 
   );
 });
 
+test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  const sharedRule = stylesheet.match(/body\.has-bg\s+:where\((.*?)\)\s*\{([^}]*)\}/s);
+  assert.ok(sharedRule, "shared artwork icon-control rule is missing");
+  assert.match(sharedRule[1], /\.icon-btn/);
+  assert.match(sharedRule[1], /\.ctrl:not\(\.play\)/);
+  assert.doesNotMatch(sharedRule[1], /\.ctrl\.play/);
+  assert.match(sharedRule[2], /background:\s*var\(--icon-surface\)/);
+  assert.match(sharedRule[2], /color:\s*var\(--icon-fg\)/);
+  assert.match(sharedRule[2], /border:\s*1px solid var\(--icon-border\)/);
+  assert.match(stylesheet, /body\.has-bg\s+\.sort-ico\s*\{[^}]*var\(--icon-surface\)[^}]*var\(--icon-fg\)[^}]*\}/s);
+});
+
 test("a slow previous cover cannot overwrite the current cover", async () => {
   const pending = new Map();
   const applied = [];

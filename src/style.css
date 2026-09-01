@@ -12,6 +12,9 @@
   --tx-3: #6d7080;
   --accent: #8B5CF6;
   --accent-2: #A78BFA;
+  --icon-surface: #211838;
+  --icon-fg: #eee8ff;
+  --icon-border: #6f58a8;
   --bd: rgba(255, 255, 255, 0.07);
   --bd-2: rgba(255, 255, 255, 0.12);
   --vio-glow: rgba(139, 92, 246, 0.14);
@@ -804,6 +807,36 @@ body.bg-light.has-bg select.sel,
 body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
 body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
 body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
+
+/* Small icon controls sit directly over the artwork in several views. A
+   transparent button can always land on a same-colour patch, so the palette
+   gives them an opaque tinted plate and a foreground proven against that plate. */
+body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle) {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border: 1px solid var(--icon-border);
+}
+body.has-bg.icon-only .vh-actions .btn-line.sm {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border-color: var(--icon-border);
+}
+body.has-bg .sort-ico {
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border: 1px solid var(--icon-border);
+}
+body.has-bg.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle):hover,
+body.has-bg.icon-only .vh-actions .btn-line.sm:hover {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  box-shadow: 0 0 0 2px var(--icon-border);
+}
+body.has-bg .ctrl.active { color: var(--accent-2); }
 
 /* ─── Cookies consent ─── */
 .ck-title { font-size: 12px; color: var(--tx-2); padding: 8px 0 6px; font-weight: 600; }
