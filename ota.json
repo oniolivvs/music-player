@@ -1,5 +1,5 @@
 {
-  "version": "0.22.102",
+  "version": "0.22.103",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -8,11 +8,12 @@
     "store.js",
     "diagnostics.mjs",
     "artwork-theme.mjs",
-    "cleanup.mjs"
+    "cleanup.mjs",
+    "library-actions.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Artwork themes now give compact icon controls an opaque, same-hue surface with readable contrast. Cleanup settings group blocked-track, duplicate-file, and playlist-duplicate deletion together, with playlist scope clearly separated below.",
+  "notes": "Your Library now includes a fifth action that safely deletes blocked tracks through the existing confirmation flow. Artwork and manual image backgrounds are permanently centered and cropped with cover so they fill the whole player window without stretching or empty bands.",
   "platforms": [
     "linux",
     "windows",
