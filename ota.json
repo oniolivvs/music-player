@@ -1,5 +1,5 @@
 {
-  "version": "0.22.101",
+  "version": "0.22.102",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -12,7 +12,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Two memories for downloads. Deleting a downloaded file from the app now means never: the track's video id is remembered as suppressed, its online entry stays out of the library and every playlist, and scans / follows / adoption can no longer slide it back in at the next launch. Choosing it again (direct play or a fresh download) lifts the memory on the spot. Separately, new tracks in followed playlists are now governed by one setting — ask (one grouped prompt; the ones you decline are remembered and never proposed again), auto (download straight away), or off (manual checks only). A per-playlist 'auto-download' check now stands on its own: ticked, that playlist downloads its new tracks at each check regardless of the global setting. Settings → Downloads shows both memories and a 'Forget' button each. Sources that hold nothing playable stop cluttering the sidebar: a folder that scans empty is dropped from Sources instead of staying as a dead row, and a source emptied by a rescan leaves the list at once. Video files (mp4 / webm / mkv) count as media everywhere a folder is judged — a video-only folder is a real source, its files can be sized and deleted. 'Show in folder' now selects the actual file in Explorer instead of just opening its parent folder. Custom accent: two color pickers (normal · hover) build a 'custom' accent on top of the preset swatches, applied live. New 'Player icon size' slider scales the playback controls. The desktop bridge now speaks the Windows transport (SMTC), so the media keys and the lock screen work on Windows too.",
+  "notes": "Artwork themes now give compact icon controls an opaque, same-hue surface with readable contrast. Cleanup settings group blocked-track, duplicate-file, and playlist-duplicate deletion together, with playlist scope clearly separated below.",
   "platforms": [
     "linux",
     "windows",
