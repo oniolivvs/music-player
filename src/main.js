@@ -7,6 +7,7 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
+import { bindLibraryActions, buildLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -4337,6 +4338,7 @@ function showLibrary() {
   const nOnline = libPaths.filter(isOnline).length;
   const nDl = downloadablePaths(libPaths).length;
   const nDead = libPaths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
+  const libraryActions = buildLibraryActions({ downloadableCount: nDl, blockedCount: blockedKeys.size });
   // The library behaves like a playlist you cannot delete: same header, same
   // actions, same drag-to-reorder. "Follow" is deliberately absent — following
   // mirrors an upstream playlist, and the library has no upstream to mirror.
@@ -4344,20 +4346,18 @@ function showLibrary() {
     icon: IC.disc,
     title: "Your Library",
     subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}${nOnline ? ` · ${nOnline} online` : ""}${nDead ? ` · ${nDead} unavailable` : ""}`,
-    actions:
-      `<button id="libRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
-      `<button id="libUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
-      // Always shown, unlike on a playlist: the library is the home view, and a
-      // control that vanishes whenever nothing is downloadable reads as missing
-      // rather than as "nothing to do". With no online tracks it stays enabled
-      // and says so on click.
-      `<button id="libDlBtn" class="btn-line sm"${nDl ? "" : ` title="Nothing left to download — everything is local or already known unavailable"`}>${ic(IC.save)} Save locally${nDl ? ` (${nDl} mp3)` : ""}</button>` +
-      `<button id="libDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
+    // Always show every action: controls that vanish when their count reaches
+    // zero read as missing, while a stable row can explain that there is nothing
+    // to do. Button labels collapse automatically in icon-only mode.
+    actions: libraryActions.map(action => `<button id="${action.id}" class="btn-line sm"${action.title ? ` title="${esc(action.title)}"` : ""}>${ic(IC[action.icon])} ${esc(action.label)}</button>`).join(""),
   });
-  $("#libRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
-  $("#libUrlBtn")?.addEventListener("click", addUrlToLibrary);
-  $("#libDlBtn")?.addEventListener("click", downloadLibraryOnline);
-  $("#libDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("library"));
+  bindLibraryActions($, libraryActions, {
+    refresh: refreshActiveViewAction,
+    addUrl: addUrlToLibrary,
+    download: downloadLibraryOnline,
+    cleanDuplicates: () => checkDuplicatesFlow("library"),
+    deleteBlocked: deleteBlockedTracks,
+  });
   $("#recoRail")?.remove();
   renderTracks(library);
 }
