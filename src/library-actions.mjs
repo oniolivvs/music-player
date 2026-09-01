@@ -1,4 +1,4 @@
-export function buildLibraryActions({ downloadableCount = 0, blockedCount = 0 } = {}) {
+export function buildLibraryActions({ downloadableCount = 0 } = {}) {
   return [
     {
       id: "libRefreshBtn",
@@ -34,16 +34,23 @@ export function buildLibraryActions({ downloadableCount = 0, blockedCount = 0 } 
       id: "libDeleteBlockedBtn",
       title: "Delete blocked tracks permanently",
       icon: "trash",
-      label: `Delete blocked tracks${blockedCount ? ` (${blockedCount})` : ""}`,
+      label: "Delete blocked tracks",
       handler: "deleteBlocked",
+      cleanup: true,
     },
   ];
 }
 
-export function bindLibraryActions(find, actions, handlers) {
+export function renderLibraryActions(actions, renderIcon, escapeHtml) {
+  return actions.map(action => `<button id="${escapeHtml(action.id)}" class="btn-line sm"${action.title ? ` title="${escapeHtml(action.title)}"` : ""}${action.cleanup ? " data-cleanup-action" : ""}>${renderIcon(action.icon)} ${escapeHtml(action.label)}</button>`).join("");
+}
+
+export function bindLibraryActions(find, actions, handlers, runCleanup) {
   for (const action of actions) {
     const handler = handlers[action.handler];
     if (typeof handler !== "function") continue;
-    find(`#${action.id}`)?.addEventListener("click", handler);
+    if (action.cleanup && typeof runCleanup !== "function") continue;
+    const listener = action.cleanup ? () => runCleanup(handler) : handler;
+    find(`#${action.id}`)?.addEventListener("click", listener);
   }
 }

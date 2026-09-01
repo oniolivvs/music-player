@@ -7,7 +7,7 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
-import { bindLibraryActions, buildLibraryActions } from "./library-actions.mjs";
+import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -753,8 +753,6 @@ function applyArtworkTheme(src, result) {
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
   const background = artworkBackgroundStyle(result.imageSrc);
   root.setProperty("--app-bg-image", background.image);
-  root.setProperty("--app-bg-size", background.size);
-  root.setProperty("--app-bg-position", background.position);
   document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
   const text = result.palette.text;
   document.body.classList.toggle("bg-light", (text.r + text.g + text.b) / 3 < 80);
@@ -4338,7 +4336,7 @@ function showLibrary() {
   const nOnline = libPaths.filter(isOnline).length;
   const nDl = downloadablePaths(libPaths).length;
   const nDead = libPaths.filter(p => isStreamTrack(p) && dlBlock[ytId(p)]).length;
-  const libraryActions = buildLibraryActions({ downloadableCount: nDl, blockedCount: blockedKeys.size });
+  const libraryActions = buildLibraryActions({ downloadableCount: nDl });
   // The library behaves like a playlist you cannot delete: same header, same
   // actions, same drag-to-reorder. "Follow" is deliberately absent — following
   // mirrors an upstream playlist, and the library has no upstream to mirror.
@@ -4349,7 +4347,7 @@ function showLibrary() {
     // Always show every action: controls that vanish when their count reaches
     // zero read as missing, while a stable row can explain that there is nothing
     // to do. Button labels collapse automatically in icon-only mode.
-    actions: libraryActions.map(action => `<button id="${action.id}" class="btn-line sm"${action.title ? ` title="${esc(action.title)}"` : ""}>${ic(IC[action.icon])} ${esc(action.label)}</button>`).join(""),
+    actions: renderLibraryActions(libraryActions, icon => ic(IC[icon]), esc),
   });
   bindLibraryActions($, libraryActions, {
     refresh: refreshActiveViewAction,
@@ -4357,7 +4355,7 @@ function showLibrary() {
     download: downloadLibraryOnline,
     cleanDuplicates: () => checkDuplicatesFlow("library"),
     deleteBlocked: deleteBlockedTracks,
-  });
+  }, runCleanup);
   $("#recoRail")?.remove();
   renderTracks(library);
 }

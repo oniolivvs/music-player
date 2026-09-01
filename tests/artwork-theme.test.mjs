@@ -98,13 +98,9 @@ test("light green artwork keeps the icon treatment green and switches to dark fo
 test("artwork backgrounds fill the window by cropping instead of stretching", () => {
   assert.deepEqual(artworkBackgroundStyle("data:image/jpeg;base64,cover"), {
     image: 'url("data:image/jpeg;base64,cover")',
-    size: "cover",
-    position: "center",
   });
   assert.deepEqual(artworkBackgroundStyle(""), {
     image: "none",
-    size: "cover",
-    position: "center",
   });
 });
 

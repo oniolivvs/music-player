@@ -6,7 +6,7 @@ try {
   libraryActions = await import("../src/library-actions.mjs");
 } catch {}
 
-test("library actions keep blocked deletion fifth and expose its count", () => {
+test("library actions keep blocked deletion fifth with a stable label", () => {
   assert.equal(typeof libraryActions.buildLibraryActions, "function", "library action builder must exist");
   const actions = libraryActions.buildLibraryActions({ downloadableCount: 3, blockedCount: 7 });
   assert.deepEqual(actions.map(action => action.id), [
@@ -20,8 +20,9 @@ test("library actions keep blocked deletion fifth and expose its count", () => {
     id: "libDeleteBlockedBtn",
     title: "Delete blocked tracks permanently",
     icon: "trash",
-    label: "Delete blocked tracks (7)",
+    label: "Delete blocked tracks",
     handler: "deleteBlocked",
+    cleanup: true,
   });
 });
 
@@ -35,6 +36,7 @@ test("library actions bind blocked deletion to the existing cleanup handler", ()
     },
   });
   const deleteBlocked = () => {};
+  let guardedAction = null;
 
   libraryActions.bindLibraryActions(find, actions, {
     refresh() {},
@@ -42,7 +44,24 @@ test("library actions bind blocked deletion to the existing cleanup handler", ()
     download() {},
     cleanDuplicates() {},
     deleteBlocked,
-  });
+  }, action => { guardedAction = action; });
 
-  assert.equal(listeners.get("#libDeleteBlockedBtn:click"), deleteBlocked);
+  listeners.get("#libDeleteBlockedBtn:click")();
+  assert.equal(guardedAction, deleteBlocked);
+});
+
+test("blocked cleanup stays visible at zero and renders as a guarded action", () => {
+  assert.equal(typeof libraryActions.renderLibraryActions, "function", "library action renderer must exist");
+  const actions = libraryActions.buildLibraryActions({ downloadableCount: 0, blockedCount: 0 });
+  assert.equal(actions.length, 5);
+  assert.equal(actions.at(-1).label, "Delete blocked tracks");
+
+  const markup = libraryActions.renderLibraryActions(
+    actions,
+    icon => `<svg data-icon="${icon}"></svg>`,
+    value => String(value),
+  );
+  assert.match(markup, /id="libDeleteBlockedBtn"[^>]*data-cleanup-action/);
+  assert.match(markup, /data-icon="trash"/);
+  assert.match(markup, /> Delete blocked tracks<\/button>/);
 });
