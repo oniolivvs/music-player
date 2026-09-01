@@ -8,6 +8,7 @@ import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
 import {
+  buildCleanupActionLayout,
   buildCleanupSummary,
   chooseDuplicatePlan,
   collectBlockedPaths,
@@ -6216,12 +6217,12 @@ function openSettings() {
     </div>
     <div class="set-group"><div class="set-title">Cleanup</div>
       <div class="set-row"><label>Show blocked tracks <span class="set-sub">(greyed instead of hidden)</span></label><input type="checkbox" id="setShowBlocked" ${s.showBlocked ? "checked" : ""}></div>
-      <div class="cleanup-actions">
-        <button id="setDeleteBlocked" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete blocked tracks (${blockedKeys.size})</button>
-        <button id="setDeleteDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete duplicate files</button>
-        <select id="setCleanupPlaylist" class="sel sm-sel wide" aria-label="Playlist to clean"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>
-        <button id="setRemovePlaylistDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.list)}Remove playlist duplicates</button>
-      </div>
+      ${buildCleanupActionLayout({
+        deleteBlocked: `<button id="setDeleteBlocked" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete blocked tracks (${blockedKeys.size})</button>`,
+        deleteFiles: `<button id="setDeleteDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete duplicate files</button>`,
+        deletePlaylistEntries: `<button id="setRemovePlaylistDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.list)}Remove playlist duplicates</button>`,
+        playlistSelector: `<select id="setCleanupPlaylist" class="sel sm-sel wide" aria-label="Playlist to clean"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>`,
+      })}
       <div class="set-hint">Blocked entries are deleted from the app; local files are removed only after the confirmation. Duplicate-file cleanup keeps the playlist-preferred copy.</div>
     </div>
     </section>

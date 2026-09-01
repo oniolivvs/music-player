@@ -614,7 +614,8 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
   /* Long rows (label + wide control) stack so nothing gets clipped on a phone. */
   .set-row { flex-wrap: wrap; min-width: 0; }
   .set-row label { min-width: 0; }
-  .cleanup-actions { grid-template-columns: 1fr; }
+  .cleanup-delete-actions { grid-template-columns: 1fr; }
+  .cleanup-playlist-scope { grid-template-columns: 1fr; gap: 6px; }
   .text-in, .num-in, .sel.wide, .dir-pick { max-width: 100%; }
   .text-in { width: 100%; }
   /* Full-screen modals on mobile: give them safe-area breathing room. */
@@ -629,8 +630,11 @@ body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
 .set-row label { font-size: 13px; color: var(--tx-1); }
 .set-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
 .set-row input[type="range"] { width: 150px; accent-color: var(--accent); }
-.cleanup-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 7px 0; }
-.cleanup-actions .btn-line, .cleanup-actions .sel { width: 100%; }
+.cleanup-delete-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 7px 0; }
+.cleanup-delete-actions .btn-line { width: 100%; }
+.cleanup-playlist-scope { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 0 0 7px; }
+.cleanup-playlist-scope label { color: var(--tx-2); font-size: 12px; font-weight: 700; }
+.cleanup-playlist-scope .sel { width: 100%; }
 .text-in { width: 210px; }
 .num-in { width: 88px; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
 .num-in:focus { border-color: var(--accent); }

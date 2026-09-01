@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import * as cleanupRenderer from "../src/cleanup.mjs";
 import {
   chooseDuplicatePlan,
   rewritePaths,
@@ -23,6 +24,25 @@ test("cleanup playlist selector has an accessible name", async () => {
   const selector = source.match(/<select id="setCleanupPlaylist"[^>]*>/)?.[0];
   assert.ok(selector);
   assert.match(selector, /\baria-label="Playlist to clean"/);
+});
+
+test("cleanup layout keeps all delete actions together and playlist scope separate", () => {
+  assert.equal(typeof cleanupRenderer.buildCleanupActionLayout, "function", "cleanup layout renderer must exist");
+  const markup = cleanupRenderer.buildCleanupActionLayout({
+    deleteBlocked: '<button data-marker="blocked">Blocked</button>',
+    deleteFiles: '<button data-marker="files">Files</button>',
+    deletePlaylistEntries: '<button data-marker="playlist-delete">Playlist duplicates</button>',
+    playlistSelector: '<select id="setCleanupPlaylist"><option>All</option></select>',
+  });
+  const deleteGroup = markup.match(/<div class="cleanup-delete-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  const playlistScope = markup.match(/<div class="cleanup-playlist-scope">([\s\S]*?)<\/div>/)?.[1] || "";
+
+  assert.ok(deleteGroup.indexOf('data-marker="blocked"') >= 0);
+  assert.ok(deleteGroup.indexOf('data-marker="files"') > deleteGroup.indexOf('data-marker="blocked"'));
+  assert.ok(deleteGroup.indexOf('data-marker="playlist-delete"') > deleteGroup.indexOf('data-marker="files"'));
+  assert.doesNotMatch(deleteGroup, /setCleanupPlaylist/);
+  assert.match(playlistScope, /<label for="setCleanupPlaylist">Playlist scope<\/label>/);
+  assert.match(playlistScope, /id="setCleanupPlaylist"/);
 });
 
 test("startup registers the resolved writable download root", async () => {

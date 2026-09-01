@@ -10,6 +10,24 @@ function compareCodePoints(first, second) {
   }
 }
 
+export function buildCleanupActionLayout({
+  deleteBlocked = "",
+  deleteFiles = "",
+  deletePlaylistEntries = "",
+  playlistSelector = "",
+} = {}) {
+  return `
+    <div class="cleanup-delete-actions">
+      ${deleteBlocked}
+      ${deleteFiles}
+      ${deletePlaylistEntries}
+    </div>
+    <div class="cleanup-playlist-scope">
+      <label for="setCleanupPlaylist">Playlist scope</label>
+      ${playlistSelector}
+    </div>`;
+}
+
 export function chooseDuplicatePlan(groups = [], playlists = []) {
   const references = new Map();
   for (const playlist of playlists) {
