@@ -134,6 +134,16 @@ export function paletteFromPixels(rgba) {
   if (contrastRatio(text, panel) < 4.5) text = luminance(panel) > 0.18 ? rgb(0, 0, 0) : rgb(255, 255, 255);
   const accent = readableAccent(dominant, panel, lightSurface);
   const accent2 = readableAccent(shiftedAccent(accent, lightSurface), panel, lightSurface);
+  const iconSurface = lightSurface
+    ? blend(dominant, white, 0.68)
+    : blend(dominant, black, 0.62);
+  const iconForegroundSeed = lightSurface
+    ? blend(dominant, black, 0.72)
+    : blend(dominant, white, 0.78);
+  const iconForeground = readableAccent(iconForegroundSeed, iconSurface, lightSurface);
+  const iconBorder = lightSurface
+    ? blend(dominant, black, 0.34)
+    : blend(dominant, white, 0.34);
 
   return {
     dominant,
@@ -147,6 +157,9 @@ export function paletteFromPixels(rgba) {
     text,
     muted: blend(text, panel, 0.38),
     subtle: blend(text, panel, 0.58),
+    iconSurface,
+    iconForeground,
+    iconBorder,
   };
 }
 
@@ -167,6 +180,9 @@ export function cssVarsForPalette(palette) {
     "--tx-3": hex(palette.subtle),
     "--accent": hex(palette.accent),
     "--accent-2": hex(palette.accent2),
+    "--icon-surface": hex(palette.iconSurface),
+    "--icon-fg": hex(palette.iconForeground),
+    "--icon-border": hex(palette.iconBorder),
   };
 }
 

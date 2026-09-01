@@ -69,6 +69,32 @@ test("accent text keeps normal-text contrast on artwork panels", () => {
   assert.ok(contrastRatio(palette.accent2, palette.panel) >= 4.5);
 });
 
+test("dark green artwork produces a green icon surface with readable foreground", () => {
+  const palette = paletteFromPixels(pixels([[[24, 132, 58, 255], 16]]));
+  assert.ok(palette.iconSurface, "icon surface must be derived from artwork");
+  assert.ok(palette.iconForeground, "icon foreground must be derived from artwork");
+  assert.ok(palette.iconBorder, "icon border must be derived from artwork");
+  assert.ok(palette.iconSurface.g > palette.iconSurface.r);
+  assert.ok(palette.iconSurface.g > palette.iconSurface.b);
+  assert.ok(contrastRatio(palette.iconForeground, palette.iconSurface) >= 4.5);
+  const variables = cssVarsForPalette(palette);
+  for (const name of ["--icon-surface", "--icon-fg", "--icon-border"]) {
+    assert.match(variables[name], /^#[0-9a-f]{6}$/i);
+  }
+});
+
+test("light green artwork keeps the icon treatment green and switches to dark foreground", () => {
+  const palette = paletteFromPixels(pixels([[[154, 238, 174, 255], 16]]));
+  assert.ok(palette.iconSurface, "icon surface must be derived from artwork");
+  assert.ok(palette.iconForeground, "icon foreground must be derived from artwork");
+  assert.ok(palette.iconSurface.g > palette.iconSurface.r);
+  assert.ok(palette.iconSurface.g > palette.iconSurface.b);
+  assert.ok(palette.iconForeground.r < palette.iconSurface.r);
+  assert.ok(palette.iconForeground.g < palette.iconSurface.g);
+  assert.ok(palette.iconForeground.b < palette.iconSurface.b);
+  assert.ok(contrastRatio(palette.iconForeground, palette.iconSurface) >= 4.5);
+});
+
 test("artwork backgrounds fill the window by cropping instead of stretching", () => {
   assert.deepEqual(artworkBackgroundStyle("data:image/jpeg;base64,cover"), {
     image: 'url("data:image/jpeg;base64,cover")',
