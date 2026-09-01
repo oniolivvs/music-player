@@ -23,10 +23,14 @@ export async function storeLoadStrict(key) {
 }
 
 export async function storeSave(key, data) {
-  if (IS_NATIVE) {
-    try { await T.core.invoke("store_save", { key, data }); }
-    catch (e) { console.error(`[store] save ${key}:`, e); }
-  } else {
-    localStorage.setItem("mp." + key, data);
-  }
+  if (IS_NATIVE) return await T.core.invoke("store_save", { key, data });
+  localStorage.setItem("mp." + key, data);
+}
+
+// Ordinary UI preferences remain best-effort. Cleanup uses storeSave directly
+// so it can stop and report a failed persistence operation to the user.
+export function storeSaveQuietly(key, data) {
+  return storeSave(key, data).catch(error => {
+    console.error(`[store] save ${key}:`, error);
+  });
 }

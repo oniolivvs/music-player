@@ -4,15 +4,21 @@
 
 import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
-import { storeLoad, storeLoadStrict, storeSave } from "./store.js";
+import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
 import {
   buildCleanupSummary,
   chooseDuplicatePlan,
   collectBlockedPaths,
+  clearSuccessfulBlockKeys,
+  createGenerationGuard,
   dedupePlaylistPaths,
+  duplicateConfirmationResults,
+  persistInOrder,
+  queueSignature,
   removeQueuePaths,
+  rewriteQueuePaths,
   rewritePaths,
 } from "./cleanup.mjs";
 
@@ -94,6 +100,7 @@ let library = [];
 let folders = [];
 let view = [];
 let queue = [];
+const cleanupPlaybackGeneration = createGenerationGuard();
 let curIndex = -1, preIndex = -1;
 let expectedQueued = 0, queueSettled = false;
 let curEpoch = 0; // tags the current sink; stale status polls are ignored
@@ -833,11 +840,16 @@ function fmtViews(n) {
   if (n >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}K views`;
   return `${n} views`;
 }
-async function saveOnline() {
+async function saveOnline({ strict = false } = {}) {
   // Persist the whole index (capped): it also restores title/artist/artwork of
   // downloaded mp3 files that have no embedded tags (see enrichLibrary).
   const entries = [...onlineIndex.entries()].slice(-4000);
-  await storeSave("online", JSON.stringify(Object.fromEntries(entries)));
+  try {
+    await storeSave("online", JSON.stringify(Object.fromEntries(entries)));
+  } catch (error) {
+    if (strict) throw error;
+    console.error("[online] save:", error);
+  }
 }
 async function loadOnline() {
   const raw = await storeLoad("online");
@@ -850,7 +862,12 @@ async function loadOnline() {
 let _lastSavePos = -1, _lastQueueSig = "";
 function savePlayback() {
   if (!S().resumePlayback) return;
-  if (curIndex < 0 || !queue.length) { storeSave("playback", ""); storeSave("playbackq", ""); _lastQueueSig = ""; return; }
+  if (curIndex < 0 || !queue.length) {
+    void storeSaveQuietly("playback", "");
+    void storeSaveQuietly("playbackq", "");
+    _lastQueueSig = "";
+    return;
+  }
   if (playing && !queueSettled) return; // hardPlay in flight: wallPos still carries the previous track
   const pos = Math.round(wallPos());
   if (pos === _lastSavePos && !playing) return; // avoid redundant writes
@@ -860,9 +877,34 @@ function savePlayback() {
   // JSON rewritten every ~4 s of playback (~3 MB/min) when the only fields that
   // moved were `index` and `position`. On phone flash that is a recurring hitch
   // and pointless wear.
-  const sig = queue.length + "|" + queue[0] + "|" + queue[queue.length - 1];
-  if (sig !== _lastQueueSig) { _lastQueueSig = sig; storeSave("playbackq", JSON.stringify(queue)); }
-  storeSave("playback", JSON.stringify({ index: curIndex, position: pos, shuffle }));
+  const sig = queueSignature(queue);
+  if (sig !== _lastQueueSig) {
+    _lastQueueSig = sig;
+    void storeSaveQuietly("playbackq", sig);
+  }
+  void storeSaveQuietly("playback", JSON.stringify({ index: curIndex, position: pos, shuffle }));
+}
+async function persistCleanupPlayback(generation) {
+  const isCurrent = () => generation === undefined || cleanupPlaybackGeneration.isCurrent(generation);
+  if (!S().resumePlayback || !isCurrent()) return false;
+  // The cleanup path always awaits the full ordered queue before its playback
+  // marker. Capture one state, then refuse the second write if user playback
+  // supersedes it while native storage is in flight.
+  const savedQueue = [...queue];
+  const savedIndex = curIndex;
+  const hasPlayback = savedIndex >= 0 && savedQueue.length;
+  const sig = hasPlayback ? queueSignature(savedQueue) : "";
+  await storeSave("playbackq", sig);
+  if (!isCurrent()) return false;
+  const savedPosition = hasPlayback ? Math.round(wallPos()) : -1;
+  await storeSave(
+    "playback",
+    savedPosition < 0 ? "" : JSON.stringify({ index: savedIndex, position: savedPosition, shuffle }),
+  );
+  if (!isCurrent()) return false;
+  _lastQueueSig = sig;
+  _lastSavePos = savedPosition;
+  return true;
 }
 async function restorePlayback() {
   if (!S().resumePlayback) return;
@@ -900,7 +942,7 @@ async function loadHistory() {
   if (raw) { try { history2 = JSON.parse(raw); } catch {} }
   if (!Array.isArray(history2)) history2 = [];
 }
-function saveHistory() { storeSave("history", JSON.stringify(history2.slice(0, 1000))); }
+function saveHistory() { void storeSaveQuietly("history", JSON.stringify(history2.slice(0, 1000))); }
 function recordHistory(t, path) {
   const lim = Math.max(0, Math.min(1000, Number(S().historyLimit) || 0));
   if (!lim) { if (history2.length) { history2 = []; saveHistory(); } return; }
@@ -933,7 +975,7 @@ async function loadPlays() {
   if (raw) { try { plays = JSON.parse(raw) || {}; } catch { plays = {}; } }
   if (typeof plays !== "object" || !plays) plays = {};
 }
-function savePlays() { storeSave("plays", JSON.stringify(plays)); }
+function savePlays() { void storeSaveQuietly("plays", JSON.stringify(plays)); }
 
 // Commits the track that just ended, if it was heard long enough.
 // Call it BEFORE the next wallStart(): after that the clock has restarted from
@@ -3248,7 +3290,7 @@ async function loadDlBlock() {
   const raw = await storeLoad("dlblock");
   if (raw) { try { dlBlock = JSON.parse(raw) || {}; } catch {} }
 }
-function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
+function saveDlBlock() { void storeSaveQuietly("dlblock", JSON.stringify(dlBlock)); }
 
 // Deleted-on-purpose downloads ("suppressed", by videoId): the user erased the
 // local file, so re-imports, folder scans and follow checks must never slide
@@ -3259,7 +3301,7 @@ async function loadSuppressed() {
   const raw = await storeLoad("suppressed");
   if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) suppressedSet = new Set(a); } catch {} }
 }
-function saveSuppressed() { storeSave("suppressed", JSON.stringify([...suppressedSet])); }
+function saveSuppressed() { void storeSaveQuietly("suppressed", JSON.stringify([...suppressedSet])); }
 
 // New tracks the user REFUSED in the "Download N new tracks?" prompt: never
 // proposed again (a later explicit download clears the memory).
@@ -3268,7 +3310,7 @@ async function loadDeclined() {
   const raw = await storeLoad("declined");
   if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) dlDeclined = new Set(a); } catch {} }
 }
-function saveDeclined() { storeSave("declined", JSON.stringify([...dlDeclined])); }
+function saveDeclined() { void storeSaveQuietly("declined", JSON.stringify([...dlDeclined])); }
 
 // ─── Blocked tracks ─────────────────────────────────────────────────────
 // A track can be "blocked" — hidden everywhere and unplayable (skipped in the
@@ -3280,7 +3322,14 @@ async function loadBlocked() {
   const raw = await storeLoad("blocked");
   if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) blockedKeys = new Set(a); } catch {} }
 }
-function saveBlocked() { storeSave("blocked", JSON.stringify([...blockedKeys])); }
+async function saveBlocked({ strict = false } = {}) {
+  try {
+    await storeSave("blocked", JSON.stringify([...blockedKeys]));
+  } catch (error) {
+    if (strict) throw error;
+    console.error("[blocked] save:", error);
+  }
+}
 function blockKeyOf(p) { const v = videoIdOf(p); return v ? "id:" + v : "path:" + p; }
 function isBlocked(p) { return blockedKeys.has(blockKeyOf(p)); }
 function setBlocked(paths, on) {
@@ -3317,27 +3366,34 @@ async function runCleanup(action) {
 }
 function applyCleanupQueue(removed) {
   const next = removeQueuePaths(queue, curIndex, removed);
+  return applyCleanupQueueState(next);
+}
+function applyDuplicateCleanupQueue(replacements) {
+  return applyCleanupQueueState(rewriteQueuePaths(queue, curIndex, replacements, new Set()));
+}
+function applyCleanupQueueState(next) {
   queue = next.queue;
   preIndex = -1;
   expectedQueued = 1;
   curIndex = next.currentIndex;
   return next;
 }
-async function settleCleanupQueue(next) {
-  if (next.activeRemoved) {
+async function settleCleanupQueue(next, generation) {
+  if (!cleanupPlaybackGeneration.isCurrent(generation)) return;
+  if (next.activeRemoved || next.activeChanged) {
     if (next.currentIndex >= 0) await hardPlay(next.currentIndex);
     else {
       try { await invoke("stop"); } catch {}
+      if (!cleanupPlaybackGeneration.isCurrent(generation)) return;
       playing = false;
       updateNowPlaying(null, "");
       setPlayIcon(false);
       updatePlayingRow();
       mediaPlayback();
       setCurrentArtwork("");
-      savePlayback();
     }
   } else {
-    savePlayback();
+    if (!cleanupPlaybackGeneration.isCurrent(generation)) return;
     if (curIndex >= 0) await schedulePreload();
   }
 }
@@ -3358,6 +3414,8 @@ async function deleteBlockedTracks() {
     `This removes ${preview.entries} blocked entries and ${preview.files} local files permanently.`,
     "Delete",
   )) return;
+
+  const playbackGeneration = cleanupPlaybackGeneration.current();
 
   const removed = new Set();
   const failed = new Set();
@@ -3386,17 +3444,24 @@ async function deleteBlockedTracks() {
       playlistsChanged = true;
     }
   }
-  const failedKeys = new Set([...failed].map(blockKeyOf));
-  const blockedBefore = blockedKeys.size;
-  for (const key of blockedKeys) if (!failedKeys.has(key)) blockedKeys.delete(key);
-  const blockedChanged = blockedKeys.size !== blockedBefore;
-  const queueState = removed.size ? applyCleanupQueue(removed) : null;
+  const nextBlockedKeys = clearSuccessfulBlockKeys(blockedKeys, removed, failed, blockKeyByPath);
+  const blockedChanged = nextBlockedKeys.size !== blockedKeys.size
+    || [...nextBlockedKeys].some(key => !blockedKeys.has(key));
+  blockedKeys = nextBlockedKeys;
+  // Never let a deletion finishing after a newer play selection rewrite the
+  // queue or restart an older track. The other references remain safe to fix.
+  const queueState = removed.size && cleanupPlaybackGeneration.isCurrent(playbackGeneration)
+    ? applyCleanupQueue(removed)
+    : null;
 
-  if (libraryChanged) await saveLibrary();
-  if (onlineChanged) await saveOnline();
-  if (playlistsChanged) PL.persist();
-  if (blockedChanged) saveBlocked();
-  if (queueState) await settleCleanupQueue(queueState);
+  await persistInOrder([
+    ...(libraryChanged ? [() => saveLibrary({ strict: true })] : []),
+    ...(onlineChanged ? [() => saveOnline({ strict: true })] : []),
+    ...(playlistsChanged ? [() => PL.persist({ strict: true })] : []),
+    ...(blockedChanged ? [() => saveBlocked({ strict: true })] : []),
+    ...(queueState ? [() => persistCleanupPlayback(playbackGeneration)] : []),
+  ]);
+  if (queueState) await settleCleanupQueue(queueState, playbackGeneration);
   renderPlaylists();
   refreshView();
   const summary = buildCleanupSummary(cleanupItems(paths, failed));
@@ -3426,24 +3491,16 @@ async function deleteDuplicateFiles() {
     "Delete",
   )) return;
 
-  const replacements = new Map();
-  const failed = new Set();
-  for (const group of plan) {
-    for (const path of group.remove) {
-      try {
-        await invoke("delete_file", { path });
-        replacements.set(path, group.keep);
-      } catch (error) {
-        failed.add(path);
-        console.error("[cleanup] duplicate delete", path, error);
-        diagnostics.record("error", "cleanup", "duplicate_delete_failed", error);
-      }
-    }
+  const playbackGeneration = cleanupPlaybackGeneration.current();
+  const outcomes = await invoke("confirm_delete_duplicates", { deletions: plan });
+  const { replacements, failures } = duplicateConfirmationResults(plan, outcomes);
+  const failed = new Set(failures.keys());
+  for (const [path, error] of failures) {
+    console.error("[cleanup] duplicate delete", path, error);
+    diagnostics.record("error", "cleanup", "duplicate_delete_failed", error);
   }
   if (replacements.size) {
     const removed = new Set();
-    const activePath = curIndex >= 0 && curIndex < queue.length ? queue[curIndex] : undefined;
-    queue = rewritePaths(queue, replacements, removed);
     const playlists = PL.getPlaylists();
     let playlistsChanged = false;
     for (const playlist of playlists) {
@@ -3462,13 +3519,15 @@ async function deleteDuplicateFiles() {
     });
     _localOk.clear();
     _localIdx.built = false;
-    if (playlistsChanged) PL.persist();
-    if (libraryChanged) await saveLibrary();
-    if (activePath !== undefined) {
-      curIndex = queue.indexOf(replacements.get(activePath) || activePath);
-      savePlayback();
-      if (curIndex >= 0) await schedulePreload();
-    }
+    const queueState = cleanupPlaybackGeneration.isCurrent(playbackGeneration)
+      ? applyDuplicateCleanupQueue(replacements)
+      : null;
+    await persistInOrder([
+      ...(libraryChanged ? [() => saveLibrary({ strict: true })] : []),
+      ...(playlistsChanged ? [() => PL.persist({ strict: true })] : []),
+      ...(queueState ? [() => persistCleanupPlayback(playbackGeneration)] : []),
+    ]);
+    if (queueState) await settleCleanupQueue(queueState, playbackGeneration);
   }
   renderPlaylists();
   refreshView();
@@ -3501,7 +3560,7 @@ async function removePlaylistDuplicates() {
     "Remove",
   )) return;
   for (const change of changes) change.playlist.paths = change.paths;
-  PL.persist();
+  await PL.persist({ strict: true });
   renderPlaylists();
   refreshView();
   flash(`Removed ${removed} playlist duplicate${removed === 1 ? "" : "s"}`);
@@ -3546,13 +3605,13 @@ async function autoBlockUnplayableTrack(path, reason = "") {
 // any leftover .part file on its own. Only writes when the pending set changes.
 let _dlqSig = "";
 function saveDlQueue() {
-  if (!S().resumeDownloads) { if (_dlqSig) { _dlqSig = ""; storeSave("dlqueue", ""); } return; }
+  if (!S().resumeDownloads) { if (_dlqSig) { _dlqSig = ""; void storeSaveQuietly("dlqueue", ""); } return; }
   const pending = dlQueue.filter(d => d.status === "queued" || d.status === "active")
     .map(d => ({ path: d.path, id: d.id, title: d.title }));
   const sig = pending.map(p => p.path).join("|");
   if (sig === _dlqSig) return;
   _dlqSig = sig;
-  storeSave("dlqueue", pending.length ? JSON.stringify(pending) : "");
+  void storeSaveQuietly("dlqueue", pending.length ? JSON.stringify(pending) : "");
 }
 async function resumeDownloads() {
   if (!S().resumeDownloads) return;
@@ -4816,6 +4875,9 @@ async function startSource(cmd, path, gain) {
 let playSeq = 0; // guards against overlapping hardPlay calls (fast double-clicks)
 async function hardPlay(i) {
   if (i < 0 || i >= queue.length) return;
+  // A cleanup may be waiting on disk I/O. A new playback selection always wins
+  // over its later queue rewrite/restart continuation.
+  cleanupPlaybackGeneration.advance();
   // Le morceau sortant est valide ICI, tant que wallPos() porte encore son
   // temps joue : hardPlay appelle wallStart(0) plus bas.
   commitPlay();
@@ -4909,6 +4971,9 @@ async function resumeWithRetry() {
   }
 }
 async function togglePlay() {
+  // Pause/resume is also a user playback decision: do not let a pending cleanup
+  // subsequently restart a track after this action.
+  cleanupPlaybackGeneration.advance();
   if (curIndex < 0 && view.length) return playFrom(0);
   if (_needsStart && !playing) {
     // First Play after a session-resume: actually start the restored track and
@@ -5479,10 +5544,15 @@ function rpcPause(t) {
 function rpcStop() { _rpcClearTimers(); clearRPC(); }
 
 // ─── Library (persisted) ───
-async function saveLibrary() {
+async function saveLibrary({ strict = false } = {}) {
   // Never write over a library we failed to read — that turns a transient read
   // error into permanent data loss.
-  if (_libraryLoadFailed) { console.warn("[library] save refused: this session never loaded it"); return; }
+  if (_libraryLoadFailed) {
+    const error = new Error("library save refused: this session never loaded it");
+    if (strict) throw error;
+    console.warn("[library]", error.message);
+    return;
+  }
   // Last-line guard: never persist two rows for the SAME SONG, whatever path code
   // inserted them. Identity is musical (trackKey), not path-string — so a
   // "yt:<id>" + its local mp3 (with or without [id]) collapse to ONE entry.
@@ -5508,7 +5578,12 @@ async function saveLibrary() {
   }
   _localIdx.built = false; // library changed → drop the videoId→paths index
   enrichLibrary();
-  await storeSave("library", JSON.stringify({ folders, tracks: library }));
+  try {
+    await storeSave("library", JSON.stringify({ folders, tracks: library }));
+  } catch (error) {
+    if (strict) throw error;
+    console.error("[library] save:", error);
+  }
 }
 // Set when the library file could not be READ (or was corrupt). While it is on,
 // saveLibrary refuses to write: an unreadable library.json used to surface as
@@ -6316,8 +6391,8 @@ function openSettings() {
   $("#setNewTracks")?.addEventListener("change", e => SETTINGS.setSetting("newTrackBehavior", e.target.value));
   $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
   $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
-  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else { storeSave("playback", ""); storeSave("playbackq", ""); _lastQueueSig = ""; } });
-  $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else storeSave("dlqueue", ""); });
+  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else { void storeSaveQuietly("playback", ""); void storeSaveQuietly("playbackq", ""); _lastQueueSig = ""; } });
+  $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else void storeSaveQuietly("dlqueue", ""); });
   $("#setHist").addEventListener("change", e => {
     const v = Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0)));
     e.target.value = v; SETTINGS.setSetting("historyLimit", v);
@@ -6417,7 +6492,7 @@ async function loadFollows() {
   if (raw) { try { follows = JSON.parse(raw); } catch {} }
   if (!Array.isArray(follows)) follows = [];
 }
-function saveFollows() { storeSave("follows", JSON.stringify(follows)); }
+function saveFollows() { void storeSaveQuietly("follows", JSON.stringify(follows)); }
 function followFor(playlistId) { return follows.find(f => f.playlistId === playlistId && f.enabled !== false); }
 
 // The playlist may point at the LOCAL file while the upstream track is "yt:id" —
@@ -7062,9 +7137,16 @@ async function init() {
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadSuppressed(), loadDeclined(), loadHistory(), loadBlocked(), loadPlays()]);
   await loadLibrary();
   // Tell the backend which folders it may delete inside, before anything can
-  // ask it to. delete_file used to accept any media file anywhere on the disk.
+  // ask it to. Resolve the actual writable download destination here too: an
+  // empty fresh setting must register the default/fallback, not the empty string.
   if (IS_NATIVE) {
-    try { await invoke("register_roots", { paths: [...folders, S().downloadDir || ""].filter(Boolean) }); }
+    const roots = [...folders];
+    try {
+      const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
+      if (downloadRoot) roots.push(downloadRoot);
+    }
+    catch (e) { console.warn("[download root]", e); }
+    try { if (roots.length) await invoke("register_roots", { paths: roots }); }
     catch (e) { console.warn("[roots]", e); }
   }
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates

@@ -1115,69 +1115,92 @@ fn download_dir_candidates(dir: &str) -> Result<(String, String, Option<String>)
 
 fn resolve_download_dir(dir: &str) -> Result<String, String> {
     let (resolved, default, appdir) = download_dir_candidates(dir)?;
-    // A dir is only usable if we can actually WRITE there — on Android the
-    // shared Music folder needs All-Files-Access, which the user may not have
-    // granted yet, and create_dir_all can even succeed while writes fail.
-    if writable(&resolved) {
-        let c = crate::library::canon(&resolved);
-        crate::library::register_root(&c); // downloads land here → deletable
-        return Ok(c);
-    }
-    // Fall back to the default location…
-    if resolved != default && writable(&default) {
-        dbg_log(&format!("download dir '{resolved}' not writable; using '{default}'"));
-        let c = crate::library::canon(&default);
-        crate::library::register_root(&c);
-        return Ok(c);
-    }
-    // …and on Android, always land somewhere writable: the app's own external
-    // files dir needs NO permission, so downloads work even without All-Files.
-    if let Some(appdir) = appdir {
-        if writable(&appdir) {
-            dbg_log(&format!("using app storage '{appdir}' (no All-Files-Access)"));
-            return Ok(crate::library::canon(&appdir));
+    for (index, candidate) in download_root_candidates(&resolved, &default, appdir).into_iter().enumerate() {
+        // A dir is only usable if we can actually WRITE there — on Android the
+        // shared Music folder needs All-Files-Access, which the user may not
+        // have granted yet, and create_dir_all can even succeed while writes fail.
+        if writable(&candidate) {
+            if index > 0 {
+                dbg_log(&format!("download dir '{resolved}' not writable; using '{candidate}'"));
+            }
+            return Ok(register_download_root(&candidate));
         }
     }
     Err(format!("cannot write to a download folder (grant All-Files-Access, or pick a writable folder). Tried: {resolved}"))
 }
 
-/// Resolve the same writable download root used by `yt_download`, including its
-/// platform defaults and fallback locations. Cleanup uses this command before
-/// duplicate scanning so it cannot drift from the destination downloads use.
+fn download_root_candidates(resolved: &str, default: &str, appdir: Option<String>) -> Vec<String> {
+    let mut candidates = vec![resolved.to_string()];
+    if resolved != default {
+        candidates.push(default.to_string());
+    }
+    if let Some(appdir) = appdir {
+        candidates.push(appdir);
+    }
+    candidates
+}
+
+fn register_download_root(dir: &str) -> String {
+    let canonical = crate::library::canon(dir);
+    crate::library::register_root(&canonical);
+    canonical
+}
+
+/// Resolve and provision the writable download root used by `yt_download`,
+/// including platform defaults and fallback locations. Startup calls this so a
+/// fresh empty setting registers the same root that a future download will use.
 #[tauri::command]
 pub fn yt_download_root(dir: String) -> Result<String, String> {
     resolve_download_dir(&dir)
 }
 
-fn existing_scannable_dir(dir: &str) -> Option<String> {
+// Unlike writable(), this is used by cleanup scans and must never provision a
+// missing default folder. It still proves writability with a short probe, so
+// cleanup registers the same kind of usable destination as actual downloads.
+fn existing_writable_dir(dir: &str) -> Option<String> {
     let metadata = std::fs::metadata(dir).ok()?;
-    if !metadata.is_dir() || std::fs::read_dir(dir).is_err() {
+    if !metadata.is_dir() {
         return None;
     }
     let canonical = crate::library::canon(dir);
-    (!canonical.is_empty()).then_some(canonical)
+    if canonical.is_empty() {
+        return None;
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    let probe = std::path::Path::new(&canonical)
+        .join(format!(".mp_cleanup_write_test-{}-{nonce}", std::process::id()));
+    let opened = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .ok()?;
+    drop(opened);
+    std::fs::remove_file(probe).ok()?;
+    Some(canonical)
 }
 
-fn first_existing_scannable_dir(candidates: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+fn first_existing_writable_dir(candidates: impl IntoIterator<Item = Option<String>>) -> Option<String> {
     candidates
         .into_iter()
-        .find_map(|candidate| candidate.and_then(|path| existing_scannable_dir(&path)))
+        .find_map(|candidate| candidate.and_then(|path| existing_writable_dir(&path)))
 }
 
 fn resolve_existing_download_dir(dir: &str) -> Result<Option<String>, String> {
     let (resolved, default, appdir) = download_dir_candidates(dir)?;
-    Ok(first_existing_scannable_dir([
-        Some(resolved.clone()),
-        (resolved != default).then_some(default),
-        appdir,
-    ]))
+    Ok(first_existing_writable_dir(
+        download_root_candidates(&resolved, &default, appdir).into_iter().map(Some),
+    ))
 }
 
-/// Return an already-existing download root that cleanup may scan. Unlike the
-/// download resolver, this command neither creates paths nor registers roots.
+/// Return the already-existing writable download root that cleanup may scan.
+/// It intentionally does not create missing folders, but does register the
+/// selected fallback so capability-relative deletion permits its real files.
 #[tauri::command]
 pub fn yt_cleanup_download_root(dir: String) -> Result<Option<String>, String> {
-    resolve_existing_download_dir(&dir)
+    Ok(resolve_existing_download_dir(&dir)?.map(|root| register_download_root(&root)))
 }
 
 /// True if we can create `dir` and write a file into it.
@@ -1544,7 +1567,7 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
 #[cfg(test)]
 mod url_guard_tests {
     use super::{
-        check_yt_id, check_yt_url, first_existing_scannable_dir, yt_cleanup_download_root,
+        check_yt_id, check_yt_url, existing_writable_dir, first_existing_writable_dir, yt_cleanup_download_root,
         yt_download_root,
     };
     use std::{
@@ -1632,26 +1655,21 @@ mod url_guard_tests {
         let raw = path.to_string_lossy().into_owned();
         let resolved = yt_download_root(raw.clone()).unwrap();
         assert_eq!(resolved, crate::library::canon(&raw));
+        assert!(crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&resolved));
         remove_managed_test_root(&resolved);
         std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
-    fn cleanup_download_root_does_not_create_a_missing_directory() {
+    fn cleanup_writable_probe_does_not_create_a_missing_directory() {
         let path = cleanup_test_root("missing");
         let raw = path.to_string_lossy().into_owned();
         assert!(!path.exists());
-        let missing_root = crate::library::canon(&raw);
-        let managed = crate::library::MANAGED_ROOTS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let before = managed.clone();
-        assert!(!before.contains(&missing_root));
-        let root = yt_cleanup_download_root(raw.clone()).unwrap();
+        assert_eq!(existing_writable_dir(&raw), None);
         assert!(!path.exists());
-        assert_eq!(*managed, before);
-        assert!(!managed.contains(&missing_root));
-        assert_ne!(root.as_deref(), Some(missing_root.as_str()));
     }
 
     #[test]
@@ -1660,10 +1678,15 @@ mod url_guard_tests {
         std::fs::create_dir_all(&path).unwrap();
         let raw = path.to_string_lossy().into_owned();
         let download_root = yt_download_root(raw.clone()).unwrap();
+        remove_managed_test_root(&download_root);
         assert_eq!(
             yt_cleanup_download_root(raw).unwrap(),
             Some(download_root.clone())
         );
+        assert!(crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&download_root));
         remove_managed_test_root(&download_root);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -1678,7 +1701,7 @@ mod url_guard_tests {
         std::fs::create_dir_all(&default).unwrap();
         std::fs::create_dir_all(&app).unwrap();
         assert_eq!(
-            first_existing_scannable_dir([
+            first_existing_writable_dir([
                 Some(configured.to_string_lossy().into_owned()),
                 Some(default.to_string_lossy().into_owned()),
                 Some(app.to_string_lossy().into_owned()),
@@ -1697,7 +1720,7 @@ mod url_guard_tests {
         std::fs::create_dir_all(&default).unwrap();
         std::fs::create_dir_all(&app).unwrap();
         assert_eq!(
-            first_existing_scannable_dir([
+            first_existing_writable_dir([
                 Some(configured.to_string_lossy().into_owned()),
                 Some(default.to_string_lossy().into_owned()),
                 Some(app.to_string_lossy().into_owned()),
@@ -1715,7 +1738,7 @@ mod url_guard_tests {
         let app = base.join("app");
         std::fs::create_dir_all(&app).unwrap();
         assert_eq!(
-            first_existing_scannable_dir([
+            first_existing_writable_dir([
                 Some(configured.to_string_lossy().into_owned()),
                 Some(default.to_string_lossy().into_owned()),
                 Some(app.to_string_lossy().into_owned()),

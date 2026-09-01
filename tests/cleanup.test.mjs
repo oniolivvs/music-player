@@ -6,7 +6,13 @@ import {
   rewritePaths,
   dedupePlaylistPaths,
   collectBlockedPaths,
+  clearSuccessfulBlockKeys,
+  duplicateConfirmationResults,
   removeQueuePaths,
+  rewriteQueuePaths,
+  queueSignature,
+  createGenerationGuard,
+  persistInOrder,
   buildCleanupSummary,
 } from "../src/cleanup.mjs";
 
@@ -15,6 +21,13 @@ test("cleanup playlist selector has an accessible name", async () => {
   const selector = source.match(/<select id="setCleanupPlaylist"[^>]*>/)?.[0];
   assert.ok(selector);
   assert.match(selector, /\baria-label="Playlist to clean"/);
+});
+
+test("startup registers the resolved writable download root", async () => {
+  const source = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(source, /await invoke\("yt_download_root", \{ dir: String\(S\(\)\.downloadDir \|\| ""\) \}\)/);
+  assert.match(source, /if \(downloadRoot\) roots\.push\(downloadRoot\)/);
+  assert.match(source, /invoke\("register_roots", \{ paths: roots \}\)/);
 });
 
 test("cleanup summary counts successful entries, local files, failures and bytes", () => {
@@ -69,6 +82,26 @@ test("duplicate keeper breaks equal references and length lexically", () => {
   }]);
 });
 
+test("duplicate keeper uses code-point ordering across locale-sensitive paths", () => {
+  const groups = [{ paths: ["D:/é.mp3", "D:/z.mp3", "D:/Z.mp3"] }];
+  const playlists = [{ paths: ["D:/é.mp3", "D:/z.mp3", "D:/Z.mp3"] }];
+
+  assert.deepEqual(chooseDuplicatePlan(groups, playlists), [{
+    keep: "D:/Z.mp3",
+    remove: ["D:/z.mp3", "D:/é.mp3"],
+  }]);
+});
+
+test("only native duplicate-confirmation successes rewrite references", () => {
+  const plan = [{ keep: "keep.mp3", remove: ["deleted-copy.mp3", "changed-copy.mp3"] }];
+  const result = duplicateConfirmationResults(plan, [
+    { path: "deleted-copy.mp3", deleted: true },
+    { path: "changed-copy.mp3", deleted: false, error: "content changed" },
+  ]);
+  assert.deepEqual(result.replacements, new Map([["deleted-copy.mp3", "keep.mp3"]]));
+  assert.deepEqual(result.failures, new Map([["changed-copy.mp3", "content changed"]]));
+});
+
 test("rewrite replaces removed copies and keeps first order", () => {
   const replacements = new Map([["copy.mp3", "keep.mp3"]]);
   assert.deepEqual(rewritePaths(["copy.mp3", "other.mp3", "keep.mp3"], replacements, new Set()),
@@ -99,6 +132,25 @@ test("blocked collection is unique and only includes blocked keys", () => {
     new Set(["video:a", "video:c"]),
     blockKeyByPath,
   ), ["D:/Music/a.mp3", "D:/Music/c.mp3"]);
+});
+
+test("cleanup clears only successful block keys and preserves a key shared with a failure", () => {
+  const keyByPath = new Map([
+    ["D:/Music/ok.mp3", "video:ok"],
+    ["D:/Music/failed-copy.mp3", "video:shared"],
+    ["D:/Music/removed-copy.mp3", "video:shared"],
+    ["D:/Music/outside.mp3", "video:outside"],
+  ]);
+
+  assert.deepEqual(
+    clearSuccessfulBlockKeys(
+      new Set(["video:ok", "video:shared", "video:outside"]),
+      new Set(["D:/Music/ok.mp3", "D:/Music/removed-copy.mp3"]),
+      new Set(["D:/Music/failed-copy.mp3"]),
+      keyByPath,
+    ),
+    new Set(["video:shared", "video:outside"]),
+  );
 });
 
 test("queue removal shifts the active index when an earlier path is removed", () => {
@@ -135,4 +187,48 @@ test("queue removal uses -1 for an empty queue", () => {
   assert.deepEqual(removeQueuePaths(["active.mp3"], 0, new Set(["active.mp3"])), {
     queue: [], currentIndex: -1, activeRemoved: true,
   });
+});
+
+test("duplicate queue rewrite follows the active occurrence instead of indexOf", () => {
+  const rewritten = rewriteQueuePaths(
+    ["keep.mp3", "prior.mp3", "active-copy.mp3"],
+    2,
+    new Map([["active-copy.mp3", "keep.mp3"]]),
+    new Set(),
+  );
+
+  assert.deepEqual(rewritten, {
+    queue: ["keep.mp3", "prior.mp3"],
+    currentIndex: 0,
+    activeChanged: true,
+  });
+});
+
+test("queue signature changes when only an interior occurrence changes", () => {
+  assert.notEqual(
+    queueSignature(["first.mp3", "old-middle.mp3", "last.mp3"]),
+    queueSignature(["first.mp3", "new-middle.mp3", "last.mp3"]),
+  );
+});
+
+test("cleanup generation guard rejects a stale playback continuation", () => {
+  const guard = createGenerationGuard();
+  const cleanupGeneration = guard.current();
+  guard.advance(); // a user playback action wins while cleanup awaits disk I/O
+  let staleCleanupRestartedPlayback = false;
+  if (guard.isCurrent(cleanupGeneration)) staleCleanupRestartedPlayback = true;
+  assert.equal(staleCleanupRestartedPlayback, false);
+});
+
+test("cleanup persistence is ordered and propagates the first write failure", async () => {
+  const calls = [];
+  await assert.rejects(
+    persistInOrder([
+      async () => { calls.push("library"); },
+      async () => { calls.push("playlists"); throw new Error("disk full"); },
+      async () => { calls.push("blocked"); },
+    ]),
+    /disk full/,
+  );
+  assert.deepEqual(calls, ["library", "playlists"]);
 });

@@ -1,7 +1,7 @@
 // App settings: an in-memory object persisted via the generic store ("settings").
 // loadSettings() is awaited once at startup; setSetting() persists immediately.
 
-import { storeLoad, storeSave } from "./store.js";
+import { storeLoad, storeSaveQuietly } from "./store.js";
 
 export const THEMES = {
   dark:     { "--bg-0": "#0b0b0f", "--bg-1": "#121218", "--bg-2": "#17171f", "--bg-3": "#20202b", "--bg-4": "#2a2a38", "--tx-1": "#f4f5f8", "--tx-2": "#a6a9b8", "--tx-3": "#6d7080" },
@@ -114,7 +114,7 @@ let _s = { ...DEFAULTS };
 
 export function resetSettings() {
   _s = { ...DEFAULTS };
-  storeSave("settings", JSON.stringify(_s));
+  void storeSaveQuietly("settings", JSON.stringify(_s));
   return _s;
 }
 
@@ -132,6 +132,6 @@ export function setSetting(key, value) {
   _s[key] = value;
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    storeSave("settings", JSON.stringify(_s));
+    void storeSaveQuietly("settings", JSON.stringify(_s));
   }, 100);
 }

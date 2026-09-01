@@ -7,7 +7,7 @@ import { storeLoad, storeSave } from "./store.js";
 let _cache = [];
 let _loaded = false;
 
-function _persist() { storeSave("playlists", JSON.stringify(_cache)); }
+function _persist() { void persist(); }
 
 export async function initPlaylists() {
   if (_loaded) return;
@@ -20,7 +20,14 @@ export async function initPlaylists() {
 export function getPlaylists() { return _cache; }
 // Persist after a direct mutation of the array returned by getPlaylists()
 // (used by cloud-sync merge, which appends/edits in place).
-export function persist() { _persist(); }
+export async function persist({ strict = false } = {}) {
+  try {
+    await storeSave("playlists", JSON.stringify(_cache));
+  } catch (error) {
+    if (strict) throw error;
+    console.error("[playlists] save:", error);
+  }
+}
 
 export function createPlaylist(name) {
   const pl = { id: crypto.randomUUID(), name: (name || "").trim() || "New playlist", paths: [] };
