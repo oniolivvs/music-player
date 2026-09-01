@@ -1188,10 +1188,27 @@ fn first_existing_writable_dir(candidates: impl IntoIterator<Item = Option<Strin
         .find_map(|candidate| candidate.and_then(|path| existing_writable_dir(&path)))
 }
 
+fn cleanup_download_root_candidates(
+    setting: &str,
+    resolved: &str,
+    default: &str,
+    appdir: Option<String>,
+) -> Vec<String> {
+    // A custom setting names the only destination future downloads will use.
+    // If it does not exist yet, cleanup scans no download folder instead of
+    // silently deleting from an older default/fallback destination.
+    if !setting.trim().is_empty() {
+        return vec![resolved.to_string()];
+    }
+    download_root_candidates(resolved, default, appdir)
+}
+
 fn resolve_existing_download_dir(dir: &str) -> Result<Option<String>, String> {
     let (resolved, default, appdir) = download_dir_candidates(dir)?;
     Ok(first_existing_writable_dir(
-        download_root_candidates(&resolved, &default, appdir).into_iter().map(Some),
+        cleanup_download_root_candidates(dir, &resolved, &default, appdir)
+            .into_iter()
+            .map(Some),
     ))
 }
 
@@ -1567,8 +1584,8 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
 #[cfg(test)]
 mod url_guard_tests {
     use super::{
-        check_yt_id, check_yt_url, existing_writable_dir, first_existing_writable_dir, yt_cleanup_download_root,
-        yt_download_root,
+        check_yt_id, check_yt_url, cleanup_download_root_candidates, existing_writable_dir,
+        first_existing_writable_dir, yt_cleanup_download_root, yt_download_root,
     };
     use std::{
         path::PathBuf,
@@ -1709,6 +1726,32 @@ mod url_guard_tests {
             Some(crate::library::canon(&configured.to_string_lossy()))
         );
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn custom_cleanup_root_never_falls_back_to_an_old_default() {
+        assert_eq!(
+            cleanup_download_root_candidates(
+                "D:/New Music",
+                "D:/New Music",
+                "D:/Old Default",
+                Some("D:/App Fallback".to_string()),
+            ),
+            vec!["D:/New Music".to_string()],
+        );
+    }
+
+    #[test]
+    fn empty_cleanup_setting_keeps_platform_fallbacks() {
+        assert_eq!(
+            cleanup_download_root_candidates(
+                "",
+                "D:/Default",
+                "D:/Default",
+                Some("D:/App Fallback".to_string()),
+            ),
+            vec!["D:/Default".to_string(), "D:/App Fallback".to_string()],
+        );
     }
 
     #[test]

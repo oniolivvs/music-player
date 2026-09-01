@@ -15,11 +15,13 @@ import {
   createGenerationGuard,
   dedupePlaylistPaths,
   duplicateConfirmationResults,
+  persistLatestGeneration,
   persistInOrder,
   queueSignature,
   removeQueuePaths,
   rewriteQueuePaths,
   rewritePaths,
+  runPlaybackTransition,
 } from "./cleanup.mjs";
 
 // Signals to the index.html OTA bootstrap that this frontend loaded — its
@@ -885,25 +887,31 @@ function savePlayback() {
   void storeSaveQuietly("playback", JSON.stringify({ index: curIndex, position: pos, shuffle }));
 }
 async function persistCleanupPlayback(generation) {
-  const isCurrent = () => generation === undefined || cleanupPlaybackGeneration.isCurrent(generation);
-  if (!S().resumePlayback || !isCurrent()) return false;
-  // The cleanup path always awaits the full ordered queue before its playback
-  // marker. Capture one state, then refuse the second write if user playback
-  // supersedes it while native storage is in flight.
-  const savedQueue = [...queue];
-  const savedIndex = curIndex;
-  const hasPlayback = savedIndex >= 0 && savedQueue.length;
-  const sig = hasPlayback ? queueSignature(savedQueue) : "";
-  await storeSave("playbackq", sig);
-  if (!isCurrent()) return false;
-  const savedPosition = hasPlayback ? Math.round(wallPos()) : -1;
-  await storeSave(
-    "playback",
-    savedPosition < 0 ? "" : JSON.stringify({ index: savedIndex, position: savedPosition, shuffle }),
+  if (!S().resumePlayback) return true;
+  const saved = await persistLatestGeneration(
+    cleanupPlaybackGeneration,
+    generation,
+    () => {
+      const savedQueue = [...queue];
+      const savedIndex = curIndex;
+      const hasPlayback = savedIndex >= 0 && savedQueue.length;
+      return {
+        queue: hasPlayback ? savedQueue : [],
+        index: hasPlayback ? savedIndex : -1,
+        position: hasPlayback ? Math.round(wallPos()) : -1,
+        shuffle,
+      };
+    },
+    snapshot => storeSave(
+      "playback",
+      snapshot.position < 0 ? "" : JSON.stringify(snapshot),
+    ),
   );
-  if (!isCurrent()) return false;
-  _lastQueueSig = sig;
-  _lastSavePos = savedPosition;
+  // The atomic cleanup snapshot embeds its queue. Leave the split-queue cache
+  // dirty so the next ordinary periodic save refreshes playbackq before it
+  // writes the lightweight playback marker again.
+  _lastQueueSig = "";
+  _lastSavePos = saved.position;
   return true;
 }
 async function restorePlayback() {
@@ -5015,7 +5023,7 @@ async function togglePlay() {
   }
   updatePlayingRow(); mediaPlayback();
 }
-async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); setCurrentArtwork(""); return; } history.push(curIndex); await hardPlay(j); }
+async function next() { const j = nextIndex(curIndex, true); if (j < 0) { runPlaybackTransition(cleanupPlaybackGeneration, () => { playing = false; }); setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); setCurrentArtwork(""); return; } history.push(curIndex); await hardPlay(j); }
 async function prev() {
   if (wallPos() > 3) { await invoke("seek", { secs: 0 }); wallSeek(0); return; }
   if (history.length) await hardPlay(history.pop());
@@ -5133,7 +5141,9 @@ function startPolling() {
     }
     if (queueSettled && queued < expectedQueued && queued >= 1 && preIndex >= 0) {
       commitPlay(); // avant wallStart(0), sinon le temps joue est perdu
-      history.push(curIndex); curIndex = preIndex;
+      runPlaybackTransition(cleanupPlaybackGeneration, () => {
+        history.push(curIndex); curIndex = preIndex;
+      });
       const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
       wallStart(0); updateNowPlaying(t, queue[curIndex]); updatePlayingRow(); mediaPlayback();
       rpcTrack(t); recordHistory(t, queue[curIndex]); armPlayCount(t, queue[curIndex]); savePlayback(); // gapless advance
@@ -5158,13 +5168,15 @@ function startPolling() {
           history.push(curIndex); await hardPlay(j);
         }
       } else if (j >= 0) {
-        playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
+        runPlaybackTransition(cleanupPlaybackGeneration, () => { playing = false; });
+        setPlayIcon(false); updatePlayingRow(); mediaPlayback();
         setCurrentArtwork("");
         _drainSkips = 0;
         flash("Playback keeps failing (stream errors) — stopped. Try again in a moment.");
       } else { // queue drained naturally → stop
         commitPlay(); wallPause(); savePlayback(); // the last track's played time was being lost (wallPos kept drifting)
-        playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex]));
+        runPlaybackTransition(cleanupPlaybackGeneration, () => { playing = false; });
+        setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex]));
         setCurrentArtwork("");
       }
     }

@@ -12,7 +12,9 @@ import {
   rewriteQueuePaths,
   queueSignature,
   createGenerationGuard,
+  persistLatestGeneration,
   persistInOrder,
+  runPlaybackTransition,
   buildCleanupSummary,
 } from "../src/cleanup.mjs";
 
@@ -218,6 +220,60 @@ test("cleanup generation guard rejects a stale playback continuation", () => {
   let staleCleanupRestartedPlayback = false;
   if (guard.isCurrent(cleanupGeneration)) staleCleanupRestartedPlayback = true;
   assert.equal(staleCleanupRestartedPlayback, false);
+});
+
+test("automatic playback transitions invalidate a pending cleanup before applying state", () => {
+  const guard = createGenerationGuard();
+  const cleanupGeneration = guard.current();
+  const playback = { index: 0 };
+
+  runPlaybackTransition(guard, () => { playback.index = 1; });
+
+  assert.equal(playback.index, 1);
+  assert.equal(guard.isCurrent(cleanupGeneration), false);
+});
+
+test("cleanup playback persistence retries with the newest stable generation", async () => {
+  const guard = createGenerationGuard();
+  const cleanupGeneration = guard.current();
+  let playback = { queue: ["cleaned.mp3"], index: 0 };
+  const persisted = [];
+
+  const saved = await persistLatestGeneration(
+    guard,
+    cleanupGeneration,
+    () => structuredClone(playback),
+    async snapshot => {
+      persisted.push(snapshot);
+      if (persisted.length === 1) {
+        playback = { queue: ["user-choice.mp3"], index: 0 };
+        runPlaybackTransition(guard, () => {});
+      }
+    },
+  );
+
+  assert.deepEqual(persisted, [
+    { queue: ["cleaned.mp3"], index: 0 },
+    { queue: ["user-choice.mp3"], index: 0 },
+  ]);
+  assert.deepEqual(saved, { queue: ["user-choice.mp3"], index: 0 });
+});
+
+test("cleanup playback persistence rejects when playback never becomes stable", async () => {
+  const guard = createGenerationGuard();
+  let writes = 0;
+
+  await assert.rejects(
+    persistLatestGeneration(
+      guard,
+      guard.current(),
+      () => ({ index: writes }),
+      async () => { writes++; guard.advance(); },
+      2,
+    ),
+    /playback changed during cleanup/i,
+  );
+  assert.equal(writes, 2);
 });
 
 test("cleanup persistence is ordered and propagates the first write failure", async () => {

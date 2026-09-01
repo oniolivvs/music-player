@@ -187,6 +187,39 @@ export function createGenerationGuard() {
   };
 }
 
+// Every playback transition that can race cleanup goes through this small
+// boundary. Advancing before applying the state guarantees an awaiting cleanup
+// observes the change even when the transition itself is synchronous.
+export function runPlaybackTransition(guard, transition) {
+  guard.advance();
+  return transition();
+}
+
+// Persist one atomic snapshot. If playback moves while storage is in flight,
+// retry from the newest state; success is reported only for a generation that
+// stayed stable for the complete write. The initial generation must still be
+// current so a cleanup that lost the race before persistence cannot start.
+export async function persistLatestGeneration(
+  guard,
+  initialGeneration,
+  capture,
+  persist,
+  maxAttempts = 3,
+) {
+  if (!guard.isCurrent(initialGeneration)) {
+    throw new Error("Playback changed during cleanup");
+  }
+
+  let generation = initialGeneration;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const snapshot = capture();
+    await persist(snapshot);
+    if (guard.isCurrent(generation)) return snapshot;
+    generation = guard.current();
+  }
+  throw new Error("Playback changed during cleanup");
+}
+
 // Keep cleanup persistence causal. An error deliberately rejects so callers do
 // not show a successful cleanup after filesystem changes that were not saved.
 export async function persistInOrder(steps = []) {
