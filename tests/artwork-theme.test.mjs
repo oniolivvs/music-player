@@ -108,12 +108,13 @@ test("artwork backgrounds fill the window by cropping instead of stretching", ()
   });
 });
 
-test("the wallpaper stylesheet consumes centered cover presentation variables", async () => {
+test("the wallpaper stylesheet always centers and covers the full window", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(
     stylesheet,
-    /background:\s*var\(--app-bg-image, none\)\s+var\(--app-bg-position, center\)\s*\/\s*var\(--app-bg-size, cover\)\s+no-repeat;/,
+    /background:\s*var\(--app-bg-image, none\)\s+center\s*\/\s*cover\s+no-repeat;/,
   );
+  assert.doesNotMatch(stylesheet, /background:\s*var\(--app-bg-image, none\)[^;]*var\(--app-bg-size/);
 });
 
 test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {
