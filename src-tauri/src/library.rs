@@ -1,7 +1,7 @@
 //! Filesystem music library: recursive scan + best-effort tag reading.
 //! Returns plain `Track` structs — no coupling to audio or UI.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::Read;
 use std::sync::{Mutex, OnceLock};
@@ -46,6 +46,19 @@ pub struct Track {
 pub struct DuplicateFileGroup {
     pub paths: Vec<String>,
     pub bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DuplicateDeletion {
+    pub keep: String,
+    pub remove: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DuplicateDeleteResult {
+    pub path: String,
+    pub deleted: bool,
+    pub error: Option<String>,
 }
 
 // Parse a ReplayGain tag value like "-6.48 dB" into a linear multiplier.
@@ -121,20 +134,6 @@ pub fn register_root(path: &str) {
     }
 }
 
-fn under_managed_root(path: &str) -> bool {
-    let roots = match MANAGED_ROOTS.lock() {
-        Ok(v) => v,
-        Err(e) => e.into_inner(), // a poisoned lock must not disable the check
-    };
-    roots.iter().any(|r| {
-        // Prefix match on a SEPARATOR boundary, so "/music-secret" is not
-        // considered to be inside "/music".
-        path.len() > r.len()
-            && path.starts_with(r.as_str())
-            && matches!(path.as_bytes()[r.len()], b'/' | b'\\')
-    })
-}
-
 /// Frontend startup: declare the source folders (and download dir) up front so
 /// destructive operations are bounded even before the first scan of the session.
 #[tauri::command]
@@ -180,8 +179,71 @@ struct DuplicateRoot {
 
 struct DuplicateCandidate {
     path: String,
+    root_path: String,
     bytes: u64,
-    file: std::fs::File,
+}
+
+/// A short-lived handle used only while hashing or comparing one candidate.
+/// Candidate metadata intentionally owns no file handle: a library with many
+/// unique-size tracks otherwise exhausts the process descriptor limit before
+/// hashing can discard them.
+struct OpenedDuplicateFile {
+    file: cap_std::fs::File,
+}
+
+#[cfg(test)]
+static DUPLICATE_OPEN_HANDLES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+static DUPLICATE_OPEN_HANDLE_PEAK: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+impl OpenedDuplicateFile {
+    fn new(file: cap_std::fs::File) -> Self {
+        #[cfg(test)]
+        {
+            use std::sync::atomic::Ordering;
+
+            let current = DUPLICATE_OPEN_HANDLES.fetch_add(1, Ordering::SeqCst) + 1;
+            DUPLICATE_OPEN_HANDLE_PEAK.fetch_max(current, Ordering::SeqCst);
+        }
+        Self { file }
+    }
+}
+
+impl Drop for OpenedDuplicateFile {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        DUPLICATE_OPEN_HANDLES.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+fn reset_duplicate_open_handle_stats() {
+    use std::sync::atomic::Ordering;
+
+    DUPLICATE_OPEN_HANDLES.store(0, Ordering::SeqCst);
+    DUPLICATE_OPEN_HANDLE_PEAK.store(0, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn duplicate_open_handle_stats() -> (usize, usize) {
+    use std::sync::atomic::Ordering;
+
+    (
+        DUPLICATE_OPEN_HANDLES.load(Ordering::SeqCst),
+        DUPLICATE_OPEN_HANDLE_PEAK.load(Ordering::SeqCst),
+    )
+}
+
+/// A regular media file reached from a managed root without following a single
+/// user-controlled component. `parent` remains open until unlink so a later
+/// path rewrite cannot move deletion outside the directory capability.
+struct ManagedFile {
+    parent: cap_std::fs::Dir,
+    basename: std::ffi::OsString,
+    file: cap_std::fs::File,
+    metadata: cap_std::fs::Metadata,
 }
 
 fn open_capability_component(
@@ -249,10 +311,180 @@ fn open_duplicate_root(path: String) -> Result<DuplicateRoot, String> {
     Ok(DuplicateRoot { path, dir })
 }
 
-fn open_duplicate_candidate(
+fn managed_root_for_path(path: &std::path::Path) -> Result<(DuplicateRoot, std::path::PathBuf), String> {
+    if !path.is_absolute() {
+        return Err("managed file path must be absolute".into());
+    }
+    let mut roots = match MANAGED_ROOTS.lock() {
+        Ok(roots) => roots.clone(),
+        Err(error) => error.into_inner().clone(),
+    };
+    // A nested registered source wins so its held capability is as narrow as
+    // possible. Do not canonicalize `path`: that would follow an attacker-made
+    // link before the no-follow traversal below can reject it.
+    roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
+    for root_path in roots {
+        let root = std::path::Path::new(&root_path);
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        return Ok((open_duplicate_root(root_path)?, relative.to_path_buf()));
+    }
+    Err("refusing to delete a file outside your music folders".into())
+}
+
+fn open_managed_file(path: &str) -> Result<ManagedFile, String> {
+    let path = std::path::Path::new(path);
+    let (root, relative) = managed_root_for_path(path)?;
+    let extension = relative
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !AUDIO_EXTS.contains(&extension.as_str()) {
+        return Err(format!("refusing to delete a non-media file (.{extension})"));
+    }
+
+    let mut components = relative.components().peekable();
+    let mut parent = root.dir.try_clone().map_err(|error| error.to_string())?;
+    let mut basename = None;
+    while let Some(component) = components.next() {
+        let name = match component {
+            std::path::Component::Normal(name) => name,
+            _ => return Err("managed file contains an unsafe path component".into()),
+        };
+        if components.peek().is_none() {
+            basename = Some(name.to_owned());
+            break;
+        }
+        let opened = open_capability_component(&parent, std::path::Path::new(name), true)?;
+        let metadata = opened.metadata().map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("managed file traverses a symlink or non-directory".into());
+        }
+        parent = cap_std::fs::Dir::from_std_file(opened.into_std());
+    }
+
+    let basename = basename.ok_or_else(|| "managed file must be below its root".to_string())?;
+    let file = open_capability_component(&parent, std::path::Path::new(&basename), false)?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("managed file is a symlink or non-regular file".into());
+    }
+    Ok(ManagedFile { parent, basename, file, metadata })
+}
+
+fn same_capability_file(first: &cap_std::fs::Metadata, second: &cap_std::fs::Metadata) -> bool {
+    use cap_fs_ext::MetadataExt as _;
+
+    first.dev() == second.dev() && first.ino() == second.ino()
+}
+
+fn unlink_managed_file(opened: ManagedFile) -> Result<(), String> {
+    ensure_managed_file_is_current(&opened)?;
+    // Closing the file is required on Windows before unlink, but the parent
+    // capability remains held and the basename is never re-resolved globally.
+    drop(opened.file);
+    opened
+        .parent
+        .remove_file(&opened.basename)
+        .map_err(|error| error.to_string())
+}
+
+fn ensure_managed_file_is_current(opened: &ManagedFile) -> Result<(), String> {
+    let current = opened
+        .parent
+        .symlink_metadata(&opened.basename)
+        .map_err(|error| error.to_string())?;
+    if current.file_type().is_symlink() || !current.is_file() {
+        return Err("managed file changed before deletion".into());
+    }
+    if !same_capability_file(&opened.metadata, &current) {
+        return Err("managed file changed before deletion".into());
+    }
+    Ok(())
+}
+
+/// Revalidate every planned pair immediately before unlinking. Discovery can
+/// run minutes before confirmation, so neither its path strings nor its hashes
+/// are authority to delete a file now.
+fn confirm_duplicate_deletions(
+    deletions: Vec<DuplicateDeletion>,
+) -> Result<Vec<DuplicateDeleteResult>, String> {
+    let mut results = Vec::new();
+    let mut seen_removals = BTreeSet::new();
+    for deletion in deletions {
+        let keeper = match open_managed_file(&deletion.keep) {
+            Ok(keeper) => keeper,
+            Err(error) => {
+                for path in deletion.remove {
+                    results.push(DuplicateDeleteResult {
+                        path,
+                        deleted: false,
+                        error: Some(format!("duplicate keeper is unavailable: {error}")),
+                    });
+                }
+                continue;
+            }
+        };
+        for path in deletion.remove {
+            let result = (|| -> Result<(), String> {
+                if path == deletion.keep {
+                    return Err("refusing to delete the duplicate keeper".into());
+                }
+                if !seen_removals.insert(path.clone()) {
+                    return Err("duplicate removal path was requested more than once".into());
+                }
+                ensure_managed_file_is_current(&keeper)?;
+                let removal = open_managed_file(&path)?;
+                if keeper.metadata.len() != removal.metadata.len() {
+                    return Err("duplicate pair changed size before deletion".into());
+                }
+                if sha256_file(&keeper.file)? != sha256_file(&removal.file)? {
+                    return Err("duplicate pair changed content before deletion".into());
+                }
+                if !files_equal(&keeper.file, &removal.file)? {
+                    return Err("duplicate pair is not byte-for-byte equal".into());
+                }
+                // Hashing can take long enough for another process to replace
+                // the keeper. Recheck its held identity immediately before the
+                // unlink so we never delete the last current copy on stale proof.
+                ensure_managed_file_is_current(&keeper)?;
+                unlink_managed_file(removal)
+            })();
+            match result {
+                Ok(()) => results.push(DuplicateDeleteResult {
+                    path,
+                    deleted: true,
+                    error: None,
+                }),
+                Err(error) => results.push(DuplicateDeleteResult {
+                    path,
+                    deleted: false,
+                    error: Some(error),
+                }),
+            }
+        }
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn confirm_delete_duplicates(
+    deletions: Vec<DuplicateDeletion>,
+) -> Result<Vec<DuplicateDeleteResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || confirm_duplicate_deletions(deletions))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn open_duplicate_file(
     root: &DuplicateRoot,
     path: &std::path::Path,
-) -> Result<DuplicateCandidate, String> {
+) -> Result<OpenedDuplicateFile, String> {
     let relative = path
         .strip_prefix(std::path::Path::new(&root.path))
         .map_err(|_| "duplicate candidate escaped its root".to_string())?;
@@ -297,21 +529,63 @@ fn open_duplicate_candidate(
         return Err("duplicate candidate is a symlink or non-regular file".into());
     }
 
+    Ok(OpenedDuplicateFile::new(opened))
+}
+
+fn open_duplicate_candidate(
+    root: &DuplicateRoot,
+    path: &std::path::Path,
+) -> Result<DuplicateCandidate, String> {
+    let relative = path
+        .strip_prefix(std::path::Path::new(&root.path))
+        .map_err(|_| "duplicate candidate escaped its root".to_string())?;
+    let opened = open_duplicate_file(root, path)?;
+    let bytes = opened.file.metadata().map_err(|error| error.to_string())?.len();
+    drop(opened);
     Ok(DuplicateCandidate {
         path: std::path::Path::new(&root.path)
             .join(relative)
             .to_string_lossy()
             .into_owned(),
-        bytes: metadata.len(),
-        file: opened.into_std(),
+        root_path: root.path.clone(),
+        bytes,
     })
 }
 
-fn sha256_file(file: &std::fs::File) -> Result<[u8; 32], String> {
-    use sha2::{Digest, Sha256};
-    use std::io::{Seek, SeekFrom};
+fn open_duplicate_candidate_file(candidate: &DuplicateCandidate) -> Result<OpenedDuplicateFile, String> {
+    let root = open_duplicate_root(candidate.root_path.clone())?;
+    let opened = open_duplicate_file(&root, std::path::Path::new(&candidate.path))?;
+    let bytes = opened.file.metadata().map_err(|error| error.to_string())?.len();
+    if bytes != candidate.bytes {
+        return Err("duplicate candidate changed after scan".into());
+    }
+    Ok(opened)
+}
 
-    let mut file = file;
+fn collect_duplicate_candidates(roots: &[DuplicateRoot]) -> Result<Vec<DuplicateCandidate>, String> {
+    let mut candidates = BTreeMap::new();
+    for root in roots {
+        for entry in WalkDir::new(&root.path).follow_links(false) {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let extension = entry
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if entry.file_type().is_file() && AUDIO_EXTS.contains(&extension.as_str()) {
+                let candidate = open_duplicate_candidate(root, entry.path())?;
+                candidates.entry(candidate.path.clone()).or_insert(candidate);
+            }
+        }
+    }
+    Ok(candidates.into_values().collect())
+}
+
+fn sha256_file(mut file: impl Read + std::io::Seek) -> Result<[u8; 32], String> {
+    use sha2::{Digest, Sha256};
+    use std::io::SeekFrom;
+
     file.seek(SeekFrom::Start(0))
         .map_err(|error| error.to_string())?;
     let mut digest = Sha256::new();
@@ -326,11 +600,12 @@ fn sha256_file(file: &std::fs::File) -> Result<[u8; 32], String> {
     Ok(digest.finalize().into())
 }
 
-fn files_equal(first: &std::fs::File, second: &std::fs::File) -> Result<bool, String> {
-    use std::io::{Seek, SeekFrom};
+fn files_equal(
+    mut first: impl Read + std::io::Seek,
+    mut second: impl Read + std::io::Seek,
+) -> Result<bool, String> {
+    use std::io::SeekFrom;
 
-    let mut first = first;
-    let mut second = second;
     first
         .seek(SeekFrom::Start(0))
         .map_err(|error| error.to_string())?;
@@ -369,8 +644,11 @@ fn duplicate_groups(candidates: Vec<DuplicateCandidate>) -> Result<Vec<Duplicate
     for (bytes, same_size) in by_size.into_iter().filter(|(_, paths)| paths.len() > 1) {
         let mut by_hash: BTreeMap<[u8; 32], Vec<DuplicateCandidate>> = BTreeMap::new();
         for candidate in same_size {
+            let opened = open_duplicate_candidate_file(&candidate)?;
+            let hash = sha256_file(&opened.file)?;
+            drop(opened);
             by_hash
-                .entry(sha256_file(&candidate.file)?)
+                .entry(hash)
                 .or_default()
                 .push(candidate);
         }
@@ -378,13 +656,18 @@ fn duplicate_groups(candidates: Vec<DuplicateCandidate>) -> Result<Vec<Duplicate
         for same_hash in by_hash.into_values().filter(|paths| paths.len() > 1) {
             let mut exact_groups: Vec<Vec<DuplicateCandidate>> = Vec::new();
             for candidate in same_hash {
+                let opened = open_duplicate_candidate_file(&candidate)?;
                 let mut matching_group = None;
                 for (index, exact_group) in exact_groups.iter().enumerate() {
-                    if files_equal(&exact_group[0].file, &candidate.file)? {
+                    let representative = open_duplicate_candidate_file(&exact_group[0])?;
+                    let equal = files_equal(&representative.file, &opened.file)?;
+                    drop(representative);
+                    if equal {
                         matching_group = Some(index);
                         break;
                     }
                 }
+                drop(opened);
                 match matching_group {
                     Some(index) => exact_groups[index].push(candidate),
                     None => exact_groups.push(vec![candidate]),
@@ -466,23 +749,7 @@ pub async fn find_duplicate_files(roots: Vec<String>) -> Result<Vec<DuplicateFil
             .map(open_duplicate_root)
             .collect::<Result<_, _>>()?;
 
-        let mut candidates = BTreeMap::new();
-        for root in &requested_roots {
-            for entry in WalkDir::new(&root.path).follow_links(false) {
-                let entry = entry.map_err(|error| error.to_string())?;
-                let extension = entry
-                    .path()
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if entry.file_type().is_file() && AUDIO_EXTS.contains(&extension.as_str()) {
-                    let candidate = open_duplicate_candidate(root, entry.path())?;
-                    candidates.entry(candidate.path.clone()).or_insert(candidate);
-                }
-            }
-        }
-        duplicate_groups(candidates.into_values().collect())
+        duplicate_groups(collect_duplicate_candidates(&requested_roots)?)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -519,32 +786,12 @@ pub fn scan_library(roots: &[String]) -> Vec<Track> {
 /// call can never nuke arbitrary files.
 #[tauri::command]
 pub async fn delete_file(path: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    // Scope check FIRST. The media-extension test below is not a boundary on its
-    // own — it allowed deleting any .mp3/.flac/.mp4/… anywhere on the machine,
-    // so one bad `invoke` from the webview could walk the whole filesystem.
-    // Deletion is now confined to folders the app actually manages: registered
-    // sources and the download directory.
-    if !under_managed_root(&canon(&path)) {
-        return Err("refusing to delete a file outside your music folders".into());
-    }
-    let meta = std::fs::symlink_metadata(p).map_err(|e| e.to_string())?;
-    // Never follow a symlink out of the sandbox we just checked.
-    if meta.file_type().is_symlink() {
-        return Err("refusing to delete a symlink".into());
-    }
-    if !meta.is_file() {
-        return Err("not a regular file".into());
-    }
-    let ext = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    if !AUDIO_EXTS.contains(&ext.as_str()) {
-        return Err(format!("refusing to delete a non-media file (.{ext})"));
-    }
-    std::fs::remove_file(p).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let opened = open_managed_file(&path)?;
+        unlink_managed_file(opened)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Reveal a path in the host file manager. For a file we open its containing
@@ -741,61 +988,132 @@ fn read_image_uncached(path: String) -> Result<String, String> {
 /// under a heavy blur and re-composited beneath every translucent panel, and an
 /// ANIMATED one pays that cost on every frame, so the dimension cap is tighter
 /// than for a still: past ~960px the blur has erased the detail anyway.
+const GIF_MAX_DIM: u32 = 960;
+/// Reject unsafe GIF dimensions directly from the header, before frame decoding.
+const GIF_SOURCE_MAX_DIM: u32 = 4096;
+/// One retained composited canvas plus temporary frame buffers must remain bounded.
+const GIF_MAX_DECODE_ALLOCATION: u64 = 96 * 1024 * 1024;
+/// Decode and encode at most this many frames, without retaining prior frames.
+const GIF_MAX_FRAMES: usize = 400;
+/// Base64 data URLs live in the webview too, so cap re-encoded bytes while writing.
+const GIF_OUTPUT_MAX_BYTES: usize = IMG_PASSTHROUGH_BYTES;
+
+struct CappedGifWriter {
+    bytes: Vec<u8>,
+    max_bytes: usize,
+}
+
+impl CappedGifWriter {
+    fn new(max_bytes: usize) -> Self {
+        Self { bytes: Vec::new(), max_bytes }
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+impl std::io::Write for CappedGifWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let next_len = self.bytes.len().checked_add(buf.len())
+            .ok_or_else(|| std::io::Error::other("GIF output size overflow"))?;
+        if next_len > self.max_bytes {
+            return Err(std::io::Error::other(format!(
+                "GIF output exceeds the {} byte limit", self.max_bytes
+            )));
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn gif_decoder(data: &[u8]) -> Result<image::codecs::gif::GifDecoder<std::io::Cursor<&[u8]>>, String> {
+    use image::ImageDecoder;
+
+    let mut decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(data))
+        .map_err(|error| error.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(GIF_SOURCE_MAX_DIM);
+    limits.max_image_height = Some(GIF_SOURCE_MAX_DIM);
+    limits.max_alloc = Some(GIF_MAX_DECODE_ALLOCATION);
+    decoder.set_limits(limits).map_err(|error| error.to_string())?;
+    Ok(decoder)
+}
+
 fn gif_downscale(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
-    use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
-    use image::AnimationDecoder;
+    gif_downscale_with_limit(data, GIF_OUTPUT_MAX_BYTES)
+}
 
-    const MAX_DIM: u32 = 960;
-    /// Long animations are the real memory trap: every frame is decoded to a
-    /// full RGBA canvas, so 1000 frames at 960×540 is ~2 GB live. Keep the
-    /// beginning of the loop rather than refusing the file.
-    const MAX_FRAMES: usize = 400;
+fn gif_downscale_with_limit(data: &[u8], output_limit: usize) -> Result<Option<Vec<u8>>, String> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{AnimationDecoder, ImageDecoder};
 
-    let decoder = GifDecoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
-    let frames = decoder
-        .into_frames()
-        .take(MAX_FRAMES)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    if frames.is_empty() {
+    let decoder = gif_decoder(data)?;
+    let (width, height) = decoder.dimensions();
+    let oversized = width.max(height) > GIF_MAX_DIM;
+
+    // A short first pass preserves small GIF bytes without ever retaining their
+    // frames. Re-open below only when we need to encode, capping long loops.
+    let mut frame_count = 0;
+    for frame in decoder.into_frames().take(GIF_MAX_FRAMES) {
+        frame.map_err(|error| error.to_string())?;
+        frame_count += 1;
+    }
+    if frame_count == 0 {
         return Err("no frames".into());
     }
-
-    let (w, h) = frames[0].buffer().dimensions();
-    let oversized = w.max(h) > MAX_DIM;
-    // Nothing to gain: right size, short enough, small enough on disk.
-    if !oversized && data.len() <= IMG_PASSTHROUGH_BYTES && frames.len() < MAX_FRAMES {
+    if !oversized && data.len() <= IMG_PASSTHROUGH_BYTES && frame_count < GIF_MAX_FRAMES {
         return Ok(None);
     }
-    let (nw, nh) = if !oversized {
-        (w, h)
-    } else if w >= h {
-        (MAX_DIM, (h as u64 * MAX_DIM as u64 / w as u64).max(1) as u32)
+
+    let (next_width, next_height) = if !oversized {
+        (width, height)
+    } else if width >= height {
+        (
+            GIF_MAX_DIM,
+            (height as u64 * GIF_MAX_DIM as u64 / width as u64).max(1) as u32,
+        )
     } else {
-        ((w as u64 * MAX_DIM as u64 / h as u64).max(1) as u32, MAX_DIM)
+        (
+            (width as u64 * GIF_MAX_DIM as u64 / height as u64).max(1) as u32,
+            GIF_MAX_DIM,
+        )
     };
 
-    let mut out = Vec::new();
+    let mut out = CappedGifWriter::new(output_limit);
     {
-        // Speed 25 of 30: quantization quality is irrelevant under the blur, and
-        // the slow setting took tens of seconds on a long animation.
-        let mut enc = GifEncoder::new_with_speed(&mut out, 25);
-        enc.set_repeat(Repeat::Infinite).map_err(|e| e.to_string())?;
-        for f in frames {
-            let delay = f.delay();
-            // `into_frames` hands back frames already composited onto the full
-            // canvas, so the per-frame offset is absorbed and must be reset —
-            // re-applying it would drift every frame across the canvas.
-            let buf = if oversized {
-                image::imageops::resize(f.buffer(), nw, nh, image::imageops::FilterType::Triangle)
+        let decoder = gif_decoder(data)?;
+        // Speed 25 of 30: quantization quality is irrelevant under the blur,
+        // and the slow setting took tens of seconds on a long animation.
+        let mut encoder = GifEncoder::new_with_speed(&mut out, 25);
+        encoder
+            .set_repeat(Repeat::Infinite)
+            .map_err(|error| error.to_string())?;
+        for frame in decoder.into_frames().take(GIF_MAX_FRAMES) {
+            let frame = frame.map_err(|error| error.to_string())?;
+            let delay = frame.delay();
+            // `into_frames` returns a composited full canvas. Reset the output
+            // frame origin instead of applying the source delta offsets again.
+            let buffer = if oversized {
+                image::imageops::resize(
+                    frame.buffer(),
+                    next_width,
+                    next_height,
+                    image::imageops::FilterType::Triangle,
+                )
             } else {
-                f.into_buffer()
+                frame.into_buffer()
             };
-            enc.encode_frame(image::Frame::from_parts(buf, 0, 0, delay))
-                .map_err(|e| e.to_string())?;
+            encoder
+                .encode_frame(image::Frame::from_parts(buffer, 0, 0, delay))
+                .map_err(|error| error.to_string())?;
         }
     }
-    Ok(Some(out))
+    Ok(Some(out.into_bytes()))
 }
 
 /// Bounded: values are base64 data URLs up to ~8 MB each, so an unbounded map
@@ -1055,7 +1373,7 @@ mod image_source_tests {
 
 #[cfg(test)]
 mod gif_tests {
-    use super::{gif_downscale, IMG_PASSTHROUGH_BYTES};
+    use super::{gif_downscale, gif_downscale_with_limit, IMG_PASSTHROUGH_BYTES};
     use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
     use image::{AnimationDecoder, Frame, RgbaImage};
 
@@ -1078,6 +1396,20 @@ mod gif_tests {
                 enc.encode_frame(Frame::new(img)).unwrap();
             }
         }
+        out
+    }
+
+    // A tiny image block on a huge logical screen proves the decoder limit is
+    // checked on its composited canvas, without the test fixture allocating it.
+    fn sparse_canvas_gif(width: u16, height: u16) -> Vec<u8> {
+        let mut out = b"GIF89a".to_vec();
+        out.extend_from_slice(&width.to_le_bytes());
+        out.extend_from_slice(&height.to_le_bytes());
+        out.extend_from_slice(&[0x80, 0, 0]); // 2-colour global table
+        out.extend_from_slice(&[0, 0, 0, 255, 255, 255]);
+        out.push(0x2c); // one 1×1 image at origin
+        out.extend_from_slice(&[0, 0, 0, 0, 1, 0, 1, 0, 0]);
+        out.extend_from_slice(&[2, 2, 0x44, 0x01, 0, 0x3b]); // clear, pixel, end
         out
     }
 
@@ -1128,6 +1460,30 @@ mod gif_tests {
     }
 
     #[test]
+    fn unsafe_gif_canvas_is_rejected_before_frame_allocation() {
+        let src = make_gif(4097, 1, 1);
+        assert!(gif_downscale(&src).is_err(), "unsafe source dimensions must not be decoded");
+    }
+
+    #[test]
+    fn gif_decoder_rejects_a_large_composited_canvas_by_allocation_limit() {
+        let src = sparse_canvas_gif(4096, 4096);
+        assert!(
+            gif_downscale(&src).is_err(),
+            "a tiny delta frame must not bypass the retained-canvas allocation limit"
+        );
+    }
+
+    #[test]
+    fn gif_reencode_refuses_to_exceed_its_output_byte_ceiling() {
+        let src = make_gif(1280, 720, 2);
+        assert!(
+            gif_downscale_with_limit(&src, 32).is_err(),
+            "the encoder must stop instead of accumulating an unbounded output buffer"
+        );
+    }
+
+    #[test]
     fn garbage_is_reported_not_panicked() {
         assert!(gif_downscale(b"GIF89a-not-really-a-gif").is_err());
         assert!(gif_downscale(&[]).is_err());
@@ -1173,8 +1529,10 @@ mod img_cache_tests {
 #[cfg(test)]
 mod duplicate_file_tests {
     use super::{
-        canon, duplicate_groups, files_equal, find_duplicate_files, open_duplicate_candidate,
-        open_duplicate_root, register_root, safe_duplicate_input,
+        canon, collect_duplicate_candidates, confirm_duplicate_deletions, duplicate_groups,
+        duplicate_open_handle_stats, files_equal, find_duplicate_files, open_duplicate_candidate,
+        open_duplicate_file, open_duplicate_root, open_managed_file, register_root, safe_duplicate_input,
+        reset_duplicate_open_handle_stats, unlink_managed_file, DuplicateDeletion,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1219,6 +1577,23 @@ mod duplicate_file_tests {
     }
 
     #[test]
+    fn duplicate_scan_closes_handles_for_a_large_set_of_unique_sizes() {
+        let dir = temp_dir("duplicate-bounded-handles");
+        for index in 1..=320_usize {
+            std::fs::write(dir.join(format!("{index}.mp3")), vec![index as u8; index]).unwrap();
+        }
+        let root = open_duplicate_root(canon(&dir.to_string_lossy())).unwrap();
+        reset_duplicate_open_handle_stats();
+
+        let candidates = collect_duplicate_candidates(&[root]).unwrap();
+        let groups = duplicate_groups(candidates).unwrap();
+
+        assert!(groups.is_empty(), "different sizes cannot form a duplicate group");
+        assert_eq!(duplicate_open_handle_stats(), (0, 1), "unique-size candidates must not retain file descriptors");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn exact_comparison_rejects_same_size_different_content() {
         let dir = temp_dir("duplicate-byte-comparison");
         let first = dir.join("first.mp3");
@@ -1227,8 +1602,8 @@ mod duplicate_file_tests {
         std::fs::write(&different, b"other-audio-byte").unwrap();
 
         let root = open_duplicate_root(canon(&dir.to_string_lossy())).unwrap();
-        let first = open_duplicate_candidate(&root, &first).unwrap();
-        let different = open_duplicate_candidate(&root, &different).unwrap();
+        let first = open_duplicate_file(&root, &first).unwrap();
+        let different = open_duplicate_file(&root, &different).unwrap();
         assert!(!files_equal(&first.file, &different.file).unwrap());
         drop(first);
         drop(different);
@@ -1237,7 +1612,7 @@ mod duplicate_file_tests {
     }
 
     #[test]
-    fn validated_handles_survive_or_block_path_replacement() {
+    fn changed_candidate_is_reopened_no_follow_before_hashing() {
         let dir = temp_dir("duplicate-handle-race");
         let first = dir.join("first.mp3");
         let copy = dir.join("copy.mp3");
@@ -1255,6 +1630,7 @@ mod duplicate_file_tests {
         let copy_candidate = open_duplicate_candidate(&root, &copy).unwrap();
 
         let removed = std::fs::remove_file(&first).is_ok();
+        assert!(removed, "candidate collection must not retain a file handle");
         if removed {
             #[cfg(unix)]
             let replaced = std::os::unix::fs::symlink(&outside, &first).is_ok();
@@ -1262,13 +1638,9 @@ mod duplicate_file_tests {
             let replaced = std::os::windows::fs::symlink_file(&outside, &first).is_ok();
             if replaced {
                 assert!(open_duplicate_candidate(&root, &first).is_err());
+                assert!(duplicate_groups(vec![first_candidate, copy_candidate]).is_err());
             }
-        } else {
-            assert!(first.is_file(), "open handle must be what blocked replacement");
         }
-
-        let groups = duplicate_groups(vec![first_candidate, copy_candidate]).unwrap();
-        assert_eq!(groups.len(), 1, "hashing must use the validated handles");
 
         drop(root);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1324,6 +1696,137 @@ mod duplicate_file_tests {
         assert!(groups[0].paths.iter().any(|path| path.ends_with("copy.mp3")));
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn capability_unlink_stays_inside_the_held_parent_after_ancestor_replacement() {
+        let root = temp_dir("capability-unlink");
+        let nested = root.join("nested");
+        let parked = root.join("parked");
+        let outside = temp_dir("capability-unlink-outside");
+        let media = nested.join("song.mp3");
+        let outside_media = outside.join("song.mp3");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(&media, b"managed-media").unwrap();
+        std::fs::write(&outside_media, b"outside-media").unwrap();
+
+        let root_path = canon(&root.to_string_lossy());
+        register_root(&root_path);
+        let opened = open_managed_file(&canon(&media.to_string_lossy())).unwrap();
+
+        let ancestor_moved = std::fs::rename(&nested, &parked).is_ok();
+        #[cfg(unix)]
+        let ancestor_replaced = ancestor_moved
+            && std::os::unix::fs::symlink(&outside, &nested).is_ok();
+        #[cfg(windows)]
+        let ancestor_replaced = ancestor_moved
+            && (std::os::windows::fs::symlink_dir(&outside, &nested).is_ok()
+                || std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(&nested)
+                    .arg(&outside)
+                    .output()
+                    .map(|output| output.status.success())
+                    .unwrap_or(false));
+
+        unlink_managed_file(opened).unwrap();
+        assert!(outside_media.exists(), "a replacement ancestor must never redirect unlink outside the root");
+        if ancestor_replaced {
+            assert!(!parked.join("song.mp3").exists(), "the held parent receives the unlink");
+            let _ = std::fs::remove_dir(&nested);
+        } else {
+            assert!(!media.exists(), "a held directory may block replacement but must still unlink its own file");
+        }
+
+        crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|managed| managed != &root_path);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    fn managed_duplicate_pair(label: &str) -> (PathBuf, PathBuf, PathBuf, String) {
+        let root = temp_dir(label);
+        let keep = root.join("keep.mp3");
+        let remove = root.join("remove.mp3");
+        std::fs::write(&keep, b"same-audio-bytes").unwrap();
+        std::fs::write(&remove, b"same-audio-bytes").unwrap();
+        let root_path = canon(&root.to_string_lossy());
+        register_root(&root_path);
+        (root, keep, remove, root_path)
+    }
+
+    fn duplicate_delete(keep: &PathBuf, remove: &PathBuf) -> Vec<super::DuplicateDeleteResult> {
+        confirm_duplicate_deletions(vec![DuplicateDeletion {
+            keep: canon(&keep.to_string_lossy()),
+            remove: vec![canon(&remove.to_string_lossy())],
+        }])
+        .unwrap()
+    }
+
+    fn cleanup_managed_duplicate_pair(root: PathBuf, root_path: &str) {
+        crate::library::MANAGED_ROOTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|managed| managed != root_path);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn duplicate_confirmation_rejects_a_changed_removal_before_unlink() {
+        let (root, keep, remove, root_path) = managed_duplicate_pair("duplicate-confirm-changed-removal");
+        std::fs::write(&remove, b"other-audio-byte").unwrap();
+
+        let outcome = duplicate_delete(&keep, &remove);
+
+        assert_eq!(outcome.len(), 1);
+        assert!(!outcome[0].deleted);
+        assert!(outcome[0].error.is_some());
+        assert!(remove.exists(), "changed content must not be deleted");
+        cleanup_managed_duplicate_pair(root, &root_path);
+    }
+
+    #[test]
+    fn duplicate_confirmation_rejects_a_missing_or_changed_keeper() {
+        let (root, keep, remove, root_path) = managed_duplicate_pair("duplicate-confirm-missing-keeper");
+        std::fs::remove_file(&keep).unwrap();
+
+        let outcome = duplicate_delete(&keep, &remove);
+
+        assert_eq!(outcome.len(), 1);
+        assert!(!outcome[0].deleted);
+        assert!(outcome[0].error.is_some());
+        assert!(remove.exists(), "the final remaining copy must survive");
+        cleanup_managed_duplicate_pair(root, &root_path);
+    }
+
+    #[test]
+    fn duplicate_confirmation_rejects_non_equal_same_size_files() {
+        let (root, keep, remove, root_path) = managed_duplicate_pair("duplicate-confirm-non-equal");
+        std::fs::write(&keep, b"other-audio-byte").unwrap();
+
+        let outcome = duplicate_delete(&keep, &remove);
+
+        assert_eq!(outcome.len(), 1);
+        assert!(!outcome[0].deleted);
+        assert!(outcome[0].error.is_some());
+        assert!(remove.exists());
+        cleanup_managed_duplicate_pair(root, &root_path);
+    }
+
+    #[test]
+    fn duplicate_confirmation_deletes_only_a_current_exact_match() {
+        let (root, keep, remove, root_path) = managed_duplicate_pair("duplicate-confirm-success");
+
+        let outcome = duplicate_delete(&keep, &remove);
+
+        assert_eq!(outcome.len(), 1);
+        assert!(outcome[0].deleted, "the current exact duplicate is deleted");
+        assert!(outcome[0].error.is_none());
+        assert!(keep.exists());
+        assert!(!remove.exists());
+        cleanup_managed_duplicate_pair(root, &root_path);
     }
 
     #[test]
