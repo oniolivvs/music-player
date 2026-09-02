@@ -178,6 +178,13 @@ test("artwork backgrounds give shared icon controls an opaque readable surface",
   assert.match(stylesheet, /body\.has-bg\s+\.sort-ico\s*\{[^}]*var\(--icon-surface\)[^}]*var\(--icon-fg\)[^}]*\}/s);
 });
 
+test("artwork theme colors every top navigation state from the cover palette", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\s*\{[^}]*background:\s*var\(--icon-surface\)[^}]*color:\s*var\(--icon-fg\)[^}]*border-color:\s*var\(--icon-border\)/s);
+  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item:hover\s*\{[^}]*border-color:\s*var\(--icon-fg\)/s);
+  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\.active\s*\{[^}]*border-color:\s*var\(--accent\)[^}]*box-shadow:/s);
+});
+
 test("a slow previous cover cannot overwrite the current cover", async () => {
   const pending = new Map();
   const applied = [];

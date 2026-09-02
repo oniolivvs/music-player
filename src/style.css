@@ -839,6 +839,23 @@ body.has-bg .sort-ico {
   color: var(--icon-fg);
   border: 1px solid var(--icon-border);
 }
+body.artwork-theme .top-nav .nav-item {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border-color: var(--icon-border);
+}
+body.artwork-theme .top-nav .nav-item:hover {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border-color: var(--icon-fg);
+  filter: brightness(1.08);
+}
+body.artwork-theme .top-nav .nav-item.active {
+  background: var(--icon-surface);
+  color: var(--icon-fg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(0, 0, 0, .28);
+}
 body.has-bg.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle):hover,
 body.has-bg.icon-only .vh-actions .btn-line.sm:hover {
   background: var(--icon-surface);
