@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, resolveArtworkSource, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, resolveArtworkSource, createArtworkThemeState } from "./artwork-theme.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -756,6 +756,7 @@ function applyArtworkTheme(src, result) {
   const root = document.documentElement.style;
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
+  root.setProperty("--app-bg-blur", `${artworkBlurPx(S().bgBlur)}px`);
   const background = artworkBackgroundStyle(result.imageSrc);
   root.setProperty("--app-bg-image", background.image);
   document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");

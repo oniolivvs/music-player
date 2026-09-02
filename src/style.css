@@ -675,12 +675,17 @@ body::before {
      full-screen blur under every panel repaint (UI glitch oscillation at best,
      saturated compositor → whole-PC freeze at worst). The layer is also fed a
      downscaled bitmap (see read_image) so the GPU upload stays cheap. */
-  will-change: filter;
+  will-change: filter, transform;
   display: none;
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
-body.artwork-theme::before { opacity: 1; transition: opacity .18s ease, filter .18s ease; }
+body.artwork-theme::before {
+  opacity: 1;
+  transform: scale(1.18);
+  transform-origin: center;
+  transition: opacity .18s ease, filter .18s ease;
+}
 body.artwork-theme.artwork-switching::before { opacity: .58; }
 body.artwork-theme,
 body.artwork-theme .sidebar,

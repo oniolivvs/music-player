@@ -192,6 +192,11 @@ export function artworkBackgroundStyle(imageSrc) {
   };
 }
 
+export function artworkBlurPx(value) {
+  const numeric = Number(value);
+  return Math.max(0, Math.min(Number.isFinite(numeric) ? numeric : 6, 6));
+}
+
 export function artworkSourceCandidates(source) {
   const value = String(source || "");
   const match = value.match(/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\//i);

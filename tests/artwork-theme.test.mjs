@@ -6,6 +6,7 @@ import {
   contrastRatio,
   cssVarsForPalette,
   artworkBackgroundStyle,
+  artworkBlurPx,
   artworkSourceCandidates,
   resolveArtworkSource,
   createGenerationGuard,
@@ -148,6 +149,20 @@ test("the wallpaper stylesheet always centers and covers the full window", async
     /background:\s*var\(--app-bg-image, none\)\s+center\s*\/\s*cover\s+no-repeat;/,
   );
   assert.doesNotMatch(stylesheet, /background:\s*var\(--app-bg-image, none\)[^;]*var\(--app-bg-size/);
+});
+
+test("dynamic artwork blur stays sharp and respects lower user values", () => {
+  assert.equal(artworkBlurPx(18), 6);
+  assert.equal(artworkBlurPx(3), 3);
+  assert.equal(artworkBlurPx(-2), 0);
+  assert.equal(artworkBlurPx("invalid"), 6);
+});
+
+test("only dynamic artwork gets the centered 118 percent zoom", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.artwork-theme::before\s*\{[^}]*transform:\s*scale\(1\.18\)/s);
+  assert.match(stylesheet, /body\.artwork-theme::before\s*\{[^}]*transform-origin:\s*center/s);
+  assert.doesNotMatch(stylesheet, /body\.has-bg::before\s*\{[^}]*transform:\s*scale\(1\.18\)/s);
 });
 
 test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {
