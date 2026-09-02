@@ -6,6 +6,8 @@ import {
   contrastRatio,
   cssVarsForPalette,
   artworkBackgroundStyle,
+  artworkSourceCandidates,
+  resolveArtworkSource,
   createGenerationGuard,
   createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
@@ -102,6 +104,41 @@ test("artwork backgrounds fill the window by cropping instead of stretching", ()
   assert.deepEqual(artworkBackgroundStyle(""), {
     image: "none",
   });
+});
+
+test("YouTube artwork requests HD variants before the universal fallback", () => {
+  assert.deepEqual(
+    artworkSourceCandidates("https://i.ytimg.com/vi_webp/abcdefghijk/hq720.webp?sqp=x"),
+    [
+      "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
+      "https://i.ytimg.com/vi/abcdefghijk/hq720.jpg",
+      "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+      "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg",
+      "https://i.ytimg.com/vi_webp/abcdefghijk/hq720.webp?sqp=x",
+    ],
+  );
+});
+
+test("non-YouTube artwork keeps its original source", () => {
+  assert.deepEqual(artworkSourceCandidates("https://covers.example/cover.jpg"), [
+    "https://covers.example/cover.jpg",
+  ]);
+});
+
+test("HD artwork resolver falls back in order", async () => {
+  const attempted = [];
+  const value = await resolveArtworkSource(
+    "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg",
+    async candidate => {
+      attempted.push(candidate);
+      if (!candidate.endsWith("hqdefault.jpg")) throw new Error("missing");
+      return "data:image/jpeg;base64,hd";
+    },
+  );
+  assert.equal(value, "data:image/jpeg;base64,hd");
+  assert.deepEqual(attempted.map(value => value.split("/").at(-1)), [
+    "maxresdefault.jpg", "hq720.jpg", "hqdefault.jpg",
+  ]);
 });
 
 test("the wallpaper stylesheet always centers and covers the full window", async () => {

@@ -192,6 +192,33 @@ export function artworkBackgroundStyle(imageSrc) {
   };
 }
 
+export function artworkSourceCandidates(source) {
+  const value = String(source || "");
+  const match = value.match(/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\//i);
+  if (!match) return value ? [value] : [];
+  const root = `https://i.ytimg.com/vi/${match[1]}`;
+  const candidates = [
+    `${root}/maxresdefault.jpg`,
+    `${root}/hq720.jpg`,
+    `${root}/hqdefault.jpg`,
+    `${root}/mqdefault.jpg`,
+  ];
+  if (!candidates.includes(value)) candidates.push(value);
+  return candidates;
+}
+
+export async function resolveArtworkSource(source, load) {
+  let lastError;
+  for (const candidate of artworkSourceCandidates(source)) {
+    try {
+      return await load(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("artwork source unavailable");
+}
+
 export function createGenerationGuard() {
   let generation = 0;
   return {

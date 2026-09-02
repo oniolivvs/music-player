@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, resolveArtworkSource, createArtworkThemeState } from "./artwork-theme.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -721,7 +721,12 @@ async function analyzeArtwork(src) {
   }
   let imageSrc = src;
   if (/^https?:\/\//.test(src) && IS_NATIVE) {
-    try { imageSrc = await netThumb(src); }
+    try {
+      imageSrc = await resolveArtworkSource(
+        src,
+        candidate => invoke("net_image", { url: candidate }),
+      );
+    }
     catch { throw new Error("remote artwork proxy failed"); }
   }
   const pixels = await new Promise((resolve, reject) => {
