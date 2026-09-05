@@ -261,7 +261,8 @@ test("blurred artwork surfaces use an adaptive text contrast shadow", async () =
 test("artwork hot bar uses the same palette panel tint and stronger light-scheme text", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.player[^)]*\)\s*\{[^}]*background:\s*rgb\(var\(--panel-rgb/);
-  assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--tx-2:\s*#27303f[^}]*--tx-3:\s*#4b5563/s);
+  assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--tx-2:\s*#27303f[^}]*--tx-3:\s*#374151/s);
+  assert.match(stylesheet, /body\.artwork-theme\.bg-light\s+\.brand\s+span\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);
 });
 
 test("a slow previous cover cannot overwrite the current cover", async () => {

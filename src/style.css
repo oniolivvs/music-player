@@ -788,7 +788,7 @@ body.has-bg #npPin.active { background: rgba(255, 255, 255, .10); }
 
 /* ─── Light wallpaper scheme: dark text on light panels (auto or forced) ─── */
 body.bg-light.has-bg {
-  --tx-1: #111318; --tx-2: #27303f; --tx-3: #4b5563;
+  --tx-1: #111318; --tx-2: #27303f; --tx-3: #374151;
   --bd: rgba(0, 0, 0, .10); --bd-2: rgba(0, 0, 0, .18);
   --bg-2: rgba(0, 0, 0, .05); --bg-3: rgba(0, 0, 0, .08); --bg-4: rgba(0, 0, 0, .14);
   --text-shadow-color: rgba(255, 255, 255, .92);
@@ -829,6 +829,14 @@ body.bg-light.has-bg select.sel,
 body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
 body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
 body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
+/* The brand normally uses an accent gradient. On a light cover that gradient
+   can land in the same luminance range as the blurred artwork, so use the
+   proven dark text tone for the label while retaining the palette on icons. */
+body.artwork-theme.bg-light .brand span {
+  background: none;
+  -webkit-text-fill-color: var(--tx-1);
+  color: var(--tx-1);
+}
 
 /* Artwork panels use the palette's panel colour rather than a fixed black or
    white wash. This keeps the hot bar, top bar and drawers in one colour logic,
