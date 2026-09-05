@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.116 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.117 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1629,4 +1629,40 @@ body.bg-light .select {
 .reco-a {
   font-size: 12px; color: var(--tx-2); margin-top: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Full-bleed artwork mode: the cover is the window background, so the outer
+   shell must not leave a second frame of gutters around it. Internal controls
+   keep their own surfaces; only the app-level seams lose their decoration. */
+body.artwork-theme.has-bg .app {
+  gap: 0;
+  padding: 0;
+  margin-right: 0;
+}
+body.artwork-theme.has-bg .nav-bar,
+body.artwork-theme.has-bg .player {
+  margin: 0;
+  border-radius: 0;
+}
+body.artwork-theme.has-bg :where(.sidebar, .main, .np-drawer) {
+  border-radius: 0;
+  border: 0;
+}
+body.artwork-theme.has-bg .rs-handle {
+  top: 0;
+  bottom: 0;
+}
+body.artwork-theme.has-bg #sideResize {
+  left: var(--side-w, 268px);
+}
+body.artwork-theme.has-bg .np-drawer {
+  top: 0;
+  right: var(--safe-right, 0px);
+  bottom: var(--player-top, 118px);
+}
+body.artwork-theme.has-bg.np-push .app {
+  margin-right: var(--np-eff, 330px);
+}
+body.artwork-theme.has-bg.np-push .nav-bar {
+  margin-right: calc(var(--np-eff, 330px) + var(--safe-right, 0px));
 }

@@ -196,6 +196,16 @@ test("the wallpaper stylesheet always centers and covers the full window", async
   assert.doesNotMatch(stylesheet, /background:\s*var\(--app-bg-image, none\)[^;]*var\(--app-bg-size/);
 });
 
+test("artwork mode removes outer layout gutters so the cover is full bleed", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.app\s*\{[^}]*gap:\s*0[^}]*padding:\s*0/s);
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.nav-bar,\s*\nbody\.artwork-theme\.has-bg\s+\.player\s*\{[^}]*margin:\s*0/s);
+  assert.match(
+    stylesheet,
+    /body\.artwork-theme\.has-bg\s+:where\(\.sidebar, \.main, \.np-drawer\)\s*\{[^}]*border-radius:\s*0[^}]*border:\s*0/s,
+  );
+});
+
 test("dynamic artwork blur stays sharp and respects lower user values", () => {
   assert.equal(artworkBlurPx(18), 6);
   assert.equal(artworkBlurPx(3), 3);
