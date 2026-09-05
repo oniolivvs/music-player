@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "music-player"
-version = "0.22.115"
+version = "0.22.116"
 dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",

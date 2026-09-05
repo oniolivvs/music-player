@@ -226,7 +226,7 @@ export function artworkZoomForViewport(imageWidth, imageHeight, viewportWidth, v
   // fill the full-bleed layer when a source contains letterbox-like margins.
   // Keep it bounded so the image stays recognisable on very wide windows.
   const zoom = 1.24
-    + Math.max(0, cropMismatch - 1) * 0.10
+    + Math.max(0, cropMismatch - 1) * 0.14
     + Math.max(0, areaFactor - 1) * 0.04;
   return Math.max(1.24, Math.min(1.48, zoom));
 }

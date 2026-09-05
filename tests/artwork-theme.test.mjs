@@ -223,6 +223,11 @@ test("responsive zoom fills square covers on wide windows without stretching", (
   assert.ok(square >= 1.30 && square <= 1.48, `unexpected fill zoom: ${square}`);
 });
 
+test("wide-window zoom also crops horizontal artwork margins", () => {
+  const wideWindow = artworkZoomForViewport(1000, 1000, 1093, 754);
+  assert.ok(wideWindow >= 1.30, `horizontal fill zoom is too small: ${wideWindow}`);
+});
+
 test("artwork theme gives every editable field palette-driven colors", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   const rule = stylesheet.match(/body\.artwork-theme\s+:where\((.*?)\)\s*\{([^}]*)\}/s);
