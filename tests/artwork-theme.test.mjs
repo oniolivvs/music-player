@@ -67,6 +67,7 @@ test("CSS variables are deterministic valid colors", () => {
   assert.match(first["--accent"], /^#[0-9a-f]{6}$/i);
   assert.match(first["--bg-0"], /^#[0-9a-f]{6}$/i);
   assert.match(first["--tx-1"], /^#[0-9a-f]{6}$/i);
+  assert.match(first["--panel-rgb"], /^\d+ \d+ \d+$/);
 });
 
 test("accent text keeps normal-text contrast on artwork panels", () => {
@@ -245,6 +246,12 @@ test("blurred artwork surfaces use an adaptive text contrast shadow", async () =
   assert.match(stylesheet, /--text-shadow-color:\s*[^;]+;/);
   assert.match(stylesheet, /body\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.main[^)]*\.np-drawer[^)]*\.player[^)]*input[^)]*textarea[^)]*select[^)]*\)\s*\{[^}]*text-shadow:[^}]*var\(--text-shadow-blur/);
   assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--text-shadow-color:/s);
+});
+
+test("artwork hot bar uses the same palette panel tint and stronger light-scheme text", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.player[^)]*\)\s*\{[^}]*background:\s*rgb\(var\(--panel-rgb/);
+  assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--tx-2:\s*#27303f[^}]*--tx-3:\s*#4b5563/s);
 });
 
 test("a slow previous cover cannot overwrite the current cover", async () => {

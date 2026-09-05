@@ -172,6 +172,7 @@ export function cssVarsForPalette(palette) {
   return {
     "--bg-0": hex(palette.background),
     "--bg-1": hex(palette.panel),
+    "--panel-rgb": `${palette.panel.r} ${palette.panel.g} ${palette.panel.b}`,
     "--bg-2": hex(palette.surface2),
     "--bg-3": hex(palette.surface3),
     "--bg-4": hex(palette.surface4),

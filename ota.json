@@ -1,5 +1,5 @@
 {
-  "version": "0.22.110",
+  "version": "0.22.111",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -14,7 +14,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Dynamic artwork backgrounds now use the best available YouTube cover, stay center-cropped at 118%, and preserve more detail with a sharper blur. Top navigation buttons also inherit readable colors from the current cover while manual backgrounds remain unchanged.",
+  "notes": "Dynamic artwork backgrounds now use the best available YouTube cover, stay center-cropped at 118%, and keep the top bar, panels, and hot bar on the same palette tint with adaptive text contrast over blurred covers.",
   "platforms": [
     "linux",
     "windows",
