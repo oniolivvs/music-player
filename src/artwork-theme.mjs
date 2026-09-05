@@ -217,15 +217,19 @@ export function artworkZoomForViewport(imageWidth, imageHeight, viewportWidth, v
   const ih = Number(imageHeight);
   const vw = Number(viewportWidth);
   const vh = Number(viewportHeight);
-  if (![iw, ih, vw, vh].every(value => Number.isFinite(value) && value > 0)) return 1.28;
+  if (![iw, ih, vw, vh].every(value => Number.isFinite(value) && value > 0)) return 1.12;
   const imageRatio = iw / ih;
   const viewportRatio = vw / vh;
   const cropMismatch = Math.max(imageRatio / viewportRatio, viewportRatio / imageRatio);
   const areaFactor = Math.sqrt((vw * vh) / (1100 * 720));
-  const zoom = 1.24
-    + Math.max(0, cropMismatch - 1) * 0.12
-    + Math.max(0, areaFactor - 1) * 0.06;
-  return Math.max(1.28, Math.min(1.6, zoom));
+  // `cover` already performs the required aspect-ratio crop. Keep this extra
+  // scale modest: it only hides the 60px pseudo-element gutter and adapts to
+  // the viewport shape; the previous 1.24–1.60 range over-cropped square covers
+  // on wide windows and made the artwork look incorrectly resized.
+  const zoom = 1.12
+    + Math.max(0, cropMismatch - 1) * 0.05
+    + Math.max(0, areaFactor - 1) * 0.025;
+  return Math.max(1.12, Math.min(1.28, zoom));
 }
 
 export function artworkDimensionsAreUsable(width, height) {
