@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.109 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.110 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -20,6 +20,7 @@
   --vio-glow: rgba(139, 92, 246, 0.14);
   --artwork-zoom: 1.28;
   --text-shadow-blur: 6px;
+  --text-shadow-color: rgba(0, 0, 0, .72);
   --ui-panel-blur: 14px;
   --r: 12px;
   --card-min: 205px; /* min column width of the YouTube card grids */
@@ -298,19 +299,16 @@ body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
    background is set — a clean, flat contrast boost. */
 body.has-bg:not(.artwork-theme) { --tx-1: #ffffff; --tx-2: #eef0f5; --tx-3: #d3d7e0; }
 body.bg-light.has-bg:not(.artwork-theme) { --tx-1: #000000; --tx-2: #16171c; --tx-3: #303138; }
-/* NB: intentionally NO blanket text-shadow on the panels — applied to every row
-   of a long list it repaints on each scroll frame and makes the whole UI lag on
-   software-rendered WebKitGTK. The brightened --tx-* tones above already carry
-   the contrast; only the big header title (few nodes) keeps a shadow, below. */
-/* The big header title sits over the busiest area — give it a touch more. */
+/* Keep the title treatment explicit; the inherited artwork contrast shadow below
+   handles the rest of each panel without adding a rule to every virtualized row. */
 body.has-bg .vh-title,
 body.has-bg .vh-sub,
 body.has-bg .now-title,
-body.has-bg .now-sub { text-shadow: 0 1px var(--text-shadow-blur, 6px) rgba(0,0,0,.6); }
+body.has-bg .now-sub { text-shadow: 0 1px var(--text-shadow-blur, 6px) var(--text-shadow-color); }
 body.bg-light.has-bg .vh-title,
 body.bg-light.has-bg .vh-sub,
 body.bg-light.has-bg .now-title,
-body.bg-light.has-bg .now-sub { text-shadow: 0 1px var(--text-shadow-blur, 6px) rgba(255,255,255,.7); }
+body.bg-light.has-bg .now-sub { text-shadow: 0 1px var(--text-shadow-blur, 6px) var(--text-shadow-color); }
 
 /* overflow-x explicit: with only overflow-y set, overflow-x computes to auto —
    any too-wide child let the whole results page pan sideways on phones. */
@@ -793,6 +791,7 @@ body.bg-light.has-bg {
   --tx-1: #171923; --tx-2: #3d4354; --tx-3: #6b7284;
   --bd: rgba(0, 0, 0, .10); --bd-2: rgba(0, 0, 0, .18);
   --bg-2: rgba(0, 0, 0, .05); --bg-3: rgba(0, 0, 0, .08); --bg-4: rgba(0, 0, 0, .14);
+  --text-shadow-color: rgba(255, 255, 255, .82);
 }
 body.bg-light.has-bg .sidebar,
 body.bg-light.has-bg .player,
@@ -830,6 +829,13 @@ body.bg-light.has-bg select.sel,
 body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
 body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
 body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
+
+/* Blurred artwork can put a label over a bright local patch even when the
+   global palette picked the right text scheme. A low-radius adaptive shadow
+   restores an edge without adding opaque text plates or another GPU blur. */
+body.has-bg :where(.nav-bar, .sidebar, .main, .np-drawer, .player, input, textarea, select) {
+  text-shadow: 0 1px calc(var(--text-shadow-blur, 6px) * .55) var(--text-shadow-color);
+}
 
 /* Small icon controls sit directly over the artwork in several views. A
    transparent button can always land on a same-colour patch, so the palette

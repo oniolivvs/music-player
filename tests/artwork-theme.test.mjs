@@ -221,7 +221,8 @@ test("artwork theme gives every editable field palette-driven colors", async () 
 
 test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  const sharedRule = stylesheet.match(/body\.has-bg\s+:where\((.*?)\)\s*\{([^}]*)\}/s);
+  const sharedRule = [...stylesheet.matchAll(/body\.has-bg\s+:where\((.*?)\)\s*\{([^}]*)\}/gs)]
+    .find(match => match[1].includes(".icon-btn"));
   assert.ok(sharedRule, "shared artwork icon-control rule is missing");
   assert.match(sharedRule[1], /\.icon-btn/);
   assert.match(sharedRule[1], /\.ctrl:not\(\.play\)/);
@@ -237,6 +238,13 @@ test("artwork theme colors every top navigation state from the cover palette", a
   assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\s*\{[^}]*background:\s*var\(--icon-surface\)[^}]*color:\s*var\(--icon-fg\)[^}]*border-color:\s*var\(--icon-border\)/s);
   assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item:hover\s*\{[^}]*border-color:\s*var\(--icon-fg\)/s);
   assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\.active\s*\{[^}]*border-color:\s*var\(--accent\)[^}]*box-shadow:/s);
+});
+
+test("blurred artwork surfaces use an adaptive text contrast shadow", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /--text-shadow-color:\s*[^;]+;/);
+  assert.match(stylesheet, /body\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.main[^)]*\.np-drawer[^)]*\.player[^)]*input[^)]*textarea[^)]*select[^)]*\)\s*\{[^}]*text-shadow:[^}]*var\(--text-shadow-blur/);
+  assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--text-shadow-color:/s);
 });
 
 test("a slow previous cover cannot overwrite the current cover", async () => {
