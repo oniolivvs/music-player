@@ -25,6 +25,23 @@ test("seek percentage input is exposed beside the song bar", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   assert.match(html, /id="seekPct"[^>]*type="number"/);
   assert.match(html, /class="seek-pct-sign"/);
+  const progress = html.match(/<div class="progress">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.match(progress, /id="seekPct"/);
+  assert.doesNotMatch(html.replace(progress, ""), /id="seekPct"/);
+});
+
+test("seek percentage field uses a clean text-style control without native arrows", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /\.seek-pct input\s*\{[^}]*appearance:\s*textfield/);
+  assert.match(stylesheet, /\.seek-pct input::-webkit-inner-spin-button\s*,\s*\.seek-pct input::-webkit-outer-spin-button/);
+  assert.match(stylesheet, /-webkit-appearance:\s*none/);
+});
+
+test("the hot bar shares the adaptive panel blur", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /--ui-panel-blur:\s*[^;]+;/);
+  assert.match(stylesheet, /body\.has-bg \.player[\s\S]*?backdrop-filter:\s*blur\(var\(--ui-panel-blur/);
+  assert.match(stylesheet, /body\.has-bg \.modal,[\s\S]*?backdrop-filter:\s*blur\(var\(--ui-panel-blur/);
 });
 
 test("shuffle search defaults to the current playlist or library scope", async () => {

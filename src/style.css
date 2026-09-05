@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.106 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.107 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -20,6 +20,7 @@
   --vio-glow: rgba(139, 92, 246, 0.14);
   --artwork-zoom: 1.28;
   --text-shadow-blur: 6px;
+  --ui-panel-blur: 14px;
   --r: 12px;
   --card-min: 205px; /* min column width of the YouTube card grids */
 }
@@ -574,7 +575,9 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .time { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
 .seek-pct { display: inline-flex; align-items: center; gap: 2px; color: var(--tx-2); font-size: 11px; font-variant-numeric: tabular-nums; }
-.seek-pct input { width: 52px; padding: 4px 5px; text-align: right; font-size: 11px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; }
+.seek-pct input { width: 52px; padding: 4px 5px; text-align: right; font-size: 11px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
+.seek-pct input::-webkit-inner-spin-button,
+.seek-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .seek-pct input:focus { border-color: var(--accent); }
 .seek-pct-sign { color: var(--tx-3); }
 
@@ -738,17 +741,15 @@ body.has-bg .modal { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 
    rectangle — the rest of the app stays sharp. The full-screen backdrop only dims
    very slightly for focus; it must NOT blur, or the whole background goes soft. */
 body.has-bg .modal-backdrop { background: rgba(0, 0, 0, .18); }
-/* Now Playing is NOT in this list on purpose.
-   It carries the same panel tint as the sidebar and the player, but it also sat
-   here — so it blurred a wallpaper that the layer behind it had already blurred
-   statically. Two blurs stacked, and the panel read as noticeably foggier than
-   everything around it at the same opacity setting. One tint, driven by the
-   Panel opacity slider, is what makes it match. */
+/* The hot bar uses the same frosted treatment as floating UI. Keeping the blur
+   in one variable prevents the controls from looking sharper than drawers and
+   makes future UI blur tuning a single change. */
+body.has-bg .player,
 body.has-bg .modal,
 body.has-bg .dl-drawer,
 body.has-bg .ctx-menu {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--ui-panel-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--ui-panel-blur, 14px));
 }
 /* Search result cards (videos + playlists) over a wallpaper: flat translucent
    fill like the other panels — the solid navy blocks hid the background. */
