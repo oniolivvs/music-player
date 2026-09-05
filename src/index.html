@@ -146,6 +146,10 @@
     <div class="progress">
       <span id="curTime" class="time">0:00</span>
       <input id="seek" class="seekbar" type="range" min="0" max="1" value="0" step="0.1">
+      <label class="seek-pct" title="Jump to a percentage of the song">
+        <input id="seekPct" type="number" min="0" max="100" step="0.1" value="0" aria-label="Song position percent">
+        <span class="seek-pct-sign">%</span>
+      </label>
       <span id="totTime" class="time">0:00</span>
     </div>
   </footer>

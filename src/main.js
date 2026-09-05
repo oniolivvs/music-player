@@ -7,6 +7,7 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState } from "./artwork-theme.mjs";
+import { clampSeekPercent, seekPercentForSeconds, seekSecondsForPercent } from "./player-controls.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -40,7 +41,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.105";
+const SRC_VERSION = "0.22.106";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -771,6 +772,7 @@ function applyArtworkTheme(src, result) {
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
   root.setProperty("--app-bg-blur", `${artworkBlurPx(S().bgBlur)}px`);
+  root.setProperty("--text-shadow-blur", `${Math.max(2, Math.min(18, artworkBlurPx(S().bgBlur) * 0.6))}px`);
   _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
   updateArtworkZoom();
   const background = artworkBackgroundStyle(result.imageSrc);
@@ -4853,6 +4855,8 @@ function updateNowPlaying(t, path) {
   $("#totTime").textContent = fmtDur(dur);
   const sk = $("#seek");
   sk.max = dur > 0 ? dur : 1; sk.value = 0; sk.style.setProperty("--fill", "0%");
+  const pct = $("#seekPct");
+  if (pct) { pct.value = "0"; pct.disabled = dur <= 0; }
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
   notifyTrack(t); mediaUpdate(t); renderNpPanel();
   // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
@@ -5091,10 +5095,23 @@ function renderSeek(p) {
     p = Math.min(p, cap);
   }
   el.value = p;
-  el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
+  const percent = seekPercentForSeconds(p, max);
+  el.style.setProperty("--fill", `${percent.toFixed(2)}%`);
+  const percentEl = $("#seekPct");
+  if (percentEl) {
+    percentEl.disabled = max <= 1;
+    percentEl.value = percent.toFixed(1);
+  }
   const txt = fmtDur(p);
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
   _lastSeekVal = p;
+}
+async function commitSeekSeconds(value) {
+  const max = Number($("#seek").max) || 1;
+  const seconds = Math.max(0, Math.min(max, Number(value) || 0));
+  try { await invoke("seek", { secs: seconds }); } catch {}
+  wallSeek(seconds); seeking = false; renderSeek(seconds); mediaPlayback();
+  if (playing || _rpcPauseTimer) updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing);
 }
 // Download progress of the current online stream: paints a second band under
 // the played fill (--buf) and reports "Chargement… N%" until playback has
@@ -5293,8 +5310,10 @@ function initSmoothScroll() {
 // ─── Interface arrangement: hide/collapse sections, dock the up-next panel ───
 function applyUiPrefs() {
   const s = S();
-  $("#navHistory").hidden = !(Number(s.historyLimit) > 0);
-  $("#navYtFeed") && ($("#navYtFeed").hidden = !s.ytFeedEnabled);
+  $("#navHistory").hidden = s.uiNavHistory === false || !(Number(s.historyLimit) > 0);
+  $("#navStats").hidden = s.uiNavStats === false;
+  $("#navYtFeed") && ($("#navYtFeed").hidden = s.uiNavYtFeed === false || !s.ytFeedEnabled);
+  $("#navShare").hidden = s.uiNavShare === false;
   // Sources now live in a topbar dropdown — hiding the section hides its button.
   const srcWrap = document.querySelector(".top-drop-wrap");
   if (srcWrap) srcWrap.hidden = !s.uiSources;
@@ -5316,6 +5335,12 @@ function applyUiPrefs() {
   $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
   document.body.classList.toggle("np-docked", !!s.npDocked);
   $("#npPin").classList.toggle("active", !!s.npDocked);
+  $("#shuffleBtn").hidden = s.uiPlayerShuffle === false;
+  $("#repeatBtn").hidden = s.uiPlayerRepeat === false;
+  $(".volume").hidden = s.uiPlayerVolume === false;
+  $(".progress").hidden = s.uiPlayerProgress === false;
+  $(".now").hidden = s.uiPlayerNow === false;
+  for (const preset of ["balanced", "focus", "compact"]) document.body.classList.toggle(`layout-${preset}`, (s.uiLayout || "balanced") === preset);
   applyListCols();
 }
 
@@ -5865,6 +5890,7 @@ async function applyTheme(manualOnly = false) {
   // what froze the whole desktop on weaker GPUs. The slider still goes to 40;
   // we just never push more than this into the compositor.
   root.setProperty("--app-bg-blur", `${Math.min(s.bgBlur ?? 18, 12)}px`);
+  root.setProperty("--text-shadow-blur", `${Math.max(2, Math.min(18, Math.min(s.bgBlur ?? 18, 12) * 0.6))}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
   root.setProperty("--panel-alpha", String(s.panelAlpha ?? 85));
   if (keepArtwork) {
@@ -6099,6 +6125,24 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="interface">
     <div class="set-group"><div class="set-title">Interface</div>
+      <div class="set-title set-title-sub">Navigation visibility</div>
+      <div class="set-row"><label>Recent tab</label><input type="checkbox" id="setUiNavHistory" ${s.uiNavHistory !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Stats tab</label><input type="checkbox" id="setUiNavStats" ${s.uiNavStats !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>YouTube tab</label><input type="checkbox" id="setUiNavYtFeed" ${s.uiNavYtFeed !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Share tab</label><input type="checkbox" id="setUiNavShare" ${s.uiNavShare !== false ? "checked" : ""}></div>
+      <div class="set-title set-title-sub">Player visibility</div>
+      <div class="set-row"><label>Shuffle button</label><input type="checkbox" id="setUiPlayerShuffle" ${s.uiPlayerShuffle !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Repeat button</label><input type="checkbox" id="setUiPlayerRepeat" ${s.uiPlayerRepeat !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Volume control</label><input type="checkbox" id="setUiPlayerVolume" ${s.uiPlayerVolume !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Song progress + percentage</label><input type="checkbox" id="setUiPlayerProgress" ${s.uiPlayerProgress !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Current-track information</label><input type="checkbox" id="setUiPlayerNow" ${s.uiPlayerNow !== false ? "checked" : ""}></div>
+      <div class="set-title set-title-sub">Layout arrangement</div>
+      <div class="set-row"><label>Layout preset</label>
+        <select id="setUiLayout" class="sel sm-sel wide">
+          <option value="balanced" ${(s.uiLayout || "balanced") === "balanced" ? "selected" : ""}>Balanced</option>
+          <option value="focus" ${s.uiLayout === "focus" ? "selected" : ""}>Focus — library first</option>
+          <option value="compact" ${s.uiLayout === "compact" ? "selected" : ""}>Compact — tighter panels</option>
+        </select></div>
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
       <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
       <div class="set-row"><label>Playlists section</label><input type="checkbox" id="setUiPlaylists" ${s.uiPlaylists ? "checked" : ""}></div>
@@ -6118,8 +6162,8 @@ function openSettings() {
         <select id="setDefSort" class="sel sm-sel wide">
           ${["default","title","title-desc","artist","album","dur","dur-desc"].map(m => `<option value="${m}"${s.sortMode === m ? " selected" : ""}>${m === "default" ? "Smart (current order)" : m.replace("-", " (") + (m.includes("-") ? ")" : "")}</option>`).join("")}
         </select></div>
-      <div class="set-hint">Adaptive keeps the labels while they fit and falls back to icons when the panel gets narrow — each button keeps its tooltip either way.</div>
-      <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the dock button in the “Now playing” panel docks it as a side column.</div>
+      <div class="set-hint">Each visibility switch applies immediately. Layout presets only change placement and density; you can still hide individual sections and columns below.</div>
+      <div class="set-hint">Adaptive keeps labels while they fit and falls back to icons when the panel gets narrow. Every icon keeps its tooltip.</div>
     </div>
     <div class="set-group"><div class="set-title">Performance</div>
       <div class="set-hint">Turn these off on a slower machine or to save battery — the app stays fully functional.</div>
@@ -6365,9 +6409,16 @@ function openSettings() {
   $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
   $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });
   $("#setBgText").addEventListener("change", e => { SETTINGS.setSetting("bgTextMode", e.target.value); applyTheme(); });
-  for (const [id, key] of [["setUiSources", "uiSources"], ["setUiSrcBtns", "uiSrcButtons"], ["setUiPlaylists", "uiPlaylists"], ["setUiImport", "uiImportBtn"], ["setUiSort", "uiSortSel"], ["setUiDock", "npDocked"]]) {
+  for (const [id, key] of [
+    ["setUiSources", "uiSources"], ["setUiSrcBtns", "uiSrcButtons"], ["setUiPlaylists", "uiPlaylists"],
+    ["setUiImport", "uiImportBtn"], ["setUiSort", "uiSortSel"], ["setUiDock", "npDocked"],
+    ["setUiNavHistory", "uiNavHistory"], ["setUiNavStats", "uiNavStats"], ["setUiNavYtFeed", "uiNavYtFeed"],
+    ["setUiNavShare", "uiNavShare"], ["setUiPlayerShuffle", "uiPlayerShuffle"], ["setUiPlayerRepeat", "uiPlayerRepeat"],
+    ["setUiPlayerVolume", "uiPlayerVolume"], ["setUiPlayerProgress", "uiPlayerProgress"], ["setUiPlayerNow", "uiPlayerNow"],
+  ]) {
     $("#" + id).addEventListener("change", e => { SETTINGS.setSetting(key, e.target.checked); applyUiPrefs(); });
   }
+  $("#setUiLayout")?.addEventListener("change", e => { SETTINGS.setSetting("uiLayout", e.target.value); applyUiPrefs(); });
   $("#setArt").addEventListener("change", e => { SETTINGS.setSetting("showArt", e.target.checked); refreshView(); });
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
@@ -7282,29 +7333,44 @@ async function init() {
     clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", Number(e.target.value)), 400);
   });
 
-  $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
+  $("#seek").addEventListener("input", () => {
+    seeking = true;
+    const seconds = Number($("#seek").value) || 0;
+    const max = Number($("#seek").max) || 1;
+    const pct = $("#seekPct");
+    if (pct) pct.value = seekPercentForSeconds(seconds, max).toFixed(1);
+    $("#curTime").textContent = fmtDur(seconds);
+  });
   // Sur le WebView Android, un tap direct sur la barre (ou un drag sans friction)
   // peut n'émettre QUE `change` (ou coalescer `input`+`change`). On écoute aussi
   // pointerup/pointercancel : le seek doit se faire même si `change` n'arrive pas,
   // et `seeking` doit toujours retomber à false.
-  $("#seek").addEventListener("change", async () => {
-    const s = Number($("#seek").value);
-    try { await invoke("seek", { secs: s }); } catch {}
-    wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
-    // Refresh the presence only if one is (or should be) shown: while playing,
-    // or while the temporary "Paused" card is still up. Never resurrect a
-    // presence that rpcPause/rpcStop already cleared.
-    if (playing || _rpcPauseTimer) updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing);
-  });
+  $("#seek").addEventListener("change", () => { void commitSeekSeconds($("#seek").value); });
   // Filet mobile : si le drag finit sans `change` (cas marginal), on seek quand même,
   // et libère `seeking` — sans ça la progress loop reste gelée indéfiniment.
   $("#seek").addEventListener("pointerup", async () => {
     if (!seeking) return;
-    const s = Number($("#seek").value);
-    try { await invoke("seek", { secs: s }); } catch {}
-    wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
+    await commitSeekSeconds($("#seek").value);
   });
   $("#seek").addEventListener("pointercancel", () => { seeking = false; });
+  $("#seekPct")?.addEventListener("input", e => {
+    seeking = true;
+    const pct = clampSeekPercent(e.target.value);
+    e.target.value = pct;
+    const seconds = seekSecondsForPercent(pct, Number($("#seek").max) || 1);
+    $("#seek").value = seconds;
+    $("#curTime").textContent = fmtDur(seconds);
+  });
+  $("#seekPct")?.addEventListener("change", e => {
+    const seconds = seekSecondsForPercent(e.target.value, Number($("#seek").max) || 1);
+    void commitSeekSeconds(seconds);
+  });
+  $("#seekPct")?.addEventListener("pointerup", e => {
+    if (!seeking) return;
+    const seconds = seekSecondsForPercent(e.currentTarget.value, Number($("#seek").max) || 1);
+    void commitSeekSeconds(seconds);
+  });
+  $("#seekPct")?.addEventListener("pointercancel", () => { seeking = false; });
 
   // Debounced: each keystroke filters the whole library (a template string +
   // toLowerCase per track), then re-renders. On desktop that is a few ms; in the

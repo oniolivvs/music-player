@@ -1,5 +1,5 @@
 {
-  "version": "0.22.105",
+  "version": "0.22.106",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,6 +9,7 @@
     "diagnostics.mjs",
     "artwork-theme.mjs",
     "cleanup.mjs",
+    "player-controls.mjs",
     "library-actions.mjs"
   ],
   "css": "style.css",

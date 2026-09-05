@@ -75,6 +75,16 @@ const DEFAULTS = {
   uiPlaylists: true,     // show the Playlists section
   uiImportBtn: true,     // show "Import from URL…"
   uiSortSel: true,       // show the sort selector
+  uiNavHistory: true,    // show Recent in the top navigation
+  uiNavStats: true,      // show Stats in the top navigation
+  uiNavYtFeed: true,     // show YouTube in the top navigation
+  uiNavShare: true,      // show Share in the top navigation
+  uiPlayerShuffle: true, // show Shuffle in the player controls
+  uiPlayerRepeat: true,  // show Repeat in the player controls
+  uiPlayerVolume: true,  // show the volume control
+  uiPlayerProgress: true, // show the song progress row
+  uiPlayerNow: true,     // show current-track info in the player
+  uiLayout: "balanced",  // balanced | focus | compact
   collSources: false,    // Sources section collapsed
   collPlaylists: false,  // Playlists section collapsed
   colAlbum: true,        // show the Album column in the track list
@@ -95,7 +105,8 @@ const DEFAULTS = {
   playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)
   downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
   dlConcurrency: 3,      // simultaneous invoke("yt_download") calls the queue pump runs (1-4)
-  shuffleSearchOnly: true, // when search filtered the view, shuffle stays inside the hits (default: true)
+  shuffleSearchOnly: false, // false = shuffle the whole playlist/library scope after a filtered pick
+  shuffleSearchScopeVersion: 2, // migrate older installs that defaulted to result-only shuffle
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
   gdriveClientId: "",    // user's Google OAuth Client ID (Desktop app)
@@ -120,7 +131,19 @@ export function resetSettings() {
 
 export async function loadSettings() {
   const raw = await storeLoad("settings");
-  if (raw) { try { _s = { ...DEFAULTS, ...JSON.parse(raw) }; } catch {} }
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      // Older builds defaulted to result-only shuffle. Move those installs to
+      // the library/playlist scope once, while keeping the setting editable.
+      if (parsed && parsed.shuffleSearchOnly === true && parsed.shuffleSearchScopeVersion !== 2) {
+        parsed.shuffleSearchOnly = false;
+        parsed.shuffleSearchScopeVersion = 2;
+        void storeSaveQuietly("settings", JSON.stringify({ ...DEFAULTS, ...parsed }));
+      }
+      _s = { ...DEFAULTS, ...parsed };
+    } catch {}
+  }
   return _s;
 }
 
