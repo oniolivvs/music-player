@@ -192,6 +192,7 @@ test("the wallpaper stylesheet always centers and covers the full window", async
     stylesheet,
     /background:\s*var\(--app-bg-image, none\)\s+center\s*\/\s*cover\s+no-repeat;/,
   );
+  assert.match(stylesheet, /body::before\s*\{[^}]*inset:\s*0;/s);
   assert.doesNotMatch(stylesheet, /background:\s*var\(--app-bg-image, none\)[^;]*var\(--app-bg-size/);
 });
 
