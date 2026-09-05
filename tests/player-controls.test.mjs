@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   clampSeekPercent,
+  clampVolumePercent,
   seekPercentForSeconds,
   seekSecondsForPercent,
 } from "../src/player-controls.mjs";
@@ -21,20 +22,36 @@ test("seek seconds converts back to a bounded percentage", () => {
   assert.equal(seekPercentForSeconds(10, 0), 0);
 });
 
-test("seek percentage input is exposed beside the song bar", async () => {
+test("song progress bar has no volume percentage field", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
-  assert.match(html, /id="seekPct"[^>]*type="number"/);
-  assert.match(html, /class="seek-pct-sign"/);
+  assert.doesNotMatch(html, /seekPct|seek-pct/);
   const progress = html.match(/<div class="progress">([\s\S]*?)<\/div>/)?.[1] || "";
-  assert.match(progress, /id="seekPct"/);
-  assert.doesNotMatch(html.replace(progress, ""), /id="seekPct"/);
+  assert.doesNotMatch(progress, /type="number"|%/);
 });
 
-test("seek percentage field uses a clean text-style control without native arrows", async () => {
+test("volume percentage field is beside the volume slider without native arrows", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(stylesheet, /\.seek-pct input\s*\{[^}]*appearance:\s*textfield/);
-  assert.match(stylesheet, /\.seek-pct input::-webkit-inner-spin-button\s*,\s*\.seek-pct input::-webkit-outer-spin-button/);
+  const volume = html.match(/<div class="volume">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.match(volume, /id="volumePct"[^>]*type="number"/);
+  assert.match(volume, /class="volume-pct-sign"/);
+  assert.match(stylesheet, /\.volume-pct input\s*\{[^}]*appearance:\s*textfield/);
+  assert.match(stylesheet, /\.volume-pct input::-webkit-inner-spin-button\s*,\s*\.volume-pct input::-webkit-outer-spin-button/);
   assert.match(stylesheet, /-webkit-appearance:\s*none/);
+});
+
+test("volume percentage clamps to the 0–100 range", () => {
+  assert.equal(clampVolumePercent(-4), 0);
+  assert.equal(clampVolumePercent(45.5), 45.5);
+  assert.equal(clampVolumePercent(140), 100);
+  assert.equal(clampVolumePercent("bad"), 0);
+});
+
+test("volume percentage updates the volume control rather than seeking", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /#volumePct/);
+  assert.match(main, /set_volume/);
+  assert.doesNotMatch(main, /#seekPct|seekSecondsForPercent/);
 });
 
 test("the hot bar shares the adaptive panel blur", async () => {

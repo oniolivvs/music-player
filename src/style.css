@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.107 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.108 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -574,12 +574,12 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .progress { display: flex; align-items: center; gap: 10px; }
 .time { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
-.seek-pct { display: inline-flex; align-items: center; gap: 2px; color: var(--tx-2); font-size: 11px; font-variant-numeric: tabular-nums; }
-.seek-pct input { width: 52px; padding: 4px 5px; text-align: right; font-size: 11px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
-.seek-pct input::-webkit-inner-spin-button,
-.seek-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.seek-pct input:focus { border-color: var(--accent); }
-.seek-pct-sign { color: var(--tx-3); }
+.volume-pct { display: inline-flex; align-items: center; gap: 2px; color: var(--tx-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.volume-pct input { width: 44px; padding: 4px 5px; text-align: right; font-size: 11px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
+.volume-pct input::-webkit-inner-spin-button,
+.volume-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.volume-pct input:focus { border-color: var(--accent); }
+.volume-pct-sign { color: var(--tx-3); }
 
 /* ─── Context menu ─── */
 .ctx-menu { position: fixed; z-index: 130; min-width: 210px; background: var(--bg-3); border: 1px solid var(--bd-2); border-radius: 10px; padding: 6px; box-shadow: 0 12px 34px rgba(0,0,0,.5); max-height: 340px; overflow-y: auto; }

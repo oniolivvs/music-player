@@ -4,6 +4,10 @@ export function clampSeekPercent(value) {
   return Math.max(0, Math.min(100, numeric));
 }
 
+export function clampVolumePercent(value) {
+  return clampSeekPercent(value);
+}
+
 export function seekSecondsForPercent(percent, duration) {
   const total = Number(duration);
   if (!Number.isFinite(total) || total <= 0) return 0;

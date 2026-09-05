@@ -7,7 +7,7 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState } from "./artwork-theme.mjs";
-import { clampSeekPercent, seekPercentForSeconds, seekSecondsForPercent } from "./player-controls.mjs";
+import { clampVolumePercent } from "./player-controls.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -41,7 +41,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.107";
+const SRC_VERSION = "0.22.108";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -4855,8 +4855,6 @@ function updateNowPlaying(t, path) {
   $("#totTime").textContent = fmtDur(dur);
   const sk = $("#seek");
   sk.max = dur > 0 ? dur : 1; sk.value = 0; sk.style.setProperty("--fill", "0%");
-  const pct = $("#seekPct");
-  if (pct) { pct.value = "0"; pct.disabled = dur <= 0; }
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
   notifyTrack(t); mediaUpdate(t); renderNpPanel();
   // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
@@ -5095,13 +5093,7 @@ function renderSeek(p) {
     p = Math.min(p, cap);
   }
   el.value = p;
-  const percent = seekPercentForSeconds(p, max);
-  el.style.setProperty("--fill", `${percent.toFixed(2)}%`);
-  const percentEl = $("#seekPct");
-  if (percentEl) {
-    percentEl.disabled = max <= 1;
-    percentEl.value = percent.toFixed(1);
-  }
+  el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
   const txt = fmtDur(p);
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
   _lastSeekVal = p;
@@ -5991,7 +5983,7 @@ function applySettings() {
   updateRepeatBtn();
   // Sans PI usager : pas un if — .catch(() => {}) évite un rejet non trappé si
   // le backend refuse le volume (device non prêt / init audio KO, surtout Android).
-  const v = S().defaultVolume; $("#volume").value = v; $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 }).catch(() => {});
+  const v = clampVolumePercent(S().defaultVolume); $("#volume").value = v; $("#volumePct").value = String(Math.round(v)); $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 }).catch(() => {});
 }
 // Version switcher / downgrade (Settings → System → Updates). Lists the version
 // commits from local git and, on Build, checks one out + rebuilds + restarts.
@@ -7327,18 +7319,24 @@ async function init() {
     flash(repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one");
   });
   let _volT = null;
+  const applyVolumePercent = value => {
+    const level = clampVolumePercent(value);
+    $("#volume").value = level;
+    $("#volumePct").value = String(Math.round(level));
+    $("#volume").style.setProperty("--fill", `${level}%`);
+    invoke("set_volume", { level: level / 100 }).catch(() => {});
+    clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", level), 400);
+    return level;
+  };
   $("#volume").addEventListener("input", e => {
-    invoke("set_volume", { level: Number(e.target.value) / 100 }).catch(() => {});
-    e.target.style.setProperty("--fill", `${e.target.value}%`);
-    clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", Number(e.target.value)), 400);
+    applyVolumePercent(e.target.value);
   });
+  $("#volumePct").addEventListener("input", e => { applyVolumePercent(e.target.value); });
+  $("#volumePct").addEventListener("change", e => { applyVolumePercent(e.target.value); });
 
   $("#seek").addEventListener("input", () => {
     seeking = true;
     const seconds = Number($("#seek").value) || 0;
-    const max = Number($("#seek").max) || 1;
-    const pct = $("#seekPct");
-    if (pct) pct.value = seekPercentForSeconds(seconds, max).toFixed(1);
     $("#curTime").textContent = fmtDur(seconds);
   });
   // Sur le WebView Android, un tap direct sur la barre (ou un drag sans friction)
@@ -7353,24 +7351,6 @@ async function init() {
     await commitSeekSeconds($("#seek").value);
   });
   $("#seek").addEventListener("pointercancel", () => { seeking = false; });
-  $("#seekPct")?.addEventListener("input", e => {
-    seeking = true;
-    const pct = clampSeekPercent(e.target.value);
-    e.target.value = pct;
-    const seconds = seekSecondsForPercent(pct, Number($("#seek").max) || 1);
-    $("#seek").value = seconds;
-    $("#curTime").textContent = fmtDur(seconds);
-  });
-  $("#seekPct")?.addEventListener("change", e => {
-    const seconds = seekSecondsForPercent(e.target.value, Number($("#seek").max) || 1);
-    void commitSeekSeconds(seconds);
-  });
-  $("#seekPct")?.addEventListener("pointerup", e => {
-    if (!seeking) return;
-    const seconds = seekSecondsForPercent(e.currentTarget.value, Number($("#seek").max) || 1);
-    void commitSeekSeconds(seconds);
-  });
-  $("#seekPct")?.addEventListener("pointercancel", () => { seeking = false; });
 
   // Debounced: each keystroke filters the whole library (a template string +
   // toLowerCase per track), then re-renders. On desktop that is a few ms; in the
