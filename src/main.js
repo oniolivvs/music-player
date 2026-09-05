@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState } from "./artwork-theme.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -40,7 +40,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.104";
+const SRC_VERSION = "0.22.105";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -703,6 +703,7 @@ async function netThumb(url) {
 
 const _artworkPaletteCache = new Map();
 let _currentArtworkSrc = "";
+let _currentArtworkSize = { width: 0, height: 0 };
 
 function cacheArtworkPalette(src, result) {
   if (_artworkPaletteCache.has(src)) _artworkPaletteCache.delete(src);
@@ -740,11 +741,13 @@ async function analyzeArtwork(src) {
     }
     catch { throw new Error("remote artwork proxy failed"); }
   }
+  let artworkSize = { width: 0, height: 0 };
   const pixels = await new Promise((resolve, reject) => {
     const img = new Image();
     if (/^https?:\/\//.test(imageSrc)) img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
+        artworkSize = { width: img.naturalWidth, height: img.naturalHeight };
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 24;
         const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -757,7 +760,7 @@ async function analyzeArtwork(src) {
     img.src = imageSrc;
   });
   const palette = paletteFromPixels(pixels);
-  const result = palette ? { palette, imageSrc } : null;
+  const result = palette ? { palette, imageSrc, width: artworkSize.width, height: artworkSize.height } : null;
   cacheArtworkPalette(src, result);
   return result;
 }
@@ -768,6 +771,8 @@ function applyArtworkTheme(src, result) {
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
   root.setProperty("--app-bg-blur", `${artworkBlurPx(S().bgBlur)}px`);
+  _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
+  updateArtworkZoom();
   const background = artworkBackgroundStyle(result.imageSrc);
   root.setProperty("--app-bg-image", background.image);
   document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
@@ -778,6 +783,7 @@ function applyArtworkTheme(src, result) {
 }
 
 function restoreManualTheme() {
+  _currentArtworkSize = { width: 0, height: 0 };
   document.body.classList.remove("artwork-theme");
   return applyTheme(true);
 }
@@ -800,6 +806,19 @@ function setCurrentArtwork(src) {
   _currentArtworkSrc = String(src || "");
   if (S().artworkTheme) scheduleArtworkTheme(_currentArtworkSrc);
 }
+
+function updateArtworkZoom() {
+  if (!S().artworkTheme || !_currentArtworkSrc) return;
+  const zoom = artworkZoomForViewport(
+    _currentArtworkSize.width,
+    _currentArtworkSize.height,
+    window.innerWidth,
+    window.innerHeight,
+  );
+  document.documentElement.style.setProperty("--artwork-zoom", zoom.toFixed(3));
+}
+
+window.addEventListener("resize", updateArtworkZoom, { passive: true });
 
 function proxyCovers(root) {
   const scope = root || document;

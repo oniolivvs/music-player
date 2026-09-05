@@ -12,6 +12,7 @@ mod stream;
 mod share;
 mod gdrive;
 mod ota;
+mod single_instance;
 pub mod youtube;
 pub mod ytnative;
 
@@ -857,6 +858,12 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Keep one desktop process per user session. A named OS mutex rejects a
+    // second launch before Tauri creates another window or audio controller.
+    let _instance_guard = match single_instance::acquire() {
+        Some(guard) => guard,
+        None => return,
+    };
     std::panic::set_hook(Box::new(|info| {
         let msg = match info.payload().downcast_ref::<&'static str>() {
             Some(s) => *s,

@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.22.104"
+version = "0.22.105"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -77,6 +77,7 @@ reqwest = { version = "0.12", default-features = false }
 # one — so they must be declared separately.
 [target.'cfg(target_os = "windows")'.dependencies]
 souvlaki = { version = "0.8", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }

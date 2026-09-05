@@ -11,6 +11,7 @@ import {
   artworkSourceCandidates,
   resolveArtworkSource,
   trimArtworkPaletteCache,
+  artworkZoomForViewport,
   createGenerationGuard,
   createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
@@ -191,11 +192,31 @@ test("dynamic artwork blur stays sharp and respects lower user values", () => {
   assert.equal(artworkBlurPx("invalid"), 6);
 });
 
-test("only dynamic artwork gets the centered 118 percent zoom", async () => {
+test("only dynamic artwork gets centered responsive zoom", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(stylesheet, /body\.artwork-theme::before\s*\{[^}]*transform:\s*scale\(1\.18\)/s);
+  assert.match(stylesheet, /body\.artwork-theme::before\s*\{[^}]*transform:\s*scale\(var\(--artwork-zoom/s);
   assert.match(stylesheet, /body\.artwork-theme::before\s*\{[^}]*transform-origin:\s*center/s);
   assert.doesNotMatch(stylesheet, /body\.has-bg::before\s*\{[^}]*transform:\s*scale\(1\.18\)/s);
+});
+
+test("artwork zoom increases for wide artwork in a large window without stretching", () => {
+  const wide = artworkZoomForViewport(1920, 1080, 1600, 900);
+  const square = artworkZoomForViewport(1000, 1000, 1600, 900);
+  assert.ok(wide >= 1.24 && wide <= 1.6);
+  assert.ok(square > wide, "square artwork needs extra crop for a wide window");
+  assert.equal(artworkZoomForViewport(0, 0, 0, 0), 1.28);
+});
+
+test("artwork theme gives every editable field palette-driven colors", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  const rule = stylesheet.match(/body\.artwork-theme\s+:where\((.*?)\)\s*\{([^}]*)\}/s);
+  assert.ok(rule, "artwork form-control rule is missing");
+  assert.match(rule[1], /textarea/);
+  assert.match(rule[1], /select/);
+  assert.match(rule[1], /\.num-in/);
+  assert.match(rule[2], /background:\s*var\(--bg-3\)/);
+  assert.match(rule[2], /color:\s*var\(--tx-1\)/);
+  assert.match(rule[2], /border-color:\s*var\(--icon-border\)/);
 });
 
 test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {

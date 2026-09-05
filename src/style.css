@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.104 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.105 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -18,6 +18,7 @@
   --bd: rgba(255, 255, 255, 0.07);
   --bd-2: rgba(255, 255, 255, 0.12);
   --vio-glow: rgba(139, 92, 246, 0.14);
+  --artwork-zoom: 1.28;
   --r: 12px;
   --card-min: 205px; /* min column width of the YouTube card grids */
 }
@@ -682,7 +683,7 @@ body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
 body.artwork-theme::before {
   opacity: 1;
-  transform: scale(1.18);
+  transform: scale(var(--artwork-zoom, 1.28));
   transform-origin: center;
   transition: opacity .18s ease, filter .18s ease;
 }
@@ -838,6 +839,22 @@ body.has-bg .sort-ico {
   background: var(--icon-surface);
   color: var(--icon-fg);
   border: 1px solid var(--icon-border);
+}
+/* Editable controls must belong to the same palette as the cover. Keep this
+   after the generic wallpaper overrides so artwork themes do not fall back to
+   a fixed white/black glass tint. */
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in) {
+  background: var(--bg-3);
+  color: var(--tx-1);
+  border-color: var(--icon-border);
+}
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in)::placeholder {
+  color: var(--tx-2);
+  opacity: .9;
+}
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in):focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
 }
 body.artwork-theme .top-nav .nav-item {
   background: var(--icon-surface);

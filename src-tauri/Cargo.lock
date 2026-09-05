@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "music-player"
-version = "0.22.104"
+version = "0.22.105"
 dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",
@@ -2934,6 +2934,7 @@ dependencies = [
  "tiny_http",
  "ureq",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

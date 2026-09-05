@@ -197,6 +197,25 @@ export function artworkBlurPx(value) {
   return Math.max(0, Math.min(Number.isFinite(numeric) ? numeric : 6, 6));
 }
 
+// Extra crop for the wallpaper layer. `background-size: cover` still does the
+// aspect-ratio work; this scale only hides edge seams and adapts to the window
+// and artwork shapes without ever stretching pixels.
+export function artworkZoomForViewport(imageWidth, imageHeight, viewportWidth, viewportHeight) {
+  const iw = Number(imageWidth);
+  const ih = Number(imageHeight);
+  const vw = Number(viewportWidth);
+  const vh = Number(viewportHeight);
+  if (![iw, ih, vw, vh].every(value => Number.isFinite(value) && value > 0)) return 1.28;
+  const imageRatio = iw / ih;
+  const viewportRatio = vw / vh;
+  const cropMismatch = Math.max(imageRatio / viewportRatio, viewportRatio / imageRatio);
+  const areaFactor = Math.sqrt((vw * vh) / (1100 * 720));
+  const zoom = 1.24
+    + Math.max(0, cropMismatch - 1) * 0.12
+    + Math.max(0, areaFactor - 1) * 0.06;
+  return Math.max(1.28, Math.min(1.6, zoom));
+}
+
 export function artworkDimensionsAreUsable(width, height) {
   return Number.isFinite(width) && Number.isFinite(height)
     && Math.max(width, height) >= 320;
