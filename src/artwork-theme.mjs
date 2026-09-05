@@ -90,10 +90,14 @@ function readableAccent(color, panel, lightSurface) {
 export function paletteFromPixels(rgba) {
   if (!rgba || rgba.length < 4) return null;
   const bins = new Map();
+  let visiblePixels = 0;
+  let sceneLuminance = 0;
   for (let index = 0; index + 3 < rgba.length; index += 4) {
     if (rgba[index + 3] < 128) continue;
     const color = rgb(rgba[index], rgba[index + 1], rgba[index + 2]);
     const light = luminance(color);
+    visiblePixels++;
+    sceneLuminance += light;
     if (light < 0.02 || light > 0.97) continue;
     const sat = saturation(color);
     const key = `${color.r >> 5}:${color.g >> 5}:${color.b >> 5}`;
@@ -123,7 +127,11 @@ export function paletteFromPixels(rgba) {
     winner.g / winner.count,
     winner.b / winner.count,
   );
-  const lightSurface = luminance(dominant) > 0.55;
+  // Saturated details often win the accent bin even when the cover is mostly
+  // white (or black). Use the whole sampled scene for the text scheme so a
+  // bright background cannot leave pale labels sitting on a light glass panel.
+  const averageSceneLuminance = visiblePixels ? sceneLuminance / visiblePixels : luminance(dominant);
+  const lightSurface = luminance(dominant) > 0.55 || averageSceneLuminance > 0.58;
   const black = rgb(7, 9, 13);
   const white = rgb(250, 251, 253);
   const background = lightSurface ? blend(dominant, white, 0.48) : blend(dominant, black, 0.78);
@@ -155,8 +163,11 @@ export function paletteFromPixels(rgba) {
     surface3: lightSurface ? blend(panel, black, 0.12) : blend(panel, white, 0.12),
     surface4: lightSurface ? blend(panel, black, 0.19) : blend(panel, white, 0.19),
     text,
-    muted: blend(text, panel, 0.38),
-    subtle: blend(text, panel, 0.58),
+    // Keep secondary labels at a WCAG-friendly distance from the panel. The
+    // old 38/58% blends looked like disabled text once the panel was translucent
+    // over a bright, blurred patch of artwork.
+    muted: blend(text, panel, 0.22),
+    subtle: blend(text, panel, 0.35),
     iconSurface,
     iconForeground,
     iconBorder,

@@ -44,6 +44,15 @@ test("bright artwork selects dark readable text", () => {
   assert.ok(contrastRatio(palette.text, palette.panel) >= 4.5);
 });
 
+test("a bright cover keeps dark text when saturated details win the accent bin", () => {
+  const palette = paletteFromPixels(pixels([
+    [[250, 250, 250, 255], 42],
+    [[18, 58, 180, 255], 6],
+  ]));
+  assert.ok(palette.text.r < 30 && palette.text.g < 30 && palette.text.b < 30);
+  assert.ok(contrastRatio(palette.subtle, palette.panel) >= 4.5);
+});
+
 test("transparent or featureless artwork falls back", () => {
   assert.equal(paletteFromPixels(pixels([
     [[0, 0, 0, 0], 4],
@@ -245,6 +254,7 @@ test("blurred artwork surfaces use an adaptive text contrast shadow", async () =
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /--text-shadow-color:\s*[^;]+;/);
   assert.match(stylesheet, /body\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.main[^)]*\.np-drawer[^)]*\.player[^)]*input[^)]*textarea[^)]*select[^)]*\)\s*\{[^}]*text-shadow:[^}]*var\(--text-shadow-blur/);
+  assert.match(stylesheet, /text-shadow:\s*0 1px min\(2\.5px,\s*var\(--text-shadow-blur/);
   assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--text-shadow-color:/s);
 });
 
