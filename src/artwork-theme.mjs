@@ -197,6 +197,11 @@ export function artworkBlurPx(value) {
   return Math.max(0, Math.min(Number.isFinite(numeric) ? numeric : 6, 6));
 }
 
+export function artworkDimensionsAreUsable(width, height) {
+  return Number.isFinite(width) && Number.isFinite(height)
+    && Math.max(width, height) >= 320;
+}
+
 export function artworkSourceCandidates(source) {
   const value = String(source || "");
   const match = value.match(/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\//i);
@@ -212,16 +217,32 @@ export function artworkSourceCandidates(source) {
   return candidates;
 }
 
-export async function resolveArtworkSource(source, load) {
+export async function resolveArtworkSource(source, load, accept = () => true) {
   let lastError;
   for (const candidate of artworkSourceCandidates(source)) {
     try {
-      return await load(candidate);
+      const value = await load(candidate);
+      if (!(await accept(value, candidate))) throw new Error("artwork candidate rejected");
+      return value;
     } catch (error) {
       lastError = error;
     }
   }
   throw lastError || new Error("artwork source unavailable");
+}
+
+export function trimArtworkPaletteCache(cache, budget) {
+  let total = [...cache.values()].reduce(
+    (sum, value) => sum + String(value?.imageSrc || "").length,
+    0,
+  );
+  while (cache.size > 1 && total > budget) {
+    const key = cache.keys().next().value;
+    const value = cache.get(key);
+    total -= String(value?.imageSrc || "").length;
+    cache.delete(key);
+  }
+  return cache;
 }
 
 export function createGenerationGuard() {

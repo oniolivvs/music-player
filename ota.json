@@ -1,5 +1,5 @@
 {
-  "version": "0.22.103",
+  "version": "0.22.104",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -13,7 +13,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Your Library now includes a fifth action that safely deletes blocked tracks through the existing confirmation flow. Artwork and manual image backgrounds are permanently centered and cropped with cover so they fill the whole player window without stretching or empty bands.",
+  "notes": "Dynamic artwork backgrounds now use the best available YouTube cover, stay center-cropped at 118%, and preserve more detail with a sharper blur. Top navigation buttons also inherit readable colors from the current cover while manual backgrounds remain unchanged.",
   "platforms": [
     "linux",
     "windows",

@@ -7,8 +7,10 @@ import {
   cssVarsForPalette,
   artworkBackgroundStyle,
   artworkBlurPx,
+  artworkDimensionsAreUsable,
   artworkSourceCandidates,
   resolveArtworkSource,
+  trimArtworkPaletteCache,
   createGenerationGuard,
   createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
@@ -140,6 +142,37 @@ test("HD artwork resolver falls back in order", async () => {
   assert.deepEqual(attempted.map(value => value.split("/").at(-1)), [
     "maxresdefault.jpg", "hq720.jpg", "hqdefault.jpg",
   ]);
+});
+
+test("HD resolver rejects a fulfilled low-resolution placeholder", async () => {
+  const attempted = [];
+  const value = await resolveArtworkSource(
+    "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg",
+    async candidate => {
+      attempted.push(candidate);
+      return candidate.endsWith("hqdefault.jpg") ? "hd" : "placeholder";
+    },
+    candidate => candidate !== "placeholder",
+  );
+  assert.equal(value, "hd");
+  assert.deepEqual(attempted.map(candidate => candidate.split("/").at(-1)), [
+    "maxresdefault.jpg", "hq720.jpg", "hqdefault.jpg",
+  ]);
+});
+
+test("artwork dimension guard rejects tiny YouTube placeholders", () => {
+  assert.equal(artworkDimensionsAreUsable(120, 90), false);
+  assert.equal(artworkDimensionsAreUsable(480, 360), true);
+  assert.equal(artworkDimensionsAreUsable(1280, 720), true);
+});
+
+test("artwork palette cache is bounded by encoded image bytes", () => {
+  const cache = new Map([
+    ["old", { imageSrc: "1234" }],
+    ["new", { imageSrc: "5678" }],
+  ]);
+  trimArtworkPaletteCache(cache, 5);
+  assert.deepEqual([...cache.keys()], ["new"]);
 });
 
 test("the wallpaper stylesheet always centers and covers the full window", async () => {

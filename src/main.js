@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, resolveArtworkSource, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, createArtworkThemeState } from "./artwork-theme.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -40,7 +40,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.103";
+const SRC_VERSION = "0.22.104";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -707,9 +707,17 @@ let _currentArtworkSrc = "";
 function cacheArtworkPalette(src, result) {
   if (_artworkPaletteCache.has(src)) _artworkPaletteCache.delete(src);
   _artworkPaletteCache.set(src, result);
-  while (_artworkPaletteCache.size > 64) {
-    _artworkPaletteCache.delete(_artworkPaletteCache.keys().next().value);
-  }
+  while (_artworkPaletteCache.size > 64) _artworkPaletteCache.delete(_artworkPaletteCache.keys().next().value);
+  trimArtworkPaletteCache(_artworkPaletteCache, 16 * 1024 * 1024);
+}
+
+function artworkDataIsUsable(value) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(artworkDimensionsAreUsable(img.naturalWidth, img.naturalHeight));
+    img.onerror = () => reject(new Error("artwork candidate decode failed"));
+    img.src = value;
+  });
 }
 
 async function analyzeArtwork(src) {
@@ -725,6 +733,9 @@ async function analyzeArtwork(src) {
       imageSrc = await resolveArtworkSource(
         src,
         candidate => invoke("net_image", { url: candidate }),
+        (value, candidate) => artworkSourceCandidates(candidate).length > 1
+          ? artworkDataIsUsable(value)
+          : true,
       );
     }
     catch { throw new Error("remote artwork proxy failed"); }
