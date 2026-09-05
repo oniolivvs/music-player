@@ -213,14 +213,14 @@ test("only dynamic artwork gets centered responsive zoom", async () => {
 test("artwork zoom increases for wide artwork in a large window without stretching", () => {
   const wide = artworkZoomForViewport(1920, 1080, 1600, 900);
   const square = artworkZoomForViewport(1000, 1000, 1600, 900);
-  assert.ok(wide >= 1.1 && wide <= 1.28);
+  assert.ok(wide >= 1.2 && wide <= 1.48);
   assert.ok(square > wide, "square artwork needs extra crop for a wide window");
-  assert.equal(artworkZoomForViewport(0, 0, 0, 0), 1.12);
+  assert.equal(artworkZoomForViewport(0, 0, 0, 0), 1.24);
 });
 
-test("responsive zoom does not over-crop square covers on wide windows", () => {
+test("responsive zoom fills square covers on wide windows without stretching", () => {
   const square = artworkZoomForViewport(1000, 1000, 1458, 754);
-  assert.ok(square <= 1.22, `unexpected crop zoom: ${square}`);
+  assert.ok(square >= 1.30 && square <= 1.48, `unexpected fill zoom: ${square}`);
 });
 
 test("artwork theme gives every editable field palette-driven colors", async () => {
