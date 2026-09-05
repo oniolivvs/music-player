@@ -40,6 +40,11 @@ test("volume percentage field is beside the volume slider without native arrows"
   assert.match(stylesheet, /-webkit-appearance:\s*none/);
 });
 
+test("volume percentage field keeps its interior transparent", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /\.volume-pct input\s*\{[^}]*background:\s*transparent/);
+});
+
 test("volume percentage clamps to the 0–100 range", () => {
   assert.equal(clampVolumePercent(-4), 0);
   assert.equal(clampVolumePercent(45.5), 45.5);

@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.108 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.109 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -575,7 +575,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .time { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
 .volume-pct { display: inline-flex; align-items: center; gap: 2px; color: var(--tx-2); font-size: 11px; font-variant-numeric: tabular-nums; }
-.volume-pct input { width: 44px; padding: 4px 5px; text-align: right; font-size: 11px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
+.volume-pct input { width: 44px; padding: 4px 5px; text-align: right; font-size: 11px; background: transparent; border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
 .volume-pct input::-webkit-inner-spin-button,
 .volume-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .volume-pct input:focus { border-color: var(--accent); }
