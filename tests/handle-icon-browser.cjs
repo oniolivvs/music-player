@@ -31,8 +31,8 @@ const assert = require('node:assert/strict');
         iconTextDelta: (svgRect.top + svgRect.bottom - labelRect.top - labelRect.bottom) / 2,
       };
     });
-    assert.ok(Math.abs(result.topInset) < 0.25, JSON.stringify(result));
-    assert.ok(Math.abs(result.bottomInset) < 0.25, JSON.stringify(result));
+    assert.ok(Math.abs(result.topInset - 8) < 0.5, JSON.stringify(result));
+    assert.ok(Math.abs(result.bottomInset - 8) < 0.5, JSON.stringify(result));
     assert.ok(Math.abs(result.iconTextDelta + 1) < 0.25, JSON.stringify(result));
     console.log(JSON.stringify(result));
   } finally { await browser.close(); }

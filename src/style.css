@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.117 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.118 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -71,9 +71,26 @@ body.smooth .imp-list, body.smooth .side-section { scroll-behavior: smooth; }
 }
 .rs-handle:hover, .rs-handle.dragging { background: var(--vio-glow); box-shadow: inset 0 0 0 1px var(--accent); }
 #sideResize { left: calc(var(--side-w, 268px) + 8px); }  /* sits on the grid gap */
-#npResize { left: -4px; top: 0; bottom: 0; }
+#npResize {
+  /* Absolute coordinates start inside the drawer's 1px border.
+     -9px places this 8px target in the gutter, flush with the panel.
+     7px insets provide an 8px outer clearance matching the sidebar handle
+     without cutting into the rounded corners. */
+  left: -9px;
+  top: 7px;
+  bottom: 7px;
+  width: 8px;
+}
 body.rs-dragging { cursor: col-resize; }
 body.rs-dragging .rs-handle { background: var(--vio-glow); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* SVG ink in icon+label controls has a one-pixel optical drop in its viewBox.
+   Lift only controls that carry text; icon-only actions keep their geometric
+   centre and playback controls stay untouched. */
+.icon-text-control > svg,
+.icon-text-control .bic svg,
+.icon-text-control [data-ic] svg,
+.icon-text-control .ni-ico svg { transform: translateY(-1px); }
 
 /* ─── Sidebar ─── */
 .sidebar {
