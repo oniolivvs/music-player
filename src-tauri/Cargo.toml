@@ -52,7 +52,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # client already present. Pure-Rust, cross-compiles to Android.
 tiny_http = "0.12"
 local-ip-address = "0.6"
-# Google Drive cloud sync (src/gdrive.rs): PKCE OAuth needs SHA-256.
 sha2 = "0.10"
 getrandom = "0.3"
 # Native YouTube backend (Innertube client, NewPipe-style): powers search /

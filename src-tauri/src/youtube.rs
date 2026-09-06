@@ -74,9 +74,9 @@ const RESOLVE_TTL: Duration = Duration::from_secs(45 * 60);
 /// Prefer AAC-in-mp4: rodio/symphonia decodes it (opus/webm is unsupported).
 const FORMAT: &str = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio[acodec=aac]/best[ext=mp4]";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct YtState {
-    cache: Mutex<HashMap<String, (Instant, String)>>, // video id -> (resolved_at, stream url)
+    cache: Arc<Mutex<HashMap<String, (Instant, String)>>>, // shared cache, cheap clones for blocking workers
 }
 
 /// Live download processes, so the frontend can cancel them.
@@ -107,10 +107,10 @@ pub struct PlaylistImport {
 /// User-facing yt-dlp configuration (fed by the setup wizard / Settings via
 /// `yt_config`): explicit binary path + optional browser to take cookies from
 /// (the script's anti-bot option). Auto-detection fills `bin` when unset.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct YtCfg {
-    bin: Mutex<Option<String>>,
-    cookies: Mutex<String>, // browser name for --cookies-from-browser, "" = off
+    bin: Arc<Mutex<Option<String>>>,
+    cookies: Arc<Mutex<String>>, // browser name for --cookies-from-browser, "" = off
 }
 
 /// Record yt-dlp failures in the shared, redacted and rotating diagnostics log.
@@ -1545,6 +1545,13 @@ pub fn cache_url(state: &YtState, id: &str, url: String) {
     state.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), (Instant::now(), url));
 }
 
+/// Drop a URL after the media endpoint rejected it. Stream URLs are signed and
+/// can expire earlier than their nominal TTL; retaining one makes every retry
+/// fail with the same 403 until the cache ages out.
+pub fn invalidate_url(state: &YtState, id: &str) {
+    state.cache.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+}
+
 pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String> {
     if let Some((at, url)) = state.cache.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
         if at.elapsed() < RESOLVE_TTL {
@@ -1581,10 +1588,18 @@ pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String>
     Ok(url)
 }
 
+/// Process execution must not block Tauri's async command workers.
+pub async fn resolve_async(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String> {
+    let (state, cfg, id) = (state.clone(), cfg.clone(), id.to_string());
+    tauri::async_runtime::spawn_blocking(move || resolve(&state, &cfg, &id))
+        .await.map_err(|e| format!("stream resolver worker failed: {e}"))?
+}
+
 #[cfg(test)]
 mod url_guard_tests {
     use super::{
-        check_yt_id, check_yt_url, cleanup_download_root_candidates, existing_writable_dir,
+        cached_url, cache_url, check_yt_id, check_yt_url, cleanup_download_root_candidates, existing_writable_dir,
+        invalidate_url,
         first_existing_writable_dir, yt_cleanup_download_root, yt_download_root,
     };
     use std::{
@@ -1593,6 +1608,15 @@ mod url_guard_tests {
     };
 
     static CLEANUP_TEST_ROOT_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn invalidating_a_failed_stream_forces_the_next_play_to_resolve_again() {
+        let state = super::YtState::default();
+        cache_url(&state, "dQw4w9WgXcQ", "https://googlevideo.example/old".into());
+        assert!(cached_url(&state, "dQw4w9WgXcQ").is_some());
+        invalidate_url(&state, "dQw4w9WgXcQ");
+        assert!(cached_url(&state, "dQw4w9WgXcQ").is_none());
+    }
 
     fn cleanup_test_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

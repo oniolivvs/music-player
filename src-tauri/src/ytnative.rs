@@ -583,8 +583,11 @@ fn vr_title_artist(v: &serde_json::Value, id: &str) -> (String, String) {
 /// "lit, coupe, relance" pattern. 96 kbps AAC is enough for transparent speech
 /// and near-transparent music, and it's 30 % gentler on the network.
 pub async fn stream_url(id: &str) -> Result<String, String> {
-    let v = vr_player(id)?;
-    vr_audio_url(&v, Some(96))
+    let id = id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = vr_player(&id)?;
+        vr_audio_url(&v, Some(96))
+    }).await.map_err(|e| format!("stream resolver worker failed: {e}"))?
 }
 
 fn safe_filename(s: &str) -> String {

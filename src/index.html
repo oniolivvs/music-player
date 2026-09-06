@@ -38,7 +38,6 @@
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
         <div class="ss-body grow">
-          <button id="importBtn" class="btn-line"><span data-ic="dl"></span> Import…</button>
           <div class="playlists-list" id="playlistsList"></div>
         </div>
       </div>
@@ -49,7 +48,6 @@
 
     <main class="main">
       <header class="topbar">
-        <button id="sideToggle" class="icon-btn side-toggle" title="Menu" data-ic="menu"></button>
         <div class="search-wrap">
           <span class="search-ico" data-ic="search"></span>
           <input id="search" type="search" placeholder="Search library — Enter to search YouTube (videos + playlists)" autocomplete="off">
@@ -87,10 +85,6 @@
     <div id="npResize" class="rs-handle" title="Drag to resize — double-click to reset"></div>
     <div class="np-head">
       <span class="dl-title">Now playing</span>
-      <span class="dl-btns">
-        <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)" data-ic="pin"></button>
-        <button id="npClose" class="icon-btn" title="Close" data-ic="x"></button>
-      </span>
     </div>
     <div class="ov-art" id="ovArt" data-ic="music"></div>
     <div class="ov-title" id="ovTitle">Nothing playing</div>
@@ -143,7 +137,7 @@
         <input id="volume" type="range" min="0" max="100" value="80">
         <label class="volume-pct" title="Volume percentage">
           <input id="volumePct" type="number" min="0" max="100" step="1" value="80" aria-label="Volume percent">
-          <span class="volume-pct-sign">%</span>
+          <span class="volume-pct-sign" aria-hidden="true">%</span>
         </label>
       </div>
     </div>
@@ -251,6 +245,26 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
         <div class="setup-actions">
           <button id="dlgCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
           <button id="dlgOk" class="btn"><span data-ic="check"></span> OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="downloadPromptModal" class="modal-backdrop" hidden>
+    <div class="modal dlg download-prompt">
+      <div class="modal-head">
+        <h2 id="dlPromptTitle">Download tracks?</h2>
+        <button id="dlPromptClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <p id="dlPromptMsg" class="dlg-msg"></p>
+        <label class="modal-check" for="dlPromptCheck">
+          <input type="checkbox" id="dlPromptCheck" checked>
+          <span>Download immediately as MP3</span>
+        </label>
+        <div class="setup-actions">
+          <button id="dlPromptCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
+          <button id="dlPromptOk" class="btn"><span data-ic="dl"></span> Continue</button>
         </div>
       </div>
     </div>

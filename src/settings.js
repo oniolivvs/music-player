@@ -73,7 +73,6 @@ const DEFAULTS = {
   uiSources: true,       // show the Sources section
   uiSrcButtons: true,    // show "Add folder…" / "Enter a path manually"
   uiPlaylists: true,     // show the Playlists section
-  uiImportBtn: true,     // show "Import from URL…"
   uiSortSel: true,       // show the sort selector
   uiNavHistory: true,    // show Recent in the top navigation
   uiNavStats: true,      // show Stats in the top navigation
@@ -89,7 +88,8 @@ const DEFAULTS = {
   collPlaylists: false,  // Playlists section collapsed
   colAlbum: true,        // show the Album column in the track list
   colDur: true,          // show the Duration column in the track list
-  npDocked: false,       // Up-next panel docked as a side column
+  npDocked: true,        // Up-next panel docked as a side column by default
+  npDockModeVersion: 1,  // migrate older installs to the new anchored default once
   uiNpOpen: false,       // Up-next panel open (restored at launch)
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge
   recoEnabled: true,     // Show a "For you" recommendation rail on the library home page
@@ -109,11 +109,6 @@ const DEFAULTS = {
   shuffleSearchScopeVersion: 2, // migrate older installs that defaulted to result-only shuffle
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
-  gdriveClientId: "",    // user's Google OAuth Client ID (Desktop app)
-  gdriveClientSecret: "",// user's Google OAuth Client secret (Desktop app)
-  gdriveTokens: null,    // { refresh_token, access_token, expires_at, email }
-  syncAuto: true,        // auto push/pull on changes + launch
-  syncAt: 0,             // last successful sync (unix ms)
   bgImage: "",           // custom background: URL or local file path
   artworkTheme: false,    // derive the wallpaper and colors from Now Playing artwork
   bgBlur: 18,            // px of blur on the background image
@@ -134,14 +129,30 @@ export async function loadSettings() {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
+      let needsSave = false;
+      // Remove account/cloud-sync data from older builds. The app is local-first
+      // now; discard stale OAuth material instead of carrying it in memory or
+      // writing it back to the settings store.
+      for (const key of ["gdriveClientId", "gdriveClientSecret", "gdriveTokens", "syncAuto", "syncAt"]) {
+        if (Object.prototype.hasOwnProperty.call(parsed, key)) { delete parsed[key]; needsSave = true; }
+      }
       // Older builds defaulted to result-only shuffle. Move those installs to
       // the library/playlist scope once, while keeping the setting editable.
       if (parsed && parsed.shuffleSearchOnly === true && parsed.shuffleSearchScopeVersion !== 2) {
         parsed.shuffleSearchOnly = false;
         parsed.shuffleSearchScopeVersion = 2;
-        void storeSaveQuietly("settings", JSON.stringify({ ...DEFAULTS, ...parsed }));
+        needsSave = true;
+      }
+      // The Now Playing panel is anchored by default now that its header pin
+      // control is gone. Migrate older installs once, while preserving a later
+      // explicit choice made from Settings.
+      if (parsed && parsed.npDockModeVersion !== 1) {
+        parsed.npDocked = true;
+        parsed.npDockModeVersion = 1;
+        needsSave = true;
       }
       _s = { ...DEFAULTS, ...parsed };
+      if (needsSave) void storeSaveQuietly("settings", JSON.stringify(_s));
     } catch {}
   }
   return _s;

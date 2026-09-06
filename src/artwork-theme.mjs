@@ -87,17 +87,20 @@ function readableAccent(color, panel, lightSurface) {
   return target;
 }
 
-export function paletteFromPixels(rgba) {
+export function paletteFromPixels(rgba, { allowNeutral = false, textMode = 'auto', dim = 0 } = {}) {
   if (!rgba || rgba.length < 4) return null;
   const bins = new Map();
   let visiblePixels = 0;
   let sceneLuminance = 0;
+  const scene = { r: 0, g: 0, b: 0 };
+  const brightness = 1 - Math.min(100, Math.max(0, Number(dim) || 0)) / 100;
   for (let index = 0; index + 3 < rgba.length; index += 4) {
     if (rgba[index + 3] < 128) continue;
-    const color = rgb(rgba[index], rgba[index + 1], rgba[index + 2]);
+    const color = rgb(rgba[index] * brightness, rgba[index + 1] * brightness, rgba[index + 2] * brightness);
     const light = luminance(color);
     visiblePixels++;
     sceneLuminance += light;
+    scene.r += color.r; scene.g += color.g; scene.b += color.b;
     if (light < 0.02 || light > 0.97) continue;
     const sat = saturation(color);
     const key = `${color.r >> 5}:${color.g >> 5}:${color.b >> 5}`;
@@ -120,7 +123,11 @@ export function paletteFromPixels(rgba) {
       bestScore = score;
     }
   }
-  if (!winner || winner.saturation / winner.count < 0.08) return null;
+  if (!visiblePixels) return null;
+  if (!winner || winner.saturation / winner.count < 0.08) {
+    if (!allowNeutral) return null;
+    winner = { ...scene, count: visiblePixels };
+  }
 
   const dominant = rgb(
     winner.r / winner.count,
@@ -131,7 +138,7 @@ export function paletteFromPixels(rgba) {
   // white (or black). Use the whole sampled scene for the text scheme so a
   // bright background cannot leave pale labels sitting on a light glass panel.
   const averageSceneLuminance = visiblePixels ? sceneLuminance / visiblePixels : luminance(dominant);
-  const lightSurface = luminance(dominant) > 0.55 || averageSceneLuminance > 0.58;
+  const lightSurface = textMode === 'dark' || (textMode !== 'light' && (luminance(dominant) > 0.55 || averageSceneLuminance > 0.58));
   const black = rgb(7, 9, 13);
   const white = rgb(250, 251, 253);
   const background = lightSurface ? blend(dominant, white, 0.48) : blend(dominant, black, 0.78);
@@ -287,7 +294,18 @@ export function createGenerationGuard() {
   };
 }
 
-export function createArtworkThemeState({ analyze, apply, restore }) {
+export function createSharedArtworkPreparation(load) {
+  const pending = new Map();
+  return source => {
+    if (pending.has(source)) return pending.get(source);
+    const task = Promise.resolve(load(source))
+      .finally(() => pending.delete(source));
+    pending.set(source, task);
+    return task;
+  };
+}
+
+export function createArtworkThemeState({ analyze, apply, restore, retain = () => {} }) {
   const guard = createGenerationGuard();
   return {
     cancel() { guard.next(); },
@@ -301,14 +319,14 @@ export function createArtworkThemeState({ analyze, apply, restore }) {
         const palette = await analyze(src);
         if (!guard.isCurrent(token)) return null;
         if (!palette) {
-          await restore();
+          await retain(null);
           return null;
         }
         apply(src, palette);
         return palette;
       } catch (error) {
         if (!guard.isCurrent(token)) return null;
-        await restore();
+        await retain(error);
         throw error;
       }
     },

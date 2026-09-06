@@ -22,6 +22,7 @@
   --text-shadow-blur: 6px;
   --text-shadow-color: rgba(0, 0, 0, .86);
   --ui-panel-blur: 14px;
+  --field-border: rgba(255, 255, 255, .24);
   --r: 12px;
   --card-min: 205px; /* min column width of the YouTube card grids */
 }
@@ -288,7 +289,7 @@ body.compact-top .search-wrap input { border-radius: 9px; }
    rendering makes it expensive; a flat translucent fill is enough. */
 body.has-bg input[type="search"],
 body.has-bg input[type="text"],
-body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: var(--field-border); }
 body.bg-light.has-bg input[type="search"],
 body.bg-light.has-bg input[type="text"],
 body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
@@ -564,7 +565,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 }
 .vol-ico { display: grid; place-items: center; color: var(--tx-2); }
 .volume { display: flex; align-items: center; gap: 8px; justify-self: end; color: var(--tx-2); }
-.volume input[type="range"] { width: 110px; accent-color: var(--accent); }
+.volume input[type="range"] { width: 110px; height: 30px; box-sizing: border-box; accent-color: var(--accent); }
 .norm { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--tx-3); cursor: pointer; user-select: none; }
 .norm input { width: 14px; height: 14px; border-radius: 4px; }
 .norm input:checked::after { width: 7px; height: 4px; }
@@ -572,12 +573,14 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .progress { display: flex; align-items: center; gap: 10px; }
 .time { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
-.volume-pct { display: inline-flex; align-items: center; gap: 2px; color: var(--tx-2); font-size: 11px; font-variant-numeric: tabular-nums; }
-.volume-pct input { width: 44px; padding: 4px 5px; text-align: right; font-size: 11px; background: transparent; border: 1px solid var(--bd); border-radius: 6px; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
+.volume-pct { position: relative; display: inline-flex; align-items: center; width: 58px; height: 30px; color: var(--tx-1); font-size: 11px; font-variant-numeric: tabular-nums; border: 1px solid var(--field-border); border-radius: 8px; background: rgba(10, 10, 15, .24); overflow: hidden; transition: border-color .14s, box-shadow .14s; }
+.volume-pct:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent); }
+.volume-pct input { width: 100%; height: 100%; box-sizing: border-box; padding: 0 18px 0 6px; text-align: right; font-size: 11px; line-height: 1; background: transparent; border: 0; border-radius: 0; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
 .volume-pct input::-webkit-inner-spin-button,
 .volume-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .volume-pct input:focus { border-color: var(--accent); }
-.volume-pct-sign { color: var(--tx-3); }
+.volume-pct-sign { position: absolute; right: 6px; top: 0; bottom: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 9px; line-height: 1; vertical-align: middle; color: var(--tx-2); pointer-events: none; transform: translateY(-1px); }
+body.has-bg .volume-pct input { background: transparent; background-color: transparent; }
 
 /* ─── Context menu ─── */
 .ctx-menu { position: fixed; z-index: 130; min-width: 210px; background: var(--bg-3); border: 1px solid var(--bd-2); border-radius: 10px; padding: 6px; box-shadow: 0 12px 34px rgba(0,0,0,.5); max-height: 340px; overflow-y: auto; }
@@ -593,7 +596,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 #cookieModal { z-index: 124; }
 /* Only the body scrolls — the header stays put and the scrollbar is clipped
    inside the rounded corners (no bar cutting across the header / top corner). */
-.modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); backdrop-filter: blur(var(--ui-panel-blur, 14px)); -webkit-backdrop-filter: blur(var(--ui-panel-blur, 14px)); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--bd); background: inherit; flex-shrink: 0; }
 .modal-head h2 { font-size: 17px; }
 .modal-body { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
@@ -683,41 +686,53 @@ body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;
   filter: blur(var(--app-bg-blur, 12px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
-  /* The wallpaper is blurred ONCE and never moves — it MUST be promoted to its
-     own GPU layer (`will-change: filter` hints chromium/WebView2). Without the
-     hint the compositor can fold it back into the main surface and re-run the
-     full-screen blur under every panel repaint (UI glitch oscillation at best,
-     saturated compositor → whole-PC freeze at worst). The layer is also fed a
-     downscaled bitmap (see read_image) so the GPU upload stays cheap. */
-  will-change: filter, transform;
+  will-change: filter;
   display: none;
 }
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--app-bg-next-image, none) center / cover no-repeat;
+  filter: blur(var(--app-bg-blur, 12px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
+  will-change: filter;
+  display: none;
+  opacity: 0;
+  transform: scale(var(--artwork-next-zoom, 1.24));
+  transform-origin: center;
+  transition: opacity 180ms ease;
+}
 body.has-bg::before { display: block; }
+body.has-bg.artwork-theme::after { display: block; }
 body.has-bg { background: #000; }
 body.artwork-theme::before {
   opacity: 1;
   transform: scale(var(--artwork-zoom, 1.24));
   transform-origin: center;
-  transition: opacity .18s ease, filter .18s ease;
+  transition: opacity 180ms ease, filter 180ms ease;
 }
-body.artwork-theme.artwork-switching::before { opacity: .58; }
+body.artwork-crossfade::after { opacity: 1; }
 body.artwork-theme,
+body.artwork-theme .nav-bar,
 body.artwork-theme .sidebar,
 body.artwork-theme .main,
-body.artwork-theme .player { transition: background-color .18s ease, color .18s ease, border-color .18s ease; }
+body.artwork-theme .np-drawer,
+body.artwork-theme .player { transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease; }
 body.no-anim.artwork-theme::before,
+body.no-anim.artwork-theme::after,
 body.no-anim.artwork-theme,
+body.no-anim.artwork-theme .nav-bar,
 body.no-anim.artwork-theme .sidebar,
 body.no-anim.artwork-theme .main,
+body.no-anim.artwork-theme .np-drawer,
 body.no-anim.artwork-theme .player { transition: none; }
-body.no-anim.artwork-theme.artwork-switching::before { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   body.artwork-theme::before,
+  body.artwork-theme::after,
   body.artwork-theme,
+  body.artwork-theme .nav-bar,
   body.artwork-theme .sidebar,
   body.artwork-theme .main,
+  body.artwork-theme .np-drawer,
   body.artwork-theme .player { transition: none; }
-  body.artwork-theme.artwork-switching::before { opacity: 1; }
 }
 /* Every surface — panels, menus AND modals — uses the same panel-alpha
    tint, so the whole UI is uniformly see-through; the Panel opacity slider drives
@@ -791,6 +806,7 @@ body.bg-light.has-bg {
   --tx-1: #111318; --tx-2: #27303f; --tx-3: #374151;
   --bd: rgba(0, 0, 0, .10); --bd-2: rgba(0, 0, 0, .18);
   --bg-2: rgba(0, 0, 0, .05); --bg-3: rgba(0, 0, 0, .08); --bg-4: rgba(0, 0, 0, .14);
+  --field-border: rgba(0, 0, 0, .26);
   --text-shadow-color: rgba(255, 255, 255, .92);
 }
 body.bg-light.has-bg .sidebar,
@@ -1635,34 +1651,34 @@ body.bg-light .select {
    shell must not leave a second frame of gutters around it. Internal controls
    keep their own surfaces; only the app-level seams lose their decoration. */
 body.artwork-theme.has-bg .app {
-  gap: 0;
-  padding: 0;
+  gap: 8px;
+  padding: 8px;
   margin-right: 0;
 }
 body.artwork-theme.has-bg .nav-bar,
 body.artwork-theme.has-bg .player {
-  margin: 0;
-  border-radius: 0;
+  border-radius: var(--r);
+  border: 1px solid var(--icon-border);
+}
+body.artwork-theme.has-bg .nav-bar {
+  margin: 8px calc(8px + var(--safe-right, 0px)) 0 calc(8px + var(--safe-left, 0px));
 }
 body.artwork-theme.has-bg :where(.sidebar, .main, .np-drawer) {
-  border-radius: 0;
-  border: 0;
+  border-radius: var(--r);
+  border: 1px solid var(--icon-border);
 }
 body.artwork-theme.has-bg .rs-handle {
-  top: 0;
-  bottom: 0;
+  top: 8px;
+  bottom: 8px;
 }
 body.artwork-theme.has-bg #sideResize {
-  left: var(--side-w, 268px);
+  left: calc(var(--side-w, 268px) + 8px);
 }
 body.artwork-theme.has-bg .np-drawer {
-  top: 0;
+  top: calc(var(--nav-bottom, 61px) + 8px);
   right: var(--safe-right, 0px);
   bottom: var(--player-top, 118px);
 }
 body.artwork-theme.has-bg.np-push .app {
-  margin-right: var(--np-eff, 330px);
-}
-body.artwork-theme.has-bg.np-push .nav-bar {
-  margin-right: calc(var(--np-eff, 330px) + var(--safe-right, 0px));
+  margin-right: calc(var(--np-eff, 330px) + 8px);
 }

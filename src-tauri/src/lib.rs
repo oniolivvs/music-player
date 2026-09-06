@@ -10,7 +10,6 @@ mod rpc;
 mod store;
 mod stream;
 mod share;
-mod gdrive;
 mod ota;
 mod single_instance;
 pub mod youtube;
@@ -125,6 +124,11 @@ fn audio_error(state: State<AppState>) -> Option<String> {
     state.audio.take_error()
 }
 
+#[tauri::command]
+fn invalidate_stream(id: String, yt: State<youtube::YtState>) {
+    youtube::invalidate_url(&yt, &id);
+}
+
 /// Opened audio-output device config ("48000 Hz · 2 ch · F32"), "" if none.
 /// On Android, appends whether the ndk_context JNI bridge fired.
 #[tauri::command]
@@ -197,12 +201,12 @@ async fn resolve_stream_url(
         match ytnative::stream_url(id).await {
             Ok(u) => Ok(u),
             Err(e) if !ytnative::forced() => {
-                youtube::resolve(yt, cfg, id).map_err(|ne| format!("{e} | {ne}"))
+                youtube::resolve_async(yt, cfg, id).await.map_err(|ne| format!("{e} | {ne}"))
             }
             Err(e) => Err(e),
         }
     } else {
-        match youtube::resolve(yt, cfg, id) {
+        match youtube::resolve_async(yt, cfg, id).await {
             Ok(u) => Ok(u),
             Err(e) => ytnative::stream_url(id).await.map_err(|ne| format!("{e} | {ne}")),
         }
@@ -220,8 +224,12 @@ async fn play_stream(
     yt: State<'_, youtube::YtState>,
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<u64, String> {
+    let request = state.audio.begin_stream_request();
     let url = resolve_stream_url(&yt, &cfg, &id).await?;
-    Ok(state.audio.play_url(url, gain, Some(reresolver(&id))))
+    if !state.audio.stream_request_current(request) {
+        return Err("stream play cancelled".into());
+    }
+    Ok(state.audio.play_url_current(url, gain, Some(reresolver(&id)), request))
 }
 
 /// A callback the audio stream calls to get a FRESH URL when a connection 403s
@@ -259,8 +267,12 @@ async fn preload_stream(
     yt: State<'_, youtube::YtState>,
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<(), String> {
+    let request = state.audio.current_stream_request();
     let url = resolve_stream_url(&yt, &cfg, &id).await?;
-    state.audio.preload_url(url, gain, Some(reresolver(&id)));
+    if !state.audio.stream_request_current(request) {
+        return Err("stream preload cancelled".into());
+    }
+    state.audio.preload_url_current(url, gain, Some(reresolver(&id)), request);
     Ok(())
 }
 
@@ -896,7 +908,6 @@ pub fn run() {
         .manage(youtube::DlState::default())
         .manage(mpris::MediaState::default())
         .manage(share::ShareState::default())
-        .manage(gdrive::GDriveState::default())
         .setup(|app| {
             let app_data = app.path()
                 .app_data_dir()
@@ -919,9 +930,8 @@ pub fn run() {
             source_version, self_update, restart_app, list_versions, switch_version,
             latest_release, open_url, download_apk, install_apk, download_installer, run_installer,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
-            gdrive::gdrive_sign_in, gdrive::gdrive_sign_out, gdrive::gdrive_set_tokens, gdrive::gdrive_account, gdrive::gdrive_pull, gdrive::gdrive_push,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
-            play_stream, preload_stream, prefetch_stream, play_direct, preload_direct,
+            play_stream, preload_stream, prefetch_stream, play_direct, preload_direct, invalidate_stream,
             reset_stream_progress,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_recommendations, youtube::yt_trending,

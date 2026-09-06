@@ -13,6 +13,7 @@ import {
   trimArtworkPaletteCache,
   artworkZoomForViewport,
   createGenerationGuard,
+  createSharedArtworkPreparation,
   createArtworkThemeState,
 } from "../src/artwork-theme.mjs";
 
@@ -196,14 +197,41 @@ test("the wallpaper stylesheet always centers and covers the full window", async
   assert.doesNotMatch(stylesheet, /background:\s*var\(--app-bg-image, none\)[^;]*var\(--app-bg-size/);
 });
 
-test("artwork mode removes outer layout gutters so the cover is full bleed", async () => {
+test("artwork mode keeps layout gutters and borders", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.app\s*\{[^}]*gap:\s*0[^}]*padding:\s*0/s);
-  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.nav-bar,\s*\nbody\.artwork-theme\.has-bg\s+\.player\s*\{[^}]*margin:\s*0/s);
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.app\s*\{[^}]*gap:\s*8px[^}]*padding:\s*8px/s);
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+\.nav-bar\s*\{[^}]*margin:\s*8px/s);
   assert.match(
     stylesheet,
-    /body\.artwork-theme\.has-bg\s+:where\(\.sidebar, \.main, \.np-drawer\)\s*\{[^}]*border-radius:\s*0[^}]*border:\s*0/s,
+    /body\.artwork-theme\.has-bg\s+:where\(\.sidebar, \.main, \.np-drawer\)\s*\{[^}]*border-radius:\s*var\(--r\)[^}]*border:\s*1px solid var\(--icon-border\)/s,
   );
+});
+
+test("a failed replacement retains the committed artwork", async () => {
+  let restored = 0, retained = 0;
+  const state = createArtworkThemeState({
+    analyze: async () => { throw new Error("decode"); },
+    apply() {},
+    restore: async () => { restored++; },
+    retain: async () => { retained++; },
+  });
+  await assert.rejects(state.use("next"), /decode/);
+  assert.equal(retained, 1);
+  assert.equal(restored, 0);
+});
+
+test("identical artwork preparations share one load", async () => {
+  let resolveLoad, calls = 0;
+  const prepare = createSharedArtworkPreparation(() => {
+    calls++;
+    return new Promise(resolve => { resolveLoad = resolve; });
+  });
+  const first = prepare("cover");
+  const second = prepare("cover");
+  assert.equal(calls, 1);
+  resolveLoad("ready");
+  assert.equal(await first, "ready");
+  assert.equal(await second, "ready");
 });
 
 test("dynamic artwork blur stays sharp and respects lower user values", () => {

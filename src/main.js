@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation } from "./artwork-theme.mjs";
 import { clampVolumePercent } from "./player-controls.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
@@ -722,13 +722,7 @@ function artworkDataIsUsable(value) {
   });
 }
 
-async function analyzeArtwork(src) {
-  if (_artworkPaletteCache.has(src)) {
-    const cached = _artworkPaletteCache.get(src);
-    _artworkPaletteCache.delete(src);
-    _artworkPaletteCache.set(src, cached);
-    return cached;
-  }
+const prepareArtworkData = createSharedArtworkPreparation(async (src) => {
   let imageSrc = src;
   if (/^https?:\/\//.test(src) && IS_NATIVE) {
     try {
@@ -764,29 +758,82 @@ async function analyzeArtwork(src) {
   const result = palette ? { palette, imageSrc, width: artworkSize.width, height: artworkSize.height } : null;
   cacheArtworkPalette(src, result);
   return result;
+});
+
+async function analyzeArtwork(src) {
+  if (_artworkPaletteCache.has(src)) {
+    const cached = _artworkPaletteCache.get(src);
+    _artworkPaletteCache.delete(src);
+    _artworkPaletteCache.set(src, cached);
+    return cached;
+  }
+  return prepareArtworkData(src);
 }
+
+const ARTWORK_FADE_MS = 180;
+let _artworkTransitionToken = 0;
 
 function applyArtworkTheme(src, result) {
   if (!S().artworkTheme) return;
+  const token = ++_artworkTransitionToken;
   const root = document.documentElement.style;
   ++_themeApplySeq;
   for (const [name, value] of Object.entries(cssVarsForPalette(result.palette))) root.setProperty(name, value);
   root.setProperty("--app-bg-blur", `${artworkBlurPx(S().bgBlur)}px`);
   root.setProperty("--text-shadow-blur", `${Math.max(2, Math.min(18, artworkBlurPx(S().bgBlur) * 0.6))}px`);
-  _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
-  updateArtworkZoom();
-  const background = artworkBackgroundStyle(result.imageSrc);
-  root.setProperty("--app-bg-image", background.image);
-  document.body.classList.add("has-bg", "artwork-theme", "artwork-switching");
   const text = result.palette.text;
   document.body.classList.toggle("bg-light", (text.r + text.g + text.b) / 3 < 80);
-  requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove("artwork-switching")));
-  diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
+
+  const nextZoom = artworkZoomForViewport(
+    result.width || 0,
+    result.height || 0,
+    window.innerWidth,
+    window.innerHeight,
+  );
+  const background = artworkBackgroundStyle(result.imageSrc);
+  const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const noAnim = !S().anim || document.body.classList.contains("no-anim") || reduceMotion;
+  const hasCurrentBg = document.body.classList.contains("artwork-theme") && Boolean(root.getPropertyValue("--app-bg-image"));
+
+  if (noAnim || !hasCurrentBg) {
+    _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
+    root.setProperty("--artwork-zoom", nextZoom.toFixed(3));
+    root.setProperty("--app-bg-image", background.image);
+    root.removeProperty("--app-bg-next-image");
+    root.removeProperty("--artwork-next-zoom");
+    document.body.classList.remove("artwork-crossfade");
+    document.body.classList.add("has-bg", "artwork-theme");
+    diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
+    return;
+  }
+
+  root.setProperty("--app-bg-next-image", background.image);
+  root.setProperty("--artwork-next-zoom", nextZoom.toFixed(3));
+  document.body.classList.add("has-bg", "artwork-theme");
+
+  requestAnimationFrame(() => {
+    if (_artworkTransitionToken !== token) return;
+    document.body.classList.add("artwork-crossfade");
+    setTimeout(() => {
+      if (_artworkTransitionToken !== token) return;
+      _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
+      root.setProperty("--artwork-zoom", nextZoom.toFixed(3));
+      root.setProperty("--app-bg-image", background.image);
+      root.removeProperty("--app-bg-next-image");
+      root.removeProperty("--artwork-next-zoom");
+      document.body.classList.remove("artwork-crossfade");
+      diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
+    }, ARTWORK_FADE_MS);
+  });
 }
 
 function restoreManualTheme() {
+  ++_artworkTransitionToken;
   _currentArtworkSize = { width: 0, height: 0 };
-  document.body.classList.remove("artwork-theme");
+  const root = document.documentElement.style;
+  root.removeProperty("--app-bg-next-image");
+  root.removeProperty("--artwork-next-zoom");
+  document.body.classList.remove("artwork-theme", "artwork-crossfade");
   return applyTheme(true);
 }
 
@@ -794,12 +841,15 @@ const _artworkThemeState = createArtworkThemeState({
   analyze: analyzeArtwork,
   apply: applyArtworkTheme,
   restore: restoreManualTheme,
+  retain(error) {
+    diagnostics.record("warn", "theme", "artwork_retained", `Artwork replacement unusable; committed artwork retained: ${String(error || "").slice(0, 140)}`);
+  },
 });
 
 function scheduleArtworkTheme(src) {
   if (!S().artworkTheme) return Promise.resolve(null);
   return _artworkThemeState.use(src).catch(error => {
-    diagnostics.record("warn", "theme", "artwork_failed", `Artwork background failed; manual theme restored: ${String(error).slice(0, 140)}`);
+    diagnostics.record("warn", "theme", "artwork_failed", `Artwork background failed; committed artwork retained: ${String(error).slice(0, 140)}`);
     return null;
   });
 }
@@ -4981,25 +5031,53 @@ async function hardPlay(i) {
   mediaPlayback();
   // Optionally cache a streamed shared track to the local library as it plays.
   if (_remote?.saveLocal && String(path).startsWith("remote:")) shareSaveRemote(t);
+  scheduleArtworkWarmup(seq);
   await schedulePreload();
 }
+
+let _preloadFor = null;
 async function schedulePreload() {
+  const expectedSeq = playSeq;
   const j = S().preloadNext ? nextIndex(curIndex) : -1;
-  queueSettled = false;
   if (j >= 0 && j !== curIndex) {
+    if (_preloadFor === j) return;
+    _preloadFor = j;
+    queueSettled = false;
     preIndex = j; expectedQueued = 2;
     const path = effectivePath(queue[j]);
     const t = trackByPath(path) || trackByPath(queue[j]);
-    try { await startSource("preload", path, gainFor(t)); }
+    try {
+      await startSource("preload", path, gainFor(t));
+      if (expectedSeq === playSeq) queueSettled = true;
+    }
     catch (e) {
       // Preload failed (e.g. stream resolve error): expect only the current
       // track in the sink, so end-of-track recovery can kick in instead of
       // waiting forever for a second entry that will never arrive.
       console.warn("[preload]", e);
-      preIndex = -1; expectedQueued = 1;
+      if (expectedSeq === playSeq) {
+        preIndex = -1; expectedQueued = 1; _preloadFor = null; queueSettled = true;
+      }
     }
   }
-  else { preIndex = -1; expectedQueued = 1; }
+  else {
+    _preloadFor = null;
+    if (expectedSeq === playSeq) {
+      preIndex = -1; expectedQueued = 1; queueSettled = true;
+    }
+  }
+}
+
+function scheduleArtworkWarmup(expectedSeq = playSeq) {
+  const run = () => {
+    if (expectedSeq !== playSeq || !playing || curIndex < 0) return;
+    const index = nextIndex(curIndex);
+    const track = index >= 0 ? trackByPath(effectivePath(queue[index])) || trackByPath(queue[index]) : null;
+    const source = track?.thumbnail || (track ? coverCache.get(albumKey(track)) : "");
+    if (source) prepareArtworkData(source).catch(() => {});
+  };
+  if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 1200 });
+  else setTimeout(run, 650);
 }
 // Sink silently emptied while paused (rodio keeps background-buffering a paused
 // http stream until the queue drains) → resume() replays NOTHING, no error. If
@@ -5312,7 +5390,7 @@ function applyUiPrefs() {
   $("#pickBtn").hidden = !s.uiSrcButtons;
   $("#manualBtn").hidden = !s.uiSrcButtons;
   $("#secPlaylists").hidden = !s.uiPlaylists;
-  $("#importBtn").hidden = !s.uiImportBtn;
+  if ($("#importBtn")) $("#importBtn").hidden = !s.uiImportBtn;
   // Hide the whole row, not just the select: the sort icon lives beside it now,
   // so hiding the select alone would leave a stray icon on an empty strip.
   // Derive the inline display from the column headers so toggling the setting
@@ -5326,7 +5404,7 @@ function applyUiPrefs() {
   }
   $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
   document.body.classList.toggle("np-docked", !!s.npDocked);
-  $("#npPin").classList.toggle("active", !!s.npDocked);
+  $("#npPin")?.classList.toggle("active", !!s.npDocked);
   $("#shuffleBtn").hidden = s.uiPlayerShuffle === false;
   $("#repeatBtn").hidden = s.uiPlayerRepeat === false;
   $(".volume").hidden = s.uiPlayerVolume === false;
@@ -7294,7 +7372,7 @@ async function init() {
   initResizers();
   // Small screens (Android/narrow windows): the sidebar is an overlay behind ☰,
   // with a full-screen backdrop so a modal opened underneath can't bleed through.
-  $("#sideToggle").addEventListener("click", () => toggleSidebar());
+  $("#sideToggle")?.addEventListener("click", () => toggleSidebar());
   $("#sideBackdrop").addEventListener("click", () => toggleSidebar(false));
   $(".sidebar").addEventListener("click", (e) => {
     if (window.innerWidth <= 700 && e.target.closest(".nav-item, .pl-row, .src-row")) toggleSidebar(false);
@@ -7409,7 +7487,7 @@ async function init() {
     }
   });
 
-  $("#importBtn").addEventListener("click", openImportPick);
+  $("#importBtn")?.addEventListener("click", openImportPick);
   $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
@@ -7485,8 +7563,8 @@ async function init() {
   };
   document.querySelector(".now").addEventListener("contextmenu", ctxOnPlaying);
   for (const sel of ["#ovArt", "#ovTitle", "#ovSub", "#ovMeta"]) $(sel).addEventListener("contextmenu", ctxOnPlaying);
-  $("#npClose").addEventListener("click", () => toggleNpPanel(false));
-  $("#npPin").addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); updateNpPush(); });
+  $("#npClose")?.addEventListener("click", () => toggleNpPanel(false));
+  $("#npPin")?.addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); updateNpPush(); });
   document.querySelectorAll(".ss-toggle").forEach(el => el.addEventListener("click", () => {
     const key = el.dataset.coll;
     SETTINGS.setSetting(key, !S()[key]);

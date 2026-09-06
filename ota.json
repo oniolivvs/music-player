@@ -10,7 +10,8 @@
     "artwork-theme.mjs",
     "cleanup.mjs",
     "player-controls.mjs",
-    "library-actions.mjs"
+    "library-actions.mjs",
+    "ui-controls.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
