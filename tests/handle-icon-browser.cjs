@@ -25,14 +25,21 @@ const assert = require('node:assert/strict');
       icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 5h7l2 2h9v12H3z"/></svg>';
       const svgRect = icon.querySelector('svg').getBoundingClientRect();
       const labelRect = button.querySelector('.ni-lbl').getBoundingClientRect();
+      const afterStyle = window.getComputedStyle(handle, '::after');
       return {
         topInset: handleRect.top - panelRect.top,
         bottomInset: panelRect.bottom - handleRect.bottom,
+        handleWidth: handleRect.width,
+        traitWidth: afterStyle.width,
+        traitLeft: afterStyle.left,
         iconTextDelta: (svgRect.top + svgRect.bottom - labelRect.top - labelRect.bottom) / 2,
       };
     });
     assert.ok(Math.abs(result.topInset - 8) < 0.5, JSON.stringify(result));
     assert.ok(Math.abs(result.bottomInset - 8) < 0.5, JSON.stringify(result));
+    assert.equal(result.handleWidth, 8, JSON.stringify(result));
+    assert.equal(result.traitWidth, '2px', JSON.stringify(result));
+    assert.equal(result.traitLeft, '3px', JSON.stringify(result));
     assert.ok(Math.abs(result.iconTextDelta + 1) < 0.25, JSON.stringify(result));
     console.log(JSON.stringify(result));
   } finally { await browser.close(); }

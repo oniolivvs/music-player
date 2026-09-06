@@ -29,5 +29,8 @@ test("artwork layout keeps the hot bar full width and aligns Now Playing below i
   assert.match(css, /body\.artwork-theme\.has-bg :where\(\.sidebar, \.main, \.np-drawer\)[\s\S]*gap|border:/);
   assert.match(css, /body\.artwork-theme\.has-bg\.np-push \.app\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff,[^}]*\+\s*8px/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*61px\)\s*\+\s*8px\)/s);
+  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*right:\s*calc\(8px\s*\+\s*var\(--safe-right,\s*0px\)\)/s);
+  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*bottom:\s*calc\(var\(--player-top,\s*118px\)\s*\+\s*8px\)/s);
+  assert.match(css, /\.rs-handle::after\s*\{[^}]*left:\s*3px;[^}]*width:\s*2px;/s);
   assert.doesNotMatch(css, /body\.artwork-theme\.has-bg[^}]*\.nav-bar\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff/s);
 });

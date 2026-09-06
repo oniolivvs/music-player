@@ -41,7 +41,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.118";
+const SRC_VERSION = "0.22.119";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -7247,7 +7247,7 @@ function initResizers() {
   });
   wireResizer("#npResize", {
     min: 250, max: 560, def: 330, setting: "npW", cssVar: "--np-w",
-    widthFrom: (ev) => window.innerWidth - 10 - ev.clientX, // drawer is right-anchored (right: 10px)
+    widthFrom: (ev) => window.innerWidth - 8 - ev.clientX, // drawer is right-anchored (right: calc(8px + var(--safe-right, 0px)))
   });
 }
 
