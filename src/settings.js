@@ -28,6 +28,7 @@ const DEFAULTS = {
   showArt: true,
   compactRows: false,
   animations: true,
+  artworkTransitionMs: 500,
   smoothScroll: true,    // eased scrolling on lists/panels (Performance group)
   smoothStrength: 3,     // smooth-scroll intensity 1 (subtle) … 5 (long glide)
   defaultVolume: 80,
@@ -118,6 +119,12 @@ const DEFAULTS = {
 
 let _s = { ...DEFAULTS };
 
+export function normalizeArtworkTransitionMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULTS.artworkTransitionMs;
+  return Math.min(5000, Math.max(0, Math.round(numeric)));
+}
+
 export function resetSettings() {
   _s = { ...DEFAULTS };
   void storeSaveQuietly("settings", JSON.stringify(_s));
@@ -151,6 +158,9 @@ export async function loadSettings() {
         parsed.npDockModeVersion = 1;
         needsSave = true;
       }
+      const transitionMs = normalizeArtworkTransitionMs(parsed.artworkTransitionMs);
+      if (transitionMs !== parsed.artworkTransitionMs) needsSave = true;
+      parsed.artworkTransitionMs = transitionMs;
       _s = { ...DEFAULTS, ...parsed };
       if (needsSave) void storeSaveQuietly("settings", JSON.stringify(_s));
     } catch {}
@@ -162,6 +172,7 @@ export function getSettings() { return _s; }
 
 let _saveTimer = null;
 export function setSetting(key, value) {
+  if (key === "artworkTransitionMs") value = normalizeArtworkTransitionMs(value);
   if (_s[key] === value) return;
   _s[key] = value;
   clearTimeout(_saveTimer);

@@ -297,6 +297,29 @@ export function createGenerationGuard() {
   };
 }
 
+export function createPlaybackArtworkGate() {
+  let generation = 0;
+  let current = "";
+  let source = "";
+  let hasSource = false;
+  return {
+    select(identity = "") {
+      current = `${++generation}:${String(identity)}`;
+      return current;
+    },
+    isCurrent(token) { return Boolean(token) && token === current; },
+    acceptSource(token, candidate = "") {
+      if (!token || token !== current) return false;
+      const next = String(candidate || "");
+      if (hasSource && next === source) return false;
+      source = next;
+      hasSource = true;
+      return true;
+    },
+    clearSource() { source = ""; hasSource = false; },
+  };
+}
+
 export function createSharedArtworkPreparation(load) {
   const pending = new Map();
   return source => {

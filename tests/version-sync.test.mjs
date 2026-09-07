@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const VERSION = "0.22.121";
+const VERSION = "0.22.122";
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 
 test("native and OTA release markers stay synchronized", async () => {

@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.121 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.122 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -681,6 +681,9 @@ body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
 .num-in { width: 88px; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
 .num-in:focus { border-color: var(--accent); }
 body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+.transition-duration-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: min(100%, 300px); color: var(--tx-2); font-size: 12px; }
+.transition-duration-control input[type="range"] { flex: 1 1 150px; min-width: 90px; }
+.transition-duration-control .num-in { width: 78px; text-align: right; }
 .set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
 .diag-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .diag-toolbar .text-in { flex: 1 1 150px; min-width: 120px; }
@@ -723,7 +726,7 @@ body::after {
   opacity: 0;
   transform: scale(var(--artwork-next-zoom, 1.24));
   transform-origin: center;
-  transition: opacity 180ms ease;
+  transition: opacity var(--artwork-transition-ms, 500ms) ease;
 }
 body.has-bg::before { display: block; }
 body.has-bg.artwork-theme::after { display: block; }
@@ -732,7 +735,7 @@ body.artwork-theme::before {
   opacity: 1;
   transform: scale(var(--artwork-zoom, 1.24));
   transform-origin: center;
-  transition: opacity 180ms ease, filter 180ms ease;
+  transition: opacity var(--artwork-transition-ms, 500ms) ease, filter var(--artwork-transition-ms, 500ms) ease;
 }
 body.artwork-crossfade::after { opacity: 1; }
 body.artwork-theme,
@@ -740,7 +743,7 @@ body.artwork-theme .nav-bar,
 body.artwork-theme .sidebar,
 body.artwork-theme .main,
 body.artwork-theme .np-drawer,
-body.artwork-theme .player { transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease; }
+body.artwork-theme .player { transition: background-color var(--artwork-transition-ms, 500ms) ease, color var(--artwork-transition-ms, 500ms) ease, border-color var(--artwork-transition-ms, 500ms) ease; }
 body.no-anim.artwork-theme::before,
 body.no-anim.artwork-theme::after,
 body.no-anim.artwork-theme,

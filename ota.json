@@ -1,5 +1,5 @@
 {
-  "version": "0.22.121",
+  "version": "0.22.122",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -15,7 +15,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Dynamic artwork backgrounds now use the best available YouTube cover, stay center-cropped at 118%, and keep the top bar, panels, and hot bar on the same palette tint with adaptive text contrast over blurred covers.",
+  "notes": "Artwork stays synchronized with the selected track after restoring playback, crossfades only after the next cover is ready, and exposes a persisted 0–5000 ms transition control in Settings (500 ms by default).",
   "platforms": [
     "linux",
     "windows",

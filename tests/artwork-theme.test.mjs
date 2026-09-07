@@ -413,7 +413,19 @@ test("a new artwork request invalidates a prepared previous transition", async (
   assert.deepEqual(events, [["begin", "old"], ["begin", "new"]]);
 });
 
-test("artwork replacements crossfade for 500 milliseconds", async () => {
-  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
-  assert.match(main, /const ARTWORK_FADE_MS = 500;/);
+test("playback artwork rejects completions from an older track selection", async () => {
+  const module = await import("../src/artwork-theme.mjs");
+  assert.equal(typeof module.createPlaybackArtworkGate, "function");
+  const gate = module.createPlaybackArtworkGate();
+  const restored = gate.select("track-a");
+  assert.equal(gate.acceptSource(restored, "cover-a"), true);
+  const playing = gate.select("track-a");
+  assert.equal(gate.acceptSource(playing, "cover-a"), false);
+  const next = gate.select("track-b");
+
+  assert.equal(gate.isCurrent(restored), false);
+  assert.equal(gate.isCurrent(playing), false);
+  assert.equal(gate.isCurrent(next), true);
+  assert.equal(gate.acceptSource(restored, "cover-old"), false);
+  assert.equal(gate.acceptSource(next, "cover-b"), true);
 });

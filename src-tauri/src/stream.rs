@@ -356,6 +356,7 @@ impl HttpStream {
         self.len
     }
 
+    #[allow(dead_code)] // used by the standalone stream_test example
     pub fn open(url: String, rr: Option<ReResolve>) -> Result<Self, String> {
         Self::open_capped(url, rr, CAP, None)
     }

@@ -6,7 +6,7 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
-import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation } from "./artwork-theme.mjs";
+import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation, createPlaybackArtworkGate } from "./artwork-theme.mjs";
 import { clampVolumePercent } from "./player-controls.mjs";
 import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
@@ -42,7 +42,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.121";
+const SRC_VERSION = "0.22.122";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -110,6 +110,7 @@ const cleanupPlaybackGeneration = createGenerationGuard();
 let curIndex = -1, preIndex = -1;
 let expectedQueued = 0, queueSettled = false;
 let curEpoch = 0; // tags the current sink; stale status polls are ignored
+const _playbackArtworkGate = createPlaybackArtworkGate();
 let playing = false, shuffle = false, normalize = true;
 // Restored-from-last-session state: the track is shown paused at _resumePos but
 // the engine hasn't started it yet — the first Play hard-starts it and seeks.
@@ -287,8 +288,9 @@ function pickStill(list, token, alive, done) {
   tryNext();
 }
 
-function setArtImg(el, url) {
-  if (el.id === "npArt") setCurrentArtwork(url);
+function setArtImg(el, url, artworkToken = el?.dataset?.playbackArtworkToken) {
+  if (el.id === "npArt" && artworkToken && !_playbackArtworkGate.isCurrent(artworkToken)) return;
+  if (el.id === "npArt") setCurrentArtwork(url, artworkToken);
   el.style.background = ""; el.textContent = ""; el.classList.add("has-cover");
   // The Now-playing panel is the one place a bigger still is worth fetching.
   if (!IS_ANDROID && el.classList.contains("ov-art") && /^https?:\/\//.test(url)) {
@@ -584,9 +586,13 @@ function seams(diff, n, max) {
   return null;
 }
 
-function setArtPlaceholder(el, t) {
-  el.classList.remove("has-cover"); el.style.backgroundImage = "";
-  el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
+function setArtPlaceholder(el, t, artworkToken = "") {
+  const retainReadyCover = el.id === "npArt" && el.classList.contains("has-cover");
+  if (artworkToken) el.dataset.playbackArtworkToken = artworkToken;
+  if (!retainReadyCover) {
+    el.classList.remove("has-cover"); el.style.backgroundImage = "";
+    el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
+  }
   el.dataset.album = albumKey(t);
   // Back to the stylesheet's default shape until we know the next cover's, or
   // the previous track's ratio lingers over the placeholder.
@@ -779,8 +785,11 @@ async function analyzeArtwork(src) {
   return prepareArtworkData(src);
 }
 
-const ARTWORK_FADE_MS = 500;
 let _artworkTransitionToken = 0;
+
+function artworkFadeMs() {
+  return SETTINGS.normalizeArtworkTransitionMs(S().artworkTransitionMs);
+}
 
 function applyArtworkTheme(src, result, isCurrent = () => true) {
   if (!S().artworkTheme || !isCurrent()) return;
@@ -802,7 +811,7 @@ function applyArtworkTheme(src, result, isCurrent = () => true) {
   );
   const background = artworkBackgroundStyle(result.imageSrc);
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const noAnim = !S().anim || document.body.classList.contains("no-anim") || reduceMotion;
+  const noAnim = !S().animations || document.body.classList.contains("no-anim") || reduceMotion;
   const hasCurrentBg = document.body.classList.contains("artwork-theme") && Boolean(root.getPropertyValue("--app-bg-image"));
 
   if (noAnim || !hasCurrentBg) {
@@ -833,7 +842,7 @@ function applyArtworkTheme(src, result, isCurrent = () => true) {
       root.removeProperty("--artwork-next-zoom");
       document.body.classList.remove("artwork-crossfade");
       diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
-    }, ARTWORK_FADE_MS);
+    }, artworkFadeMs());
   });
 }
 
@@ -873,8 +882,12 @@ function scheduleArtworkTheme(src) {
   });
 }
 
-function setCurrentArtwork(src) {
-  _currentArtworkSrc = String(src || "");
+function setCurrentArtwork(src, artworkToken = "") {
+  if (artworkToken && !_playbackArtworkGate.isCurrent(artworkToken)) return;
+  const next = String(src || "");
+  if (artworkToken && !_playbackArtworkGate.acceptSource(artworkToken, next)) return;
+  if (!artworkToken && !next) _playbackArtworkGate.clearSource();
+  _currentArtworkSrc = next;
   if (S().artworkTheme) scheduleArtworkTheme(_currentArtworkSrc);
 }
 
@@ -4906,6 +4919,7 @@ function nextIndex(from, manual = false) {
   return -1;
 }
 function updateNowPlaying(t, path) {
+  const artworkToken = _playbackArtworkGate.select(path || t?.path || "");
   setPlayIcon(true);
   // innerHTML rather than textContent: the title carries the storage badge, so
   // you can tell at a glance whether what is playing needs the network.
@@ -4915,12 +4929,12 @@ function updateNowPlaying(t, path) {
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
   const art = $("#npArt");
   if (t) {
-    setArtPlaceholder(art, t);
+    setArtPlaceholder(art, t, artworkToken);
     if (S().showArt) {
-      if (t.thumbnail) setArtImg(art, t.thumbnail);
+      if (t.thumbnail) setArtImg(art, t.thumbnail, artworkToken);
       else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
-    } else setCurrentArtwork("");
-  } else setCurrentArtwork("");
+    } else setCurrentArtwork("", artworkToken);
+  } else setCurrentArtwork("", artworkToken);
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   const sk = $("#seek");
@@ -5983,6 +5997,7 @@ async function applyTheme(manualOnly = false) {
   root.setProperty("--text-shadow-blur", `${Math.max(2, Math.min(18, Math.min(s.bgBlur ?? 18, 12) * 0.6))}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
   root.setProperty("--panel-alpha", String(s.panelAlpha ?? 85));
+  root.setProperty("--artwork-transition-ms", `${SETTINGS.normalizeArtworkTransitionMs(s.artworkTransitionMs)}ms`);
   if (keepArtwork) {
     scheduleArtworkTheme(_currentArtworkSrc);
     return;
@@ -6188,6 +6203,8 @@ function openSettings() {
           <button id="setBgClear" class="btn-line sm" title="Remove background">${IC.x}</button>
         </span></div>
       <div class="set-row"><label>Match background and colors to current artwork <span class="set-sub">Fills the window by cropping when needed; never stretches the cover.</span></label><input type="checkbox" id="setArtworkTheme" ${s.artworkTheme ? "checked" : ""}></div>
+      <div class="set-row"><label>Artwork transition <span class="set-sub">(0–5000 ms)</span></label>
+        <span class="transition-duration-control"><input type="range" id="setArtworkTransition" min="0" max="5000" step="50" value="${SETTINGS.normalizeArtworkTransitionMs(s.artworkTransitionMs)}"><input type="number" id="setArtworkTransitionNumber" class="num-in" min="0" max="5000" step="50" value="${SETTINGS.normalizeArtworkTransitionMs(s.artworkTransitionMs)}"><span>ms</span></span></div>
       <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
       <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
       <div class="set-row"><label>Text on wallpaper</label>
@@ -6495,6 +6512,15 @@ function openSettings() {
     if (e.target.checked) scheduleArtworkTheme(_currentArtworkSrc);
     else _artworkThemeState.use("").catch(error => console.error("[theme] restore", error));
   });
+  const updateArtworkTransition = value => {
+    const ms = SETTINGS.normalizeArtworkTransitionMs(value);
+    SETTINGS.setSetting("artworkTransitionMs", ms);
+    $("#setArtworkTransition").value = String(ms);
+    $("#setArtworkTransitionNumber").value = String(ms);
+    document.documentElement.style.setProperty("--artwork-transition-ms", `${ms}ms`);
+  };
+  $("#setArtworkTransition").addEventListener("input", e => updateArtworkTransition(e.target.value));
+  $("#setArtworkTransitionNumber").addEventListener("change", e => updateArtworkTransition(e.target.value));
   $("#setBgBlur").addEventListener("input", e => { SETTINGS.setSetting("bgBlur", Number(e.target.value)); applyTheme(); });
   $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
   $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });

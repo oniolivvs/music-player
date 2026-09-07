@@ -2,6 +2,7 @@
 //! HttpStream and decodes samples through rodio, without needing an audio device
 //! or the GUI. Usage: cargo run --example stream_test -- <direct-audio-url>
 
+#[allow(dead_code)]
 #[path = "../src/stream.rs"]
 mod stream;
 

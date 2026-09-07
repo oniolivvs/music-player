@@ -17,6 +17,7 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'u
       document.documentElement.style.setProperty('--app-bg-image', 'url("data:image/png;base64,aaa")');
       document.documentElement.style.setProperty('--app-bg-next-image', 'url("data:image/png;base64,bbb")');
       document.documentElement.style.setProperty('--artwork-next-zoom', '1.35');
+      document.documentElement.style.setProperty('--artwork-transition-ms', '500ms');
 
       const beforeStyle = getComputedStyle(document.body, '::before');
       const afterStyle = getComputedStyle(document.body, '::after');
@@ -27,7 +28,7 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'u
       const initialAfterTransition = afterStyle.transition;
 
       document.body.classList.add('artwork-crossfade');
-      await new Promise(resolve => setTimeout(resolve, 350));
+      await new Promise(resolve => setTimeout(resolve, 650));
       const crossfadeAfterOpacity = getComputedStyle(document.body, '::after').opacity;
 
       document.body.classList.add('no-anim');
@@ -48,8 +49,8 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'u
     assert.match(result.beforeImage, /data:image\/png;base64,aaa/, '::before must hold current image');
     assert.match(result.afterImage, /data:image\/png;base64,bbb/, '::after must hold next incoming image');
     assert.equal(result.initialAfterOpacity, '0', '::after opacity must be 0 before crossfade');
-    assert.match(result.initialAfterTransition, /opacity\s*(?:0\.18s|180ms)/, '::after transition must animate opacity for 180ms');
-    assert.equal(result.crossfadeAfterOpacity, '1', '::after opacity must be 1 with artwork-crossfade class');
+    assert.match(result.initialAfterTransition, /opacity\s*(?:0\.5s|500ms)/, '::after transition must use the configured 500ms duration');
+    assert.ok(Number(result.crossfadeAfterOpacity) > 0.99, '::after opacity must finish the artwork crossfade');
     assert.match(result.noAnimTransition, /none|0s/, 'no-anim or reduced motion must disable transition');
   } finally {
     await browser.close();
