@@ -266,6 +266,11 @@ test("wide-window zoom also crops horizontal artwork margins", () => {
   assert.ok(wideWindow >= 1.30, `horizontal fill zoom is too small: ${wideWindow}`);
 });
 
+test("artwork zoom crops pillarboxed thumbnails to fill the full window", () => {
+  const pillarboxed = artworkZoomForViewport(1280, 720, 1024, 700, 1280 / 720);
+  assert.ok(pillarboxed >= 2.0 && pillarboxed <= 2.5, `expected pillarbox crop zoom: ${pillarboxed}`);
+});
+
 test("artwork theme gives every editable field palette-driven colors", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   const rule = stylesheet.match(/body\.artwork-theme\s+:where\((.*?)\)\s*\{([^}]*)\}/s);

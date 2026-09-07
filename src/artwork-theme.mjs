@@ -219,23 +219,26 @@ export function artworkBlurPx(value) {
 // Extra crop for the wallpaper layer. `background-size: cover` still does the
 // aspect-ratio work; this scale only hides edge seams and adapts to the window
 // and artwork shapes without ever stretching pixels.
-export function artworkZoomForViewport(imageWidth, imageHeight, viewportWidth, viewportHeight) {
+export function artworkZoomForViewport(imageWidth, imageHeight, viewportWidth, viewportHeight, padCrop = 1) {
   const iw = Number(imageWidth);
   const ih = Number(imageHeight);
   const vw = Number(viewportWidth);
   const vh = Number(viewportHeight);
-  if (![iw, ih, vw, vh].every(value => Number.isFinite(value) && value > 0)) return 1.24;
+  const pad = Math.max(1, Number.isFinite(Number(padCrop)) ? Number(padCrop) : 1);
+  if (![iw, ih, vw, vh].every(value => Number.isFinite(value) && value > 0)) return 1.24 * pad;
   const imageRatio = iw / ih;
   const viewportRatio = vw / vh;
   const cropMismatch = Math.max(imageRatio / viewportRatio, viewportRatio / imageRatio);
   const areaFactor = Math.sqrt((vw * vh) / (1100 * 720));
   // `cover` performs the aspect-ratio crop; this second scale makes the cover
   // fill the full-bleed layer when a source contains letterbox-like margins.
-  // Keep it bounded so the image stays recognisable on very wide windows.
-  const zoom = 1.24
+  // When the source has letterbox or pillarbox bars (pad > 1), we scale the
+  // zoom by pad so the inner artwork completely fills the background.
+  const baseZoom = 1.24
     + Math.max(0, cropMismatch - 1) * 0.14
     + Math.max(0, areaFactor - 1) * 0.04;
-  return Math.max(1.24, Math.min(1.48, zoom));
+  const maxCap = pad > 1.05 ? 2.5 : 1.48;
+  return Math.max(1.24 * pad, Math.min(maxCap, baseZoom * pad));
 }
 
 export function artworkDimensionsAreUsable(width, height) {

@@ -32,6 +32,7 @@ const assert = require('node:assert/strict');
         handleWidth: handleRect.width,
         traitWidth: afterStyle.width,
         traitLeft: afterStyle.left,
+        traitOpacity: afterStyle.opacity,
         iconTextDelta: (svgRect.top + svgRect.bottom - labelRect.top - labelRect.bottom) / 2,
       };
     });
@@ -40,6 +41,7 @@ const assert = require('node:assert/strict');
     assert.equal(result.handleWidth, 8, JSON.stringify(result));
     assert.equal(result.traitWidth, '2px', JSON.stringify(result));
     assert.equal(result.traitLeft, '3px', JSON.stringify(result));
+    assert.equal(result.traitOpacity, '0', JSON.stringify(result));
     assert.ok(Math.abs(result.iconTextDelta + 1) < 0.25, JSON.stringify(result));
     console.log(JSON.stringify(result));
   } finally { await browser.close(); }

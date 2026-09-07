@@ -41,7 +41,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.119";
+const SRC_VERSION = "0.22.120";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -736,13 +736,22 @@ const prepareArtworkData = createSharedArtworkPreparation(async (src) => {
     }
     catch { throw new Error("remote artwork proxy failed"); }
   }
-  let artworkSize = { width: 0, height: 0 };
+  let artworkSize = { width: 0, height: 0, padCrop: 1 };
   const pixels = await new Promise((resolve, reject) => {
     const img = new Image();
     if (/^https?:\/\//.test(imageSrc)) img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
-        artworkSize = { width: img.naturalWidth, height: img.naturalHeight };
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+        let padCrop = 1;
+        try {
+          const box = contentBox(img, W, H);
+          if (box && box.w > 0 && box.h > 0) {
+            padCrop = Math.max(box.W / box.w, box.H / box.h);
+          }
+        } catch {}
+        artworkSize = { width: W, height: H, padCrop };
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 24;
         const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -755,7 +764,7 @@ const prepareArtworkData = createSharedArtworkPreparation(async (src) => {
     img.src = imageSrc;
   });
   const palette = paletteFromPixels(pixels);
-  const result = palette ? { palette, imageSrc, width: artworkSize.width, height: artworkSize.height } : null;
+  const result = palette ? { palette, imageSrc, width: artworkSize.width, height: artworkSize.height, padCrop: artworkSize.padCrop || 1 } : null;
   cacheArtworkPalette(src, result);
   return result;
 });
@@ -789,6 +798,7 @@ function applyArtworkTheme(src, result) {
     result.height || 0,
     window.innerWidth,
     window.innerHeight,
+    result.padCrop || 1,
   );
   const background = artworkBackgroundStyle(result.imageSrc);
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -796,7 +806,7 @@ function applyArtworkTheme(src, result) {
   const hasCurrentBg = document.body.classList.contains("artwork-theme") && Boolean(root.getPropertyValue("--app-bg-image"));
 
   if (noAnim || !hasCurrentBg) {
-    _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
+    _currentArtworkSize = { width: result.width || 0, height: result.height || 0, padCrop: result.padCrop || 1 };
     root.setProperty("--artwork-zoom", nextZoom.toFixed(3));
     root.setProperty("--app-bg-image", background.image);
     root.removeProperty("--app-bg-next-image");
@@ -816,7 +826,7 @@ function applyArtworkTheme(src, result) {
     document.body.classList.add("artwork-crossfade");
     setTimeout(() => {
       if (_artworkTransitionToken !== token) return;
-      _currentArtworkSize = { width: result.width || 0, height: result.height || 0 };
+      _currentArtworkSize = { width: result.width || 0, height: result.height || 0, padCrop: result.padCrop || 1 };
       root.setProperty("--artwork-zoom", nextZoom.toFixed(3));
       root.setProperty("--app-bg-image", background.image);
       root.removeProperty("--app-bg-next-image");
@@ -829,7 +839,7 @@ function applyArtworkTheme(src, result) {
 
 function restoreManualTheme() {
   ++_artworkTransitionToken;
-  _currentArtworkSize = { width: 0, height: 0 };
+  _currentArtworkSize = { width: 0, height: 0, padCrop: 1 };
   const root = document.documentElement.style;
   root.removeProperty("--app-bg-next-image");
   root.removeProperty("--artwork-next-zoom");
@@ -866,6 +876,7 @@ function updateArtworkZoom() {
     _currentArtworkSize.height,
     window.innerWidth,
     window.innerHeight,
+    _currentArtworkSize.padCrop || 1,
   );
   document.documentElement.style.setProperty("--artwork-zoom", zoom.toFixed(3));
 }
@@ -7265,22 +7276,31 @@ async function init() {
   // `+ 8px` in the CSS then gives the same gap on all four sides.
   (() => {
     const pl = document.querySelector(".player");
-    if (!pl) return;
-    // Only touch the CSS var when the value actually moved: writing to :root
-    // invalidates style for the whole document, and this fires on every tiny
-    // player height change (track title wrap etc.).
+    const nav = document.querySelector(".nav-bar");
+    if (!pl && !nav) return;
     let lastTop = -1;
+    let lastNavBottom = -1;
     const publish = () => {
-      const top = Math.round(window.innerHeight - pl.getBoundingClientRect().top);
-      if (top === lastTop) return;
-      lastTop = top;
-      document.documentElement.style.setProperty("--player-top", top + "px");
+      if (pl) {
+        const top = Math.round(window.innerHeight - pl.getBoundingClientRect().top);
+        if (top !== lastTop) {
+          lastTop = top;
+          document.documentElement.style.setProperty("--player-top", top + "px");
+        }
+      }
+      if (nav) {
+        const bottom = Math.round(nav.getBoundingClientRect().bottom);
+        if (bottom !== lastNavBottom) {
+          lastNavBottom = bottom;
+          document.documentElement.style.setProperty("--nav-bottom", bottom + "px");
+        }
+      }
     };
     publish();
-    // ResizeObserver catches the player growing (wrapped title, taller layout);
-    // the resize listener catches a viewport height change that leaves the
-    // player's own box the same size — which the observer never reports.
-    if (typeof ResizeObserver === "function") new ResizeObserver(publish).observe(pl);
+    if (typeof ResizeObserver === "function") {
+      if (pl) new ResizeObserver(publish).observe(pl);
+      if (nav) new ResizeObserver(publish).observe(nav);
+    }
     window.addEventListener("resize", publish);
   })();
   // Column layout follows the track list's own width. An observer on the element
