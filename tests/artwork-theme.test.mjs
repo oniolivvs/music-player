@@ -335,7 +335,7 @@ test("a slow previous cover cannot overwrite the current cover", async () => {
   pending.get("first")({ accent: "red" });
   await first;
 
-  assert.deepEqual(applied, [["second", { accent: "blue" }]]);
+  assert.deepEqual(applied.map(args => args.slice(0, 2)), [["second", { accent: "blue" }]]);
 });
 
 test("a stale artwork rejection is ignored without restoring the manual theme", async () => {
@@ -356,7 +356,7 @@ test("a stale artwork rejection is ignored without restoring the manual theme", 
 
   pending.get("second").resolve({ accent: "blue" });
   await second;
-  assert.deepEqual(applied, [["second", { accent: "blue" }]]);
+  assert.deepEqual(applied.map(args => args.slice(0, 2)), [["second", { accent: "blue" }]]);
 });
 
 test("missing artwork restores the manual theme and invalidates pending work", async () => {
@@ -391,4 +391,24 @@ test("cancelling artwork prevents a pending palette from being applied", async (
   await pending;
 
   assert.deepEqual(applied, []);
+});
+
+test("a new artwork request invalidates a prepared previous transition", async () => {
+  const events = [];
+  let oldIsCurrent;
+  const state = createArtworkThemeState({
+    analyze: async src => ({ src }),
+    begin: src => events.push(["begin", src]),
+    apply: (src, _palette, isCurrent) => {
+      if (src === "old") oldIsCurrent = isCurrent;
+    },
+    restore() {},
+  });
+
+  await state.use("old");
+  const next = state.use("new");
+
+  assert.equal(oldIsCurrent(), false);
+  await next;
+  assert.deepEqual(events, [["begin", "old"], ["begin", "new"]]);
 });

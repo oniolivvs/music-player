@@ -8,6 +8,7 @@ import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation } from "./artwork-theme.mjs";
 import { clampVolumePercent } from "./player-controls.mjs";
+import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import {
   buildCleanupActionLayout,
@@ -584,7 +585,6 @@ function seams(diff, n, max) {
 }
 
 function setArtPlaceholder(el, t) {
-  if (el.id === "npArt") setCurrentArtwork("");
   el.classList.remove("has-cover"); el.style.backgroundImage = "";
   el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
   el.dataset.album = albumKey(t);
@@ -782,8 +782,8 @@ async function analyzeArtwork(src) {
 const ARTWORK_FADE_MS = 180;
 let _artworkTransitionToken = 0;
 
-function applyArtworkTheme(src, result) {
-  if (!S().artworkTheme) return;
+function applyArtworkTheme(src, result, isCurrent = () => true) {
+  if (!S().artworkTheme || !isCurrent()) return;
   const token = ++_artworkTransitionToken;
   const root = document.documentElement.style;
   ++_themeApplySeq;
@@ -822,10 +822,10 @@ function applyArtworkTheme(src, result) {
   document.body.classList.add("has-bg", "artwork-theme");
 
   requestAnimationFrame(() => {
-    if (_artworkTransitionToken !== token) return;
+    if (_artworkTransitionToken !== token || !isCurrent()) return;
     document.body.classList.add("artwork-crossfade");
     setTimeout(() => {
-      if (_artworkTransitionToken !== token) return;
+      if (_artworkTransitionToken !== token || !isCurrent()) return;
       _currentArtworkSize = { width: result.width || 0, height: result.height || 0, padCrop: result.padCrop || 1 };
       root.setProperty("--artwork-zoom", nextZoom.toFixed(3));
       root.setProperty("--app-bg-image", background.image);
@@ -835,6 +835,14 @@ function applyArtworkTheme(src, result) {
       diagnostics.record("info", "theme", "artwork_applied", "Artwork palette applied");
     }, ARTWORK_FADE_MS);
   });
+}
+
+function beginArtworkRequest() {
+  ++_artworkTransitionToken;
+  const root = document.documentElement.style;
+  root.removeProperty("--app-bg-next-image");
+  root.removeProperty("--artwork-next-zoom");
+  document.body.classList.remove("artwork-crossfade");
 }
 
 function restoreManualTheme() {
@@ -850,6 +858,7 @@ function restoreManualTheme() {
 const _artworkThemeState = createArtworkThemeState({
   analyze: analyzeArtwork,
   apply: applyArtworkTheme,
+  begin: beginArtworkRequest,
   restore: restoreManualTheme,
   retain(error) {
     diagnostics.record("warn", "theme", "artwork_retained", `Artwork replacement unusable; committed artwork retained: ${String(error || "").slice(0, 140)}`);
@@ -4910,7 +4919,7 @@ function updateNowPlaying(t, path) {
     if (S().showArt) {
       if (t.thumbnail) setArtImg(art, t.thumbnail);
       else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
-    }
+    } else setCurrentArtwork("");
   } else setCurrentArtwork("");
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
@@ -6712,6 +6721,12 @@ function addFollow({ url, title, playlistId, autoDownload, knownIds, skipIds }) 
 }
 
 async function checkFollow(f, manual = false) {
+  const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
+  if (!pl) {
+    if (f.enabled !== false) { f.enabled = false; saveFollows(); renderPlaylists(); }
+    if (manual) flash(`“${f.title}”: target playlist no longer exists`);
+    return 0;
+  }
   let res;
   try { res = await invoke("yt_playlist", { url: f.url }); }
   catch (e) { console.warn("[follow]", f.title, e); if (manual) flash(`“${f.title}”: check failed — ${e}`); return 0; }
@@ -6721,7 +6736,6 @@ async function checkFollow(f, manual = false) {
   const known = new Set(f.knownIds || []);
   const skip = new Set(f.skipIds || []); // unticked at import — never restore these
   const brandNew = tracks.filter(t => !known.has(ytId(t.path)) && !skip.has(ytId(t.path)));
-  const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
   // A known track is "missing" only if we really don't have it: its local copy
   // replaces its yt: path in the playlist on download, so a raw path check would
   // flag EVERY downloaded follow as missing → autoDownload re-downloaded the
@@ -7323,6 +7337,11 @@ async function init() {
     } else window.addEventListener("resize", updateNarrowClasses);
   })();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadSuppressed(), loadDeclined(), loadHistory(), loadBlocked(), loadPlays()]);
+  const followRepair = disableOrphanedFollows(follows, PL.getPlaylists());
+  if (followRepair.changed) {
+    follows = followRepair.follows;
+    saveFollows();
+  }
   await loadLibrary();
   // Tell the backend which folders it may delete inside, before anything can
   // ask it to. Resolve the actual writable download destination here too: an

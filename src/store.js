@@ -22,9 +22,25 @@ export async function storeLoadStrict(key) {
   return localStorage.getItem("mp." + key) || "";
 }
 
-export async function storeSave(key, data) {
+const saveTails = new Map();
+
+async function rawStoreSave(key, data) {
   if (IS_NATIVE) return await T.core.invoke("store_save", { key, data });
   localStorage.setItem("mp." + key, data);
+}
+
+// Native writes are atomic individually, but callers intentionally do not await
+// most UI saves. Keep invocation order per key so a slow old snapshot can never
+// rename over the newer playback/download state. Unrelated keys stay parallel.
+export function storeSave(key, data) {
+  const previous = saveTails.get(key);
+  const write = previous
+    ? previous.catch(() => {}).then(() => rawStoreSave(key, data))
+    : rawStoreSave(key, data);
+  saveTails.set(key, write);
+  return write.finally(() => {
+    if (saveTails.get(key) === write) saveTails.delete(key);
+  });
 }
 
 // Ordinary UI preferences remain best-effort. Cleanup uses storeSave directly

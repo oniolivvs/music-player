@@ -308,12 +308,13 @@ export function createSharedArtworkPreparation(load) {
   };
 }
 
-export function createArtworkThemeState({ analyze, apply, restore, retain = () => {} }) {
+export function createArtworkThemeState({ analyze, apply, restore, retain = () => {}, begin = () => {} }) {
   const guard = createGenerationGuard();
   return {
-    cancel() { guard.next(); },
+    cancel() { guard.next(); begin(""); },
     async use(src) {
       const token = guard.next();
+      begin(src);
       if (!src) {
         await restore();
         return null;
@@ -325,7 +326,7 @@ export function createArtworkThemeState({ analyze, apply, restore, retain = () =
           await retain(null);
           return null;
         }
-        apply(src, palette);
+        apply(src, palette, () => guard.isCurrent(token));
         return palette;
       } catch (error) {
         if (!guard.isCurrent(token)) return null;
