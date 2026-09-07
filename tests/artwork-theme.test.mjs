@@ -412,3 +412,8 @@ test("a new artwork request invalidates a prepared previous transition", async (
   await next;
   assert.deepEqual(events, [["begin", "old"], ["begin", "new"]]);
 });
+
+test("artwork replacements crossfade for 500 milliseconds", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /const ARTWORK_FADE_MS = 500;/);
+});
