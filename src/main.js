@@ -42,7 +42,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.122";
+const SRC_VERSION = "0.22.123";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5082,7 +5082,8 @@ async function schedulePreload() {
     const t = trackByPath(path) || trackByPath(queue[j]);
     try {
       await startSource("preload", path, gainFor(t));
-      if (expectedSeq === playSeq) queueSettled = true;
+      // Command acceptance only starts preparation. The status poll owns the
+      // transition to "settled" once the backend reports both queued sources.
     }
     catch (e) {
       // Preload failed (e.g. stream resolve error): expect only the current

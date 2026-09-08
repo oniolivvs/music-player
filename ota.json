@@ -1,5 +1,5 @@
 {
-  "version": "0.22.122",
+  "version": "0.22.123",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -15,7 +15,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Artwork stays synchronized with the selected track after restoring playback, crossfades only after the next cover is ready, and exposes a persisted 0–5000 ms transition control in Settings (500 ms by default).",
+  "notes": "Fixes restored-playback desynchronization by waiting for the audio backend to confirm that the next source is queued before advancing artwork and metadata.",
   "platforms": [
     "linux",
     "windows",

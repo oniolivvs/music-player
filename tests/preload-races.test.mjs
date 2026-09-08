@@ -29,6 +29,19 @@ test('a late preload rejection cannot reset the new playback queue', async () =>
   assert.equal(c.preIndex,2); assert.equal(c.expectedQueued,2); assert.equal(c.queueSettled,true);
 });
 
+test('accepted preload stays unsettled until the backend appends it', async () => {
+  const c = harness(async () => undefined);
+  await c.schedulePreload();
+  const backendQueuedSources = 1;
+  assert.equal(c.expectedQueued, 2);
+  assert.equal(c.queueSettled, false);
+  assert.equal(
+    c.queueSettled && backendQueuedSources < c.expectedQueued && c.preIndex >= 0,
+    false,
+    'command acceptance must not look like a completed gapless transition',
+  );
+});
+
 const warmStart = source.indexOf("function scheduleArtworkWarmup(");
 const warmFn = warmStart >= 0 ? source.slice(warmStart, source.indexOf("\n}", warmStart) + 2) : "function scheduleArtworkWarmup() {}";
 
