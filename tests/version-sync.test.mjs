@@ -2,17 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const VERSION = "0.22.123";
+const VERSION = "0.22.124";
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 
 test("native and OTA release markers stay synchronized", async () => {
-  const [ota, main, css, cargo, lock, tauri] = await Promise.all([
+  const [ota, main, css, cargo, lock, tauri, pkg, pkgLock] = await Promise.all([
     read("../ota.json"),
     read("../src/main.js"),
     read("../src/style.css"),
     read("../src-tauri/Cargo.toml"),
     read("../src-tauri/Cargo.lock"),
     read("../src-tauri/tauri.conf.json"),
+    read("../package.json"),
+    read("../package-lock.json"),
   ]);
 
   assert.equal(JSON.parse(ota).version, VERSION);
@@ -21,4 +23,7 @@ test("native and OTA release markers stay synchronized", async () => {
   assert.match(cargo, new RegExp(`^version = "${VERSION.replaceAll(".", "\\.")}"$`, "m"));
   assert.match(lock, new RegExp(`name = "music-player"\\r?\\nversion = "${VERSION.replaceAll(".", "\\.")}"`));
   assert.equal(JSON.parse(tauri).version, VERSION);
+  assert.equal(JSON.parse(pkg).version, VERSION);
+  assert.equal(JSON.parse(pkgLock).version, VERSION);
+  assert.equal(JSON.parse(pkgLock).packages[""].version, VERSION);
 });

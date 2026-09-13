@@ -669,8 +669,8 @@ pub async fn download(
         }
         out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
         done += n as u64;
-        if total > 0 {
-            let pct = ((done * 100) / total) as i32;
+        if let Some(pct) = done.saturating_mul(100).checked_div(total) {
+            let pct = pct as i32;
             if pct != last_pct {
                 last_pct = pct;
                 let _ = app.emit("dl", serde_json::json!({ "id": id, "pct": pct }));

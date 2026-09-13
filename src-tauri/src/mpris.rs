@@ -1,19 +1,7 @@
-//! Desktop media integration.
-//! - **Linux** : MPRIS over D-Bus (KDE/GNOME widgets, playerctl).
-//! - **Windows** : SMTC — the OS media flyout, the volume OSD and, crucially,
-//!   headset media keys (play/pause/skip sent over Bluetooth/USB) all go through
-//!   it. Without this module being a no-op on Windows, Music Player never showed
-//!   up and the headset buttons did nothing on it.
-//! - **macOS** : MPNowPlayingInfoCenter (souvlaki's backend).
+//! Windows SMTC integration for the media flyout, volume OSD and headset keys.
+//!
 //! Commands push state from the frontend; widget/media-key actions come back as
 //! "media" Tauri events the frontend listens to.
-//!
-//! souvlaki's MPRIS backend is only compiled on Linux (the `use_zbus` feature is
-//! declared there); on Windows souvlaki is pulled with NO platform feature, so
-//! it builds its native SMTC backend — exactly what the OS flyout and headsets
-//! use. We never import the raw `souvlaki::platform` path from here; the whole
-//! crate re-exports `MediaControls` at the root, which keeps this file portable
-//! across all desktop OSes.
 
 #[cfg(not(target_os = "android"))]
 use souvlaki::{
@@ -101,7 +89,7 @@ fn ensure_with_hwnd(app: &AppHandle, state: &MediaState) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn fetch_hwnd(app: &AppHandle) -> Option<*mut std::ffi::c_void> {
     let win = app.get_webview_window("main")?;
-    win.hwnd().ok().map(|h| h.0 as *mut std::ffi::c_void)
+    win.hwnd().ok().map(|h| h.0)
 }
 
 #[cfg(not(target_os = "android"))]

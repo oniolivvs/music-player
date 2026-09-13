@@ -1,22 +1,15 @@
 # 🎵 Music Player
 
-A **native, local-first** desktop music player (Tauri + Rust audio engine).
+A **native, local-first Windows music player** (Tauri + Rust audio engine).
+
+Supported platform: **Windows 10/11 only**. Linux, Android and macOS builds are
+not produced or supported.
 
 ## Install
 
-Prebuilt bundles are produced by the release workflow (push a `v*` tag → GitHub
-Release with Linux `.AppImage`/`.deb`/`.rpm` and a Windows `-setup.exe`).
+Prebuilt Windows NSIS installers are produced by the release workflow.
 
-**Linux (any distro), one line:**
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/oniolivvs/music-player/main/install.sh | bash
-```
-
-It picks the `.deb`/`.rpm` for your package manager, or falls back to the
-portable AppImage. Pin a version with `MP_VERSION=v0.9.2`.
-
-**Windows (PowerShell), one line:**
+**PowerShell:**
 
 ```powershell
 irm https://raw.githubusercontent.com/oniolivvs/music-player/main/install.ps1 | iex
@@ -25,14 +18,13 @@ irm https://raw.githubusercontent.com/oniolivvs/music-player/main/install.ps1 | 
 Or download and run the `*-setup.exe` from the release page. Once the manifests
 in [`winget/`](winget/) are published: `winget install oniolivvs.MusicPlayer`.
 
-> `yt-dlp` and `ffmpeg` are fetched automatically on first use (Linux). On
-> Windows, install them and put them on `PATH`.
+The built-in YouTube engine works without extra binaries. `yt-dlp` is an
+optional booster and can be installed from the app settings.
 
 ## Build from source
 
-Needs the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
-(Rust + WebKitGTK 4.1 on Linux). Then `cd src-tauri && cargo build --release`, or
-`cargo tauri build` for the packaged bundles.
+Install the [Tauri v2 Windows prerequisites](https://v2.tauri.app/start/prerequisites/),
+then run `npm install` and `npm run build`.
 
 ## What it does
 
@@ -53,10 +45,8 @@ Needs the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
     locally* when importing a playlist) saves tracks as mp3 via yt-dlp into the
     Settings → Downloads folder (default `~/Music/MusicPlayer`), auto-adds that
     folder as a source and swaps playlist entries to the local files.
-- **Desktop media integration (MPRIS)**: the player registers as
-  `org.mpris.MediaPlayer2.musicplayer` on D-Bus (souvlaki/zbus), so KDE/GNOME
-  media widgets, `playerctl` and media keys see the current track (title,
-  artist, artwork, position) and can control play/pause/next/seek.
+- **Windows media integration (SMTC)**: the volume flyout, media keys and
+  Bluetooth/USB headset controls see the current track and can control playback.
 - Optionally **syncs YouTube Music library metadata** (playlists, likes) read-only via
   Google OAuth2 — as organizational reference only. See `docs/oauth-sync.md`.
 
@@ -65,8 +55,8 @@ Needs the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 > reversed by the project owner, who explicitly requested yt-dlp-based search,
 > import and streaming modeled on their own download script. Be aware that
 > stream extraction sits outside YouTube's Terms of Service; this stays a
-> personal-use tool. Requires `yt-dlp` on the machine (PATH, `~/Desktop/bin`,
-> `~/.local/bin`, or linuxbrew).
+> personal-use tool. The native engine needs no external executable; `yt-dlp`
+> remains an optional fallback.
 
 ## Architecture
 
@@ -85,7 +75,7 @@ music-player/
 │   │   ├── audio.rs        Audio engine: dedicated thread + mpsc + rodio Sink (epoch-tagged)
 │   │   ├── stream.rs       HTTP range-request Read+Seek source (instant streaming)
 │   │   ├── youtube.rs      yt-dlp bridge: search, playlists, URL resolve+cache, downloads
-│   │   ├── mpris.rs        MPRIS D-Bus media controls (souvlaki) → desktop widgets
+│   │   ├── mpris.rs        Windows SMTC media controls (souvlaki)
 │   │   ├── rpc.rs          Discord Rich Presence (IPC, auto-reconnect)
 │   │   ├── library.rs      Filesystem scan + tag reading (lofty)
 │   │   ├── store.rs        Generic JSON key-value persistence (atomic writes)
@@ -107,48 +97,20 @@ Module boundaries (each folder = one responsibility):
 
 ## Prerequisites
 
-- **Rust** (stable) + Cargo — <https://rustup.rs>
-- **Node.js** ≥ 18 (only for the Tauri CLI)
-- Tauri v2 system deps: `webkit2gtk4.1-devel`, `alsa-lib-devel` (audio), `gtk3`,
-  `librsvg2-devel`, `libappindicator-gtk3-devel`, a C toolchain — see
-  <https://tauri.app/start/prerequisites/>.
-
-### On immutable/atomic distros (Bazzite, Silverblue, Kinoite…)
-
-`dnf` is disabled on the host by design. **Do all dev inside a Distrobox container**
-(mutable, rootless, no host password, shares your `$HOME` and display):
-
-```bash
-distrobox create --name dev --image registry.fedoraproject.org/fedora:41 --yes
-distrobox enter dev -- sudo dnf install -y \
-  webkit2gtk4.1-devel openssl-devel curl wget file librsvg2-devel \
-  libappindicator-gtk3-devel alsa-lib-devel gcc gcc-c++ nodejs
-distrobox enter dev -- sudo dnf group install -y "c-development"
-```
-
-Rust lives in `~/.cargo` (shared home), so it's available inside the container too.
+- Windows 10/11 with WebView2
+- **Rust** stable with the MSVC toolchain — <https://rustup.rs>
+- **Node.js** ≥ 18
+- Microsoft C++ Build Tools, as listed in the
+  [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ## Build & run
 
-```bash
-npm install          # installs @tauri-apps/cli (host is fine)
-
-# Inside the dev container (or directly if you have the toolchain on the host):
-cd music-player/src-tauri && cargo build
-
-# Launch the native window (embeds the static frontend — no dev server needed):
-./src-tauri/target/debug/music-player
+```powershell
+npm install
+npm test
+npm run dev
+npm run build
 ```
-
-For hot-reload development instead of a one-off binary:
-`npm run dev` (or inside the container: `distrobox enter dev -- bash -lc 'source ~/.cargo/env; cd ~/music-player && npm run dev'`).
-
-> ✅ **Verified** (2026-07): builds clean inside a Fedora 41 container (rodio 0.21 /
-> lofty 0.21 / tauri 2.11), `cargo build` → exit 0. Streaming pipeline verified
-> headlessly: a real YouTube m4a decoded over HTTP ranges (`cargo run --example
-> stream_test -- <url>`) and local mp3 decode + seek (`--example local_test`).
-> rodio was bumped 0.19 → 0.21: the isomp4 demuxer needs `with_byte_len()` to
-> probe YouTube's moov-after-mdat files, which 0.19 couldn't provide.
 
 ## Roadmap (opt-in, in order)
 

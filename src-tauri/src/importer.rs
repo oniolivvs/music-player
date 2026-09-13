@@ -89,7 +89,7 @@ fn api_get(token: &str, url: &str) -> Result<Value, String> {
 /// One API track object → ExtTrack. Playlist items wrap the track in `track`;
 /// album/single endpoints return it bare (and without an `album` object).
 fn track_of(v: &Value) -> Option<ExtTrack> {
-    let t = if v.get("track").map_or(false, |x| x.is_object()) { &v["track"] } else { v };
+    let t = if v.get("track").is_some_and(|x| x.is_object()) { &v["track"] } else { v };
     let title = t["name"].as_str()?.trim().to_string();
     if title.is_empty() {
         return None;
@@ -168,7 +168,7 @@ fn via_api(token: &str, kind: &str, id: &str) -> Result<ExtImport, String> {
 fn find_entity(v: &Value) -> Option<&Value> {
     match v {
         Value::Object(map) => {
-            if map.get("trackList").and_then(|t| t.as_array()).map_or(false, |a| !a.is_empty()) {
+            if map.get("trackList").and_then(|t| t.as_array()).is_some_and(|a| !a.is_empty()) {
                 return Some(v);
             }
             map.values().find_map(find_entity)

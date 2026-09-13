@@ -106,7 +106,7 @@ fn manifest_names_ok(m: &OtaManifest) -> bool {
     m.modules.iter().all(|n| safe_name(n))
         && safe_name(&m.entry)
         && safe_name(&m.css)
-        && m.html.as_ref().map_or(true, |h| safe_name(h))
+        && m.html.as_ref().is_none_or(|h| safe_name(h))
 }
 
 fn ota_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -228,19 +228,19 @@ pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
 }
 
 fn this_platform() -> &'static str {
-    if cfg!(target_os = "android") { "android" } else { std::env::consts::OS }
+    "windows"
 }
 
 fn targets_this_platform(m: &OtaManifest) -> bool {
     m.platforms
         .as_ref()
-        .map_or(true, |p| p.iter().any(|x| x == this_platform()))
+        .is_none_or(|p| p.iter().any(|x| x == this_platform()))
 }
 
 fn native_supports(m: &OtaManifest) -> bool {
     m.min_native
         .as_ref()
-        .map_or(true, |mn| ver_cmp(env!("CARGO_PKG_VERSION"), mn) >= 0)
+        .is_none_or(|mn| ver_cmp(env!("CARGO_PKG_VERSION"), mn) >= 0)
 }
 
 /// Ask the repo whether a newer frontend is available.

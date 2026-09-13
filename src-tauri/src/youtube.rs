@@ -1370,6 +1370,7 @@ fn is_definitive_refusal(e: &str) -> bool {
     .any(|s| m.contains(s))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn download_attempt(
     app: &AppHandle,
     dls: &DlState,

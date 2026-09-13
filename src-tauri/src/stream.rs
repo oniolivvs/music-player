@@ -428,7 +428,7 @@ impl Read for HttpStream {
                 let mut u = self.url.clone();
                 let resolver = if self.progress.0.2.load(std::sync::atomic::Ordering::Relaxed) { self.rr.clone() } else { None };
                 let (mut r, _) = connect_rr(&mut u, tail_start, self.len, &resolver)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    .map_err(io::Error::other)?;
                 let mut v = Vec::with_capacity(TAIL_SZ as usize);
                 let mut part = [0u8; CHUNK];
                 while v.len() < TAIL_SZ as usize {
@@ -481,7 +481,7 @@ impl Read for HttpStream {
                 return Ok(n);
             }
             if let Some(e) = &g.err {
-                return Err(io::Error::new(io::ErrorKind::Other, e.clone()));
+                return Err(io::Error::other(e.clone()));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {

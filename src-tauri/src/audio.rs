@@ -396,7 +396,7 @@ impl AudioController {
                             if stream_request_t.load(Ordering::SeqCst) == request {
                                 if let Some(s) = &guard.1 {
                                     match prepared {
-                                        Ok(dec) => append_source(&s, dec, gain, agc_on),
+                                        Ok(dec) => append_source(s, dec, gain, agc_on),
                                         Err(e) => {
                                             let clean = strip_url(&e);
                                             let msg = format!("can't preload this stream: {clean}");

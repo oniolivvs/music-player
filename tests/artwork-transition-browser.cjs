@@ -28,7 +28,9 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'u
       const initialAfterTransition = afterStyle.transition;
 
       document.body.classList.add('artwork-crossfade');
-      await new Promise(resolve => setTimeout(resolve, 650));
+      // Leave headroom above the 500 ms CSS duration: under CPU contention the
+      // compositor can start later than the page timer and still be mid-frame.
+      await new Promise(resolve => setTimeout(resolve, 1200));
       const crossfadeAfterOpacity = getComputedStyle(document.body, '::after').opacity;
 
       document.body.classList.add('no-anim');

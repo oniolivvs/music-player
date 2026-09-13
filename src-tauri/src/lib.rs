@@ -1,5 +1,7 @@
-//! Shared app core. Desktop (src/main.rs binary) and Android/iOS (Tauri mobile
-//! entry point below) both boot through `run()`.
+//! Windows-only app core, booted by the desktop binary in `src/main.rs`.
+
+#[cfg(not(target_os = "windows"))]
+compile_error!("Music Player is supported on Windows only.");
 
 mod audio;
 mod diagnostics;
@@ -130,17 +132,9 @@ fn invalidate_stream(id: String, yt: State<youtube::YtState>) {
 }
 
 /// Opened audio-output device config ("48000 Hz · 2 ch · F32"), "" if none.
-/// On Android, appends whether the ndk_context JNI bridge fired.
 #[tauri::command]
 fn audio_info(state: State<AppState>) -> String {
-    let base = state.audio.info();
-    #[cfg(target_os = "android")]
-    {
-        let ndk = if NDK_READY.load(std::sync::atomic::Ordering::Relaxed) { "ndk:ok" } else { "ndk:MISSING" };
-        return if base.is_empty() { format!("(no device) [{ndk}]") } else { format!("{base} [{ndk}]") };
-    }
-    #[allow(unreachable_code)]
-    base
+    state.audio.info()
 }
 
 /// Whether ndk_context now holds a non-null JavaVM (audio can open) — shown in
@@ -433,11 +427,7 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
-/// Per-platform update info from GitHub releases. Versions are effectively
-/// independent per platform: we return the newest release that actually ships
-/// an installer/APK for THIS OS, so an Android-only fix release doesn't show up
-/// as "newer" to Windows users (and vice-versa). `asset_url` is the direct
-/// download for this platform (APK on Android) — the frontend opens it.
+/// Windows update info from GitHub releases.
 #[derive(serde::Serialize, Default)]
 struct ReleaseInfo {
     version: String,
@@ -452,12 +442,10 @@ struct ReleaseInfo {
 /// '-' sorts before '_' in the asset names. Prefer the NSIS build explicitly;
 /// `run_installer` reads the extension back to pick the matching switch.
 fn pick_platform_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value> {
-    if cfg!(target_os = "windows") {
-        if let Some(a) = assets.iter().find(|a| {
-            a["name"].as_str().map(|n| n.to_lowercase().ends_with("-setup.exe")).unwrap_or(false)
-        }) {
-            return Some(a);
-        }
+    if let Some(a) = assets.iter().find(|a| {
+        a["name"].as_str().map(|n| n.to_lowercase().ends_with("-setup.exe")).unwrap_or(false)
+    }) {
+        return Some(a);
     }
     assets
         .iter()
@@ -466,15 +454,7 @@ fn pick_platform_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Valu
 
 fn platform_asset_match(name: &str) -> bool {
     let n = name.to_lowercase();
-    if cfg!(target_os = "android") {
-        n.ends_with(".apk")
-    } else if cfg!(target_os = "windows") {
-        n.ends_with(".exe") || n.ends_with(".msi")
-    } else if cfg!(target_os = "macos") {
-        n.ends_with(".dmg") || n.ends_with(".app.tar.gz")
-    } else {
-        n.ends_with(".appimage") || n.ends_with(".deb") || n.ends_with(".rpm")
-    }
+    n.ends_with(".exe") || n.ends_with(".msi")
 }
 
 /// Self-update downloads must come from GitHub (the release host) over HTTPS.
@@ -503,15 +483,10 @@ fn is_update_artifact(path: &str) -> bool {
 }
 
 fn platform_name() -> &'static str {
-    if cfg!(target_os = "android") { "android" }
-    else if cfg!(target_os = "windows") { "windows" }
-    else if cfg!(target_os = "macos") { "macos" }
-    else { "linux" }
+    "windows"
 }
 
-/// Open a URL in the system browser / installer, cross-platform incl. Android.
-/// Uses tauri-plugin-opener, which fires a proper ACTION_VIEW intent on Android
-/// (window.open does nothing from the WebView) — the mobile update download.
+/// Open a URL in the Windows default browser.
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -667,8 +642,8 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
                 if n == 0 { break; }
                 out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
                 done += n as u64;
-                if total > 0 {
-                    let pct = ((done * 100) / total) as i32;
+                if let Some(pct) = done.saturating_mul(100).checked_div(total) {
+                    let pct = pct as i32;
                     if pct != last {
                         last = pct;
                         let _ = app.emit("apkdl", serde_json::json!({ "pct": pct }));
@@ -868,7 +843,6 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
     do_build(&app)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Keep one desktop process per user session. A named OS mutex rejects a
     // second launch before Tauri creates another window or audio controller.
@@ -918,7 +892,7 @@ pub fn run() {
             let _ = diagnostics::record("info", "app", "start", "Music Player started");
             // Native YouTube engine cache (client versions, visitor data).
             ytnative::init_storage(app_data);
-            // Register on D-Bus right away so desktop media widgets see the player.
+            // Register with Windows media controls so system widgets see the player.
             let handle = app.handle();
             if let Err(e) = mpris::init(handle, &app.state::<mpris::MediaState>()) {
                 eprintln!("[mpris] init failed (desktop integration disabled): {e}");

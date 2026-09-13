@@ -192,20 +192,21 @@ struct OpenedDuplicateFile {
 }
 
 #[cfg(test)]
-static DUPLICATE_OPEN_HANDLES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-#[cfg(test)]
-static DUPLICATE_OPEN_HANDLE_PEAK: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    static DUPLICATE_OPEN_HANDLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DUPLICATE_OPEN_HANDLE_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 impl OpenedDuplicateFile {
     fn new(file: cap_std::fs::File) -> Self {
         #[cfg(test)]
         {
-            use std::sync::atomic::Ordering;
-
-            let current = DUPLICATE_OPEN_HANDLES.fetch_add(1, Ordering::SeqCst) + 1;
-            DUPLICATE_OPEN_HANDLE_PEAK.fetch_max(current, Ordering::SeqCst);
+            let current = DUPLICATE_OPEN_HANDLES.with(|handles| {
+                let current = handles.get() + 1;
+                handles.set(current);
+                current
+            });
+            DUPLICATE_OPEN_HANDLE_PEAK.with(|peak| peak.set(peak.get().max(current)));
         }
         Self { file }
     }
@@ -214,25 +215,21 @@ impl OpenedDuplicateFile {
 impl Drop for OpenedDuplicateFile {
     fn drop(&mut self) {
         #[cfg(test)]
-        DUPLICATE_OPEN_HANDLES.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        DUPLICATE_OPEN_HANDLES.with(|handles| handles.set(handles.get() - 1));
     }
 }
 
 #[cfg(test)]
 fn reset_duplicate_open_handle_stats() {
-    use std::sync::atomic::Ordering;
-
-    DUPLICATE_OPEN_HANDLES.store(0, Ordering::SeqCst);
-    DUPLICATE_OPEN_HANDLE_PEAK.store(0, Ordering::SeqCst);
+    DUPLICATE_OPEN_HANDLES.with(|handles| handles.set(0));
+    DUPLICATE_OPEN_HANDLE_PEAK.with(|peak| peak.set(0));
 }
 
 #[cfg(test)]
 fn duplicate_open_handle_stats() -> (usize, usize) {
-    use std::sync::atomic::Ordering;
-
     (
-        DUPLICATE_OPEN_HANDLES.load(Ordering::SeqCst),
-        DUPLICATE_OPEN_HANDLE_PEAK.load(Ordering::SeqCst),
+        DUPLICATE_OPEN_HANDLES.with(std::cell::Cell::get),
+        DUPLICATE_OPEN_HANDLE_PEAK.with(std::cell::Cell::get),
     )
 }
 
@@ -776,8 +773,11 @@ pub fn scan_library(roots: &[String]) -> Vec<Track> {
             }
         }
     }
-    tracks.sort_by(|a, b| (a.artist.to_lowercase(), a.album.to_lowercase(), a.title.to_lowercase())
-        .cmp(&(b.artist.to_lowercase(), b.album.to_lowercase(), b.title.to_lowercase())));
+    tracks.sort_by_key(|track| (
+        track.artist.to_lowercase(),
+        track.album.to_lowercase(),
+        track.title.to_lowercase(),
+    ));
     tracks
 }
 
@@ -802,9 +802,7 @@ pub async fn delete_file(path: String) -> Result<(), String> {
 pub fn open_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     let is_file = p.is_file();
-    let target = if is_file {
-        path.clone()
-    } else if p.is_dir() {
+    let target = if is_file || p.is_dir() {
         path.clone()
     } else {
         p.parent()
@@ -823,11 +821,11 @@ pub fn open_path(path: String) -> Result<(), String> {
                 .map(|_| ())
                 .map_err(|e| format!("cannot open file manager: {e}"));
         }
-        return std::process::Command::new("explorer")
+        std::process::Command::new("explorer")
             .arg(&target)
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("cannot open file manager: {e}"));
+            .map_err(|e| format!("cannot open file manager: {e}"))
     }
     #[cfg(target_os = "android")]
     {
@@ -1241,8 +1239,11 @@ pub fn scan_diff(roots: &[String], known: &HashSet<String>) -> ScanDiff {
             present.push(p);
         }
     }
-    new_tracks.sort_by(|a, b| (a.artist.to_lowercase(), a.album.to_lowercase(), a.title.to_lowercase())
-        .cmp(&(b.artist.to_lowercase(), b.album.to_lowercase(), b.title.to_lowercase())));
+    new_tracks.sort_by_key(|track| (
+        track.artist.to_lowercase(),
+        track.album.to_lowercase(),
+        track.title.to_lowercase(),
+    ));
     ScanDiff { new_tracks, present, complete }
 }
 
@@ -1534,7 +1535,7 @@ mod duplicate_file_tests {
         open_duplicate_file, open_duplicate_root, open_managed_file, register_root, safe_duplicate_input,
         reset_duplicate_open_handle_stats, unlink_managed_file, DuplicateDeletion,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -1757,7 +1758,7 @@ mod duplicate_file_tests {
         (root, keep, remove, root_path)
     }
 
-    fn duplicate_delete(keep: &PathBuf, remove: &PathBuf) -> Vec<super::DuplicateDeleteResult> {
+    fn duplicate_delete(keep: &Path, remove: &Path) -> Vec<super::DuplicateDeleteResult> {
         confirm_duplicate_deletions(vec![DuplicateDeletion {
             keep: canon(&keep.to_string_lossy()),
             remove: vec![canon(&remove.to_string_lossy())],

@@ -1,15 +1,14 @@
 [package]
 name = "music-player"
-version = "0.22.123"
+version = "0.22.124"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
 
-# Tauri 2 mobile (Android) loads the app as a shared library; desktop keeps the
-# plain binary. Both entry points call music_player_lib::run() (src/lib.rs).
+# The Windows binary calls music_player_lib::run() (src/lib.rs).
 [lib]
 name = "music_player_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,8 +17,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-# Open URLs/files via the OS default handler — the ONLY reliable way to open an
-# external browser from the Android WebView (window.open does nothing there).
+# Open URLs/files via the Windows default handler.
 tauri-plugin-opener = "2"
 discord-rich-presence = "0.2"
 serde = { version = "1", features = ["derive"] }
@@ -49,54 +47,23 @@ base64 = "0.22"
 # handed to the webview at full size — which is why only small ones worked.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 # LAN device sharing (src/share.rs): a tiny sync HTTP server (host) + the ureq
-# client already present. Pure-Rust, cross-compiles to Android.
+# client already present. Pure Rust, with no external executable.
 tiny_http = "0.12"
 local-ip-address = "0.6"
 sha2 = "0.10"
 getrandom = "0.3"
-# Native YouTube backend (Innertube client, NewPipe-style): powers search /
-# playlists / channels / streaming / downloads WITHOUT the yt-dlp binary —
-# mandatory on Android (yt-dlp's glibc build can't run on bionic), automatic
-# fallback on desktop. rustls+webpki so no OpenSSL/system CA is needed on
-# Android. src/ytnative.rs wraps it behind the same shapes as youtube.rs.
+# Native YouTube backend (Innertube client, NewPipe-style): powers search,
+# playlists, channels, streaming and downloads without the yt-dlp binary.
 rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-webpki-roots"] }
-# Only for building rustypipe's HTTP client with an IPv4-pinned source on Android
-# (googlevideo binds stream URLs to the resolving IP; Android's IPv6 privacy
-# addresses rotate → 403). Matches the reqwest version rustypipe pulls (0.12).
+# Matches the reqwest version rustypipe pulls (0.12).
 reqwest = { version = "0.12", default-features = false }
 
-# OS media controls (src/mpris.rs) — the current track + the OS's media keys.
-#   - Linux: MPRIS over the pure-Rust zbus backend (no libdbus needed).
-#   - Windows: the SMTC backend, which is exactly what the volume-OSD flyout and
-#     Bluetooth/USB headset transport buttons use — i.e. what makes Music Player
-#     show up in "Now playing" and react to the headset's stop/pause/skip.
-#   - macOS: MPNowPlayingInfoCenter via souvlaki's default backend.
-# The Windows dep lives in its own target section because souvlaki's SMTC
-# backend needs no feature flags, whereas Linux needs the explicit `use_zbus`
-# one — so they must be declared separately.
+# Windows SMTC media controls: volume flyout, headset transport buttons and
+# the system "Now playing" surface.
 [target.'cfg(target_os = "windows")'.dependencies]
 souvlaki = { version = "0.8", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
-[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
-souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
-
-# Android-only deps:
-# - rquickjs-sys (rustypipe's QuickJS for YouTube's JS cipher) ships no
-#   aarch64-linux-android bindings → force bindgen (CI provides libclang + NDK).
-# - jni + ndk-context: cpal's AAudio backend reads the Android context from the
-#   global ndk_context, which nothing in the Tauri stack populates (→ "no output
-#   device", no sound). MainActivity.onCreate calls a JNI fn (src/lib.rs) that
-#   registers the Activity's JavaVM + context into ndk_context so audio opens.
-[target.'cfg(target_os = "android")'.dependencies]
-rquickjs-sys = { version = "0.9", features = ["bindgen"] }
-jni = "0.21"
-ndk-context = "0.1"
-
-# Desktop-only plugins (no-op or unsupported on mobile).
-# "Launch at login": Linux .desktop in ~/.config/autostart, Windows run-key,
-# macOS LaunchAgent — Settings → System via plugin:autostart|{enable,…}.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# Launch at login through the Windows run key.
 tauri-plugin-autostart = "2"
 
 

@@ -1,5 +1,5 @@
 {
-  "version": "0.22.123",
+  "version": "0.22.124",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -15,12 +15,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixes restored-playback desynchronization by waiting for the audio backend to confirm that the next source is queued before advancing artwork and metadata.",
-  "platforms": [
-    "linux",
-    "windows",
-    "macos",
-    "android"
-  ],
+  "notes": "Makes Music Player Windows-only, removes Linux and Android releases, and fixes incomplete test prerequisites and version drift.",
+  "platforms": ["windows"],
   "min_native": "0.22.35"
 }

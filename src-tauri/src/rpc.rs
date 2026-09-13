@@ -62,6 +62,7 @@ fn ensure_ipc_link() {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn rpc_update(
     state: State<RpcState>,
     client_id: String,
