@@ -6,6 +6,7 @@ import {
   clampVolumePercent,
   seekPercentForSeconds,
   seekSecondsForPercent,
+  volumeGainFromPercent,
 } from "../src/player-controls.mjs";
 
 test("seek percent converts to seconds and clamps safely", () => {
@@ -50,6 +51,14 @@ test("volume percentage clamps to the 0–100 range", () => {
   assert.equal(clampVolumePercent(45.5), 45.5);
   assert.equal(clampVolumePercent(140), 100);
   assert.equal(clampVolumePercent("bad"), 0);
+});
+
+test("volume uses a perceptual taper with useful low-volume travel", () => {
+  assert.equal(volumeGainFromPercent(0), 0);
+  assert.equal(volumeGainFromPercent(25), 0.015625);
+  assert.equal(volumeGainFromPercent(50), 0.125);
+  assert.equal(volumeGainFromPercent(100), 1);
+  assert.equal(volumeGainFromPercent(140), 1);
 });
 
 test("volume percentage updates the volume control rather than seeking", async () => {

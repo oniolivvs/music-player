@@ -46,15 +46,24 @@ test("text fields keep a visible border over artwork and popup glass", async () 
   assert.match(css, /\.modal[\s\S]*backdrop-filter:\s*blur\(var\(--ui-panel-blur/);
 });
 
-test("artwork layout keeps the hot bar full width and aligns Now Playing below it", async () => {
+test("every layout keeps the hot bar full width and aligns Now Playing below it", async () => {
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(css, /body\.artwork-theme\.has-bg \.nav-bar[\s\S]*margin:/);
   assert.match(css, /body\.artwork-theme\.has-bg :where\(\.sidebar, \.main, \.np-drawer\)[\s\S]*gap|border:/);
   assert.match(css, /body\.artwork-theme\.has-bg\.np-push \.app\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff,[^}]*\+\s*8px/s);
-  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*8px\)/s);
+  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*var\(--shell-gap,\s*12px\)\)/s);
+  assert.match(css, /\.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*var\(--shell-gap,\s*12px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*right:\s*calc\(8px\s*\+\s*var\(--safe-right,\s*0px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*bottom:\s*calc\(var\(--player-top,\s*118px\)\s*\+\s*8px\)/s);
   assert.match(css, /\.rs-handle::after\s*\{[^}]*left:\s*3px;[^}]*width:\s*2px;[^}]*opacity:\s*0;/s);
   assert.match(css, /\.rs-handle:hover::after[^}]*opacity:\s*1;/s);
   assert.doesNotMatch(css, /body\.artwork-theme\.has-bg[^}]*\.nav-bar\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff/s);
+});
+
+test("hot bar actions share equal space except Settings and buttons use dynamic states", async () => {
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*1 1 0/s);
+  assert.match(css, /\.top-nav \.nav-right\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\):not\(:disabled\):hover\s*\{[^}]*translateY\(-2px\)/s);
+  assert.match(css, /\.btn\.timer-armed::before\s*\{[^}]*animation:\s*button-countdown 5s linear forwards/s);
 });

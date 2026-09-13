@@ -7,7 +7,7 @@ import * as SETTINGS from "./settings.js";
 import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store.js";
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation, createPlaybackArtworkGate } from "./artwork-theme.mjs";
-import { clampVolumePercent } from "./player-controls.mjs";
+import { clampVolumePercent, volumeGainFromPercent } from "./player-controls.mjs";
 import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
@@ -44,7 +44,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.125";
+const SRC_VERSION = "0.22.126";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -6113,7 +6113,7 @@ function applySettings() {
   updateRepeatBtn();
   // Sans PI usager : pas un if — .catch(() => {}) évite un rejet non trappé si
   // le backend refuse le volume (device non prêt / init audio KO, surtout Android).
-  const v = clampVolumePercent(S().defaultVolume); $("#volume").value = v; $("#volumePct").value = String(Math.round(v)); $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 }).catch(() => {});
+  const v = clampVolumePercent(S().defaultVolume); $("#volume").value = v; $("#volumePct").value = String(Math.round(v)); $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: volumeGainFromPercent(v) }).catch(() => {});
 }
 // Version switcher / downgrade (Settings → System → Updates). Lists the version
 // commits from local git and, on Build, checks one out + rebuilds + restarts.
@@ -6645,7 +6645,7 @@ function openSettings() {
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
   $("#setSmoothAmt").addEventListener("input", e => SETTINGS.setSetting("smoothStrength", Number(e.target.value)));
-  $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }).catch(() => {}); });
+  $("#setVol").addEventListener("change", e => { const level = clampVolumePercent(e.target.value); SETTINGS.setSetting("defaultVolume", level); $("#volume").value = level; $("#volumePct").value = String(Math.round(level)); $("#volume").style.setProperty("--fill", `${level}%`); invoke("set_volume", { level: volumeGainFromPercent(level) }).catch(() => {}); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
   $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
@@ -7199,12 +7199,15 @@ async function askCookieConsent(browser) {
   // setting textContent on the button would wipe the icon next to it.
   const okLbl = $("#ckOkLbl") || ok;
   ok.disabled = true;
+  ok.classList.remove("timer-armed");
+  void ok.offsetWidth;
+  ok.classList.add("timer-armed");
   let left = 5;
   okLbl.textContent = `Accept (${left})`;
   clearInterval(_ckTimer);
   _ckTimer = setInterval(() => {
     left--;
-    if (left <= 0) { clearInterval(_ckTimer); ok.disabled = false; okLbl.textContent = "Accept"; }
+    if (left <= 0) { clearInterval(_ckTimer); ok.disabled = false; ok.classList.remove("timer-armed"); okLbl.textContent = "Accept"; }
     else okLbl.textContent = `Accept (${left})`;
   }, 1000);
   let infos = [];
@@ -7572,7 +7575,7 @@ async function init() {
     $("#volume").value = level;
     $("#volumePct").value = String(Math.round(level));
     $("#volume").style.setProperty("--fill", `${level}%`);
-    invoke("set_volume", { level: level / 100 }).catch(() => {});
+    invoke("set_volume", { level: volumeGainFromPercent(level) }).catch(() => {});
     clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", level), 400);
     return level;
   };
