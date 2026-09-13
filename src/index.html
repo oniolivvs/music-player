@@ -14,7 +14,7 @@
     <button id="navHistory" class="nav-item" title="Recently played"><span class="ni-ico" data-ic="clock"></span><span class="ni-lbl">Recent</span></button>
     <button id="navStats" class="nav-item" title="Listening stats"><span class="ni-ico" data-ic="disc"></span><span class="ni-lbl">Stats</span></button>
     <button id="navYtFeed" class="nav-item" title="YouTube home feed"><span class="ni-ico" data-ic="globe"></span><span class="ni-lbl">YouTube</span></button>
-    <button id="navShare" class="nav-item" title="Share over WiFi"><span class="ni-ico" data-ic="globe"></span><span class="ni-lbl">Share</span></button>
+    <button id="importPlaylistBtn" class="nav-item nav-import" title="Import a playlist"><span class="ni-ico" data-ic="upload"></span><span class="ni-lbl">Import playlist</span></button>
     <div class="top-drop-wrap">
       <button id="navSources" class="nav-item" title="Music sources (folders)"><span class="ni-ico" data-ic="folder"></span><span class="ni-lbl">Sources</span></button>
       <div id="srcDrop" class="top-drop" hidden>
@@ -147,45 +147,6 @@
       <span id="totTime" class="time">0:00</span>
     </div>
   </footer>
-
-  <div id="shareModal" class="modal-backdrop" hidden>
-    <div class="modal share">
-      <div class="modal-head">
-        <h2>Share over WiFi</h2>
-        <button id="shareClose" class="icon-btn" title="Close" data-ic="x"></button>
-      </div>
-      <div class="modal-body">
-        <div class="set-hint">Play your music on another device on the same WiFi — no account, nothing leaves your network. One device <b>hosts</b> its library, the other <b>connects</b> with the code.</div>
-
-        <div class="set-group"><div class="set-title">Host — share this device's library</div>
-          <div id="shareHostIdle">
-            <div class="set-hint">Start a local server so another device can browse, stream and download your library + playlists.</div>
-            <button id="shareHostStart" class="btn"><span data-ic="wifi"></span> Start sharing</button>
-            <div id="shareHostErr" class="set-hint share-err" hidden></div>
-          </div>
-          <div id="shareHostOn" hidden>
-            <div class="share-code-row">
-              <div><div class="set-sub">On the other device, choose “Connect” and enter:</div>
-                <div class="share-addr" id="shareAddr">—</div>
-                <div class="share-code" id="shareCode">000000</div></div>
-            </div>
-            <div id="shareHostInfo" class="set-hint"></div>
-            <button id="shareHostStop" class="btn-line sm"><span data-ic="stop"></span> Stop sharing</button>
-          </div>
-        </div>
-
-        <div class="set-group"><div class="set-title">Connect — receive from another device</div>
-          <div class="set-row"><label>Host address <span class="set-sub">(as shown on the host)</span></label>
-            <input type="text" id="shareHostIp" class="text-in" placeholder="192.168.1.23:38291 — or just the IP" autocomplete="off"></div>
-          <div class="set-row"><label>Port</label><input type="number" id="shareHostPort" class="num-in" value="0" min="0" max="65535"></div>
-          <div class="set-row"><label>Code</label><input type="text" id="shareConnCode" class="text-in" placeholder="000000" inputmode="numeric" maxlength="6"></div>
-          <label class="setup-chk"><input type="checkbox" id="shareSaveLocal"> Save streamed tracks locally as I play them</label>
-          <button id="shareConnect" class="btn"><span data-ic="link"></span> Connect</button>
-          <div id="shareConnStatus" class="set-hint"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div id="plDetailModal" class="modal-backdrop" hidden>
     <div class="modal pl-detail">
@@ -372,7 +333,11 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             <select id="impDest"></select>
           </div>
           <div class="imp-foot-row">
-            <label class="imp-dl" title="Watch this playlist and auto-add its future tracks"><input type="checkbox" id="impFollow"> <span class="bic" data-ic="repeat"></span> Follow</label>
+            <fieldset class="follow-choice" aria-label="Follow this playlist after import">
+              <legend>Follow future tracks?</legend>
+              <label><input type="radio" id="impFollowNo" name="impFollow" value="once" checked><span>Import once</span></label>
+              <label><input type="radio" id="impFollowYes" name="impFollow" value="follow"><span>Yes, follow it</span></label>
+            </fieldset>
             <label class="imp-dl" title="Also download the selected tracks as local mp3 files"><input type="checkbox" id="impDl"> Save locally (mp3)</label>
             <button id="impGo" class="btn"><span data-ic="dl"></span> Import</button>
           </div>

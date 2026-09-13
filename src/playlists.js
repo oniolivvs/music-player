@@ -18,6 +18,11 @@ export async function initPlaylists() {
 }
 
 export function getPlaylists() { return _cache; }
+export async function replacePlaylists(playlists) {
+  _cache = Array.isArray(playlists) ? playlists : [];
+  await persist({ strict: true });
+  return _cache;
+}
 // Persist after a direct mutation of the array returned by getPlaylists()
 // (used by cloud-sync merge, which appends/edits in place).
 export async function persist({ strict = false } = {}) {

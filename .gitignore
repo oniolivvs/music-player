@@ -23,6 +23,7 @@ CLAUDE.md
 .foreman/
 .claude/
 .graphify/
+.codegraph/
 .cursor/
 .aider*
 .codex/

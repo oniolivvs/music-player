@@ -10,6 +10,8 @@ import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBl
 import { clampVolumePercent } from "./player-controls.mjs";
 import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
+import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
+import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -42,7 +44,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.124";
+const SRC_VERSION = "0.22.125";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1164,7 +1166,10 @@ function statsAgg() {
   };
 
   const neverPlayed = library.filter(t => !plays[t.path]).length;
-  return { rows, total, secs, artists: by("artist"), albums: by("album"), neverPlayed };
+  const first = rows.reduce((value, row) => Math.min(value, Number(row.first) || value), Date.now());
+  const days = rows.length ? Math.max(1, Math.ceil((Date.now() - first) / 86400000)) : 0;
+  const coverage = library.length ? Math.round(((library.length - neverPlayed) / library.length) * 100) : 0;
+  return { rows, total, secs, artists: by("artist"), albums: by("album"), neverPlayed, days, coverage };
 }
 
 function fmtLong(s) {
@@ -1230,6 +1235,17 @@ function showStats() {
 
   host.innerHTML = `
     <div class="st-wrap">
+      <div class="st-hero">
+        <div class="st-metric st-metric-primary"><span>Listening time</span><strong>${fmtLong(s.secs)}</strong><small>${s.days} active-day span</small></div>
+        <div class="st-metric"><span>Total plays</span><strong>${s.total.toLocaleString()}</strong><small>${(s.secs / Math.max(1, s.total) / 60).toFixed(1)} min average</small></div>
+        <div class="st-metric"><span>Tracks discovered</span><strong>${s.rows.length.toLocaleString()}</strong><small>${s.neverPlayed} still unplayed</small></div>
+        <div class="st-metric st-coverage"><span>Library coverage</span><strong>${s.coverage}%</strong><small>${library.length} tracks in library</small></div>
+      </div>
+      <div class="st-spotlight">
+        <span class="st-spotlight-kicker">Your current favorite</span>
+        <strong>${esc(byPlays[0]?.title || "—")}</strong>
+        <span>${esc(byPlays[0]?.artist || "Unknown artist")} · ${byPlays[0]?.n || 0} plays · ${fmtLong(byPlays[0]?.secs || 0)}</span>
+      </div>
       <div class="st-grid">
         <div class="st-card"><div class="st-h">Most played tracks</div>${statRows(byPlays, "title", 15, { path: true, sub: "artist" })}</div>
         <div class="st-card"><div class="st-h">Least played tracks</div>${statRows(leastPlayed, "title", 15, { path: true, sub: "artist" })}</div>
@@ -2427,7 +2443,7 @@ function openPlaylist(id) {
     icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} unavailable (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
-      `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
+      `<button id="plUrlBtn" class="btn-line sm" title="Add one YouTube video">${ic(IC.link)} Add video</button>` +
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
       // Only shown while following: check THIS playlist right now, without
       // waiting for the periodic sweep or going through Settings, which checks
@@ -2466,17 +2482,17 @@ function openPlaylist(id) {
   }).filter(Boolean));
 }
 
-// Add a YouTube video OR playlist by URL straight into this playlist. yt_playlist
-// returns one track for a video URL and many for a playlist URL, so both work.
+// Music import is deliberately single-video. Playlist URLs belong to the
+// dedicated Import playlist flow, where follow/download intent is explicit.
 async function addByUrl(plId) {
   if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
-  const url = await askText("Add from URL", { placeholder: "YouTube video or playlist URL", ok: "Add" });
+  const url = await askText("Add one video", { placeholder: "YouTube video URL", ok: "Add video" });
   if (!url) return;
   flash("Fetching…");
   try {
-    const res = await invoke("yt_playlist", { url: url.trim() });
-    const tracks = (res.tracks || []).map(onlineFromResult);
-    if (!tracks.length) { flash("Nothing found at that URL"); return; }
+    const videoUrl = normalizeSingleVideoUrl(url);
+    const res = await invoke("yt_playlist", { url: videoUrl });
+    const tracks = [onlineFromResult(singleTrackFromResult(res))];
     tracks.forEach(t => onlineIndex.set(t.path, t));
     const added = [];
     for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) added.push(t); }
@@ -3321,7 +3337,9 @@ async function impFetch() {
       pls.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
     $("#impDest").dataset.title = res.title;
     $("#impDest").dataset.url = url;
-    $("#impFollow").checked = follows.some(f => f.url === url && f.enabled !== false);
+    const alreadyFollowed = follows.some(f => f.url === url && f.enabled !== false);
+    $("#impFollowYes").checked = alreadyFollowed;
+    $("#impFollowNo").checked = !alreadyFollowed;
     $("#impFoot").hidden = false;
     updateImpCount();
     // Modal closed while fetching → park the ready picker in Activity.
@@ -3340,14 +3358,14 @@ async function impFetch() {
 function updateImpCount() {
   const boxes = [...document.querySelectorAll("#impList [data-imp]")];
   const n = boxes.filter(c => c.checked).length;
-  const followOnly = !n && $("#impFollow").checked;
+  const followOnly = !n && $("#impFollowYes").checked;
   $("#impCount").textContent = `${n} of ${boxes.length} selected`;
   $("#impGo").innerHTML = followOnly ? `${ic(IC.repeat)} Follow only` : n ? `${ic(IC.dl)} Import ${n} track${n === 1 ? "" : "s"}` : `${ic(IC.dl)} Import`;
   $("#impGo").disabled = !n && !followOnly;
 }
 async function impGo() {
   const chosen = [...document.querySelectorAll("#impList [data-imp]")].filter(c => c.checked).map(c => impTracks[Number(c.dataset.imp)]);
-  const following = $("#impFollow").checked;
+  const following = $("#impFollowYes").checked;
   if (!chosen.length && !following) { flash("No tracks selected"); return; }
   let dest = $("#impDest").value;
   if (dest === "__new") dest = PL.createPlaylist($("#impDest").dataset.title).id;
@@ -4694,17 +4712,16 @@ function _reindexFeed(host) {
   }
 }
 
-// "Add from URL" for the library. Mirrors addByUrl(), but the destination is
-// the library array itself instead of a playlist's paths.
+// Music import accepts exactly one video. Playlist import has its own hot-bar flow.
 async function addUrlToLibrary() {
   if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
-  const url = await askText("Add from URL", { placeholder: "YouTube video or playlist URL", ok: "Add" });
+  const url = await askText("Import one video", { placeholder: "YouTube video URL", ok: "Import video" });
   if (!url) return;
   flash("Fetching…");
   try {
-    const res = await invoke("yt_playlist", { url: url.trim() });
-    const tracks = (res.tracks || []).map(onlineFromResult);
-    if (!tracks.length) { flash("Nothing found at that URL"); return; }
+    const videoUrl = normalizeSingleVideoUrl(url);
+    const res = await invoke("yt_playlist", { url: videoUrl });
+    const tracks = [onlineFromResult(singleTrackFromResult(res))];
     tracks.forEach(t => onlineIndex.set(t.path, t));
     const have = new Set(library.map(t => t.path));
     const keys = new Set(library.map(trackKey).filter(Boolean));
@@ -5418,14 +5435,13 @@ function applyUiPrefs() {
   $("#navHistory").hidden = s.uiNavHistory === false || !(Number(s.historyLimit) > 0);
   $("#navStats").hidden = s.uiNavStats === false;
   $("#navYtFeed") && ($("#navYtFeed").hidden = s.uiNavYtFeed === false || !s.ytFeedEnabled);
-  $("#navShare").hidden = s.uiNavShare === false;
   // Sources now live in a topbar dropdown — hiding the section hides its button.
   const srcWrap = document.querySelector(".top-drop-wrap");
   if (srcWrap) srcWrap.hidden = !s.uiSources;
   $("#pickBtn").hidden = !s.uiSrcButtons;
   $("#manualBtn").hidden = !s.uiSrcButtons;
   $("#secPlaylists").hidden = !s.uiPlaylists;
-  if ($("#importBtn")) $("#importBtn").hidden = !s.uiImportBtn;
+  if ($("#importPlaylistBtn")) $("#importPlaylistBtn").hidden = s.uiImportBtn === false;
   // Hide the whole row, not just the select: the sort icon lives beside it now,
   // so hiding the select alone would leave a stray icon on an empty strip.
   // Derive the inline display from the column headers so toggling the setting
@@ -6164,6 +6180,82 @@ async function loadDiagnosticsPanel() {
   }
 }
 
+function backupStatus(message, error = false) {
+  const host = $("#setBackupStatus");
+  if (!host) return;
+  host.textContent = message;
+  host.classList.toggle("is-error", error);
+}
+
+function currentBackup() {
+  return createBackup({
+    settings: S(), playlists: PL.getPlaylists(), library: { folders, tracks: library },
+    follows, plays, history: history2, online: Object.fromEntries(onlineIndex),
+    blocked: [...blockedKeys], suppressed: [...suppressedSet], declined: [...dlDeclined],
+  });
+}
+
+async function exportBackup() {
+  if (!IS_NATIVE) { backupStatus("Backup export needs the Windows app.", true); return; }
+  backupStatus("Choose where to save the backup…");
+  try {
+    const path = await T.core.invoke("plugin:dialog|save", { options: {
+      title: "Export Music Player backup",
+      defaultPath: `music-player-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: "Music Player backup", extensions: ["json"] }],
+    } });
+    if (!path) { backupStatus(""); return; }
+    await invoke("backup_export", { path, data: JSON.stringify(currentBackup(), null, 2) });
+    backupStatus(`Backup saved to ${path}`);
+    flash("Backup exported");
+  } catch (error) { backupStatus(`Export failed: ${error}`, true); }
+}
+
+async function importBackup() {
+  if (!IS_NATIVE) { backupStatus("Backup import needs the Windows app.", true); return; }
+  backupStatus("Choose a Music Player backup…");
+  try {
+    const path = await T.core.invoke("plugin:dialog|open", { options: {
+      directory: false, multiple: false, title: "Import Music Player backup",
+      filters: [{ name: "Music Player backup", extensions: ["json"] }],
+    } });
+    if (!path) { backupStatus(""); return; }
+    const backup = parseBackup(await invoke("backup_import", { path }));
+    const summary = backupSummary(backup);
+    const confirmed = await askConfirm(
+      "Replace current Music Player data?",
+      `${summary.playlists} playlists · ${summary.tracks} library tracks · ${summary.follows} follows · ${summary.plays} tracks with stats. Audio files are not changed.`,
+      "Import backup",
+    );
+    if (!confirmed) { backupStatus("Import cancelled."); return; }
+    const data = backup.data;
+    await SETTINGS.replaceSettings(data.settings);
+    await PL.replacePlaylists(data.playlists);
+    folders = Array.isArray(data.library.folders) ? data.library.folders : [];
+    library = Array.isArray(data.library.tracks) ? data.library.tracks : [];
+    _libraryLoadFailed = false;
+    follows = data.follows;
+    plays = data.plays;
+    history2 = data.history;
+    onlineIndex.clear();
+    for (const [key, value] of Object.entries(data.online)) onlineIndex.set(key, value);
+    blockedKeys = new Set(data.blocked);
+    suppressedSet = new Set(data.suppressed);
+    dlDeclined = new Set(data.declined);
+    await Promise.all([
+      saveLibrary({ strict: true }), saveOnline({ strict: true }), saveBlocked({ strict: true }),
+      storeSave("follows", JSON.stringify(follows)), storeSave("plays", JSON.stringify(plays)),
+      storeSave("history", JSON.stringify(history2)), storeSave("suppressed", JSON.stringify([...suppressedSet])),
+      storeSave("declined", JSON.stringify([...dlDeclined])),
+    ]);
+    $("#settingsModal").hidden = true;
+    applySettings();
+    renderPlaylists();
+    showLibrary();
+    flash(`Backup imported · ${summary.playlists} playlists restored`);
+  } catch (error) { backupStatus(`Import failed: ${error}`, true); }
+}
+
 function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
@@ -6175,6 +6267,7 @@ function openSettings() {
       <button class="set-tab" data-tab="downloads">${ic(IC.dl)}<span>Downloads</span></button>
       <button class="set-tab" data-tab="integrations">${ic(IC.radio)}<span>Integrations</span></button>
       <button class="set-tab" data-tab="library">${ic(IC.note)}<span>Library</span></button>
+      <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
       <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
     </nav>
     <div class="set-panes">
@@ -6237,7 +6330,6 @@ function openSettings() {
       <div class="set-row"><label>Recent tab</label><input type="checkbox" id="setUiNavHistory" ${s.uiNavHistory !== false ? "checked" : ""}></div>
       <div class="set-row"><label>Stats tab</label><input type="checkbox" id="setUiNavStats" ${s.uiNavStats !== false ? "checked" : ""}></div>
       <div class="set-row"><label>YouTube tab</label><input type="checkbox" id="setUiNavYtFeed" ${s.uiNavYtFeed !== false ? "checked" : ""}></div>
-      <div class="set-row"><label>Share tab</label><input type="checkbox" id="setUiNavShare" ${s.uiNavShare !== false ? "checked" : ""}></div>
       <div class="set-title set-title-sub">Player visibility</div>
       <div class="set-row"><label>Shuffle button</label><input type="checkbox" id="setUiPlayerShuffle" ${s.uiPlayerShuffle !== false ? "checked" : ""}></div>
       <div class="set-row"><label>Repeat button</label><input type="checkbox" id="setUiPlayerRepeat" ${s.uiPlayerRepeat !== false ? "checked" : ""}></div>
@@ -6254,7 +6346,7 @@ function openSettings() {
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
       <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
       <div class="set-row"><label>Playlists section</label><input type="checkbox" id="setUiPlaylists" ${s.uiPlaylists ? "checked" : ""}></div>
-      <div class="set-row"><label>“YouTube playlists” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
+      <div class="set-row"><label>Import playlist button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn !== false ? "checked" : ""}></div>
       <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
       <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
       <div class="set-row"><label>Button labels</label>
@@ -6368,7 +6460,7 @@ function openSettings() {
            <div class="set-row"><label>Auto-sync <span class="set-sub">(on launch + after changes)</span></label><input type="checkbox" id="setSyncAuto" ${s.syncAuto !== false ? "checked" : ""}></div>
            <div class="set-row"><label>${s.syncAt ? "Last synced " + new Date(s.syncAt).toLocaleString() : "Never synced"}</label>
              <span class="dir-pick"><button id="setSyncNow" class="btn-line sm">${ic(IC.refresh)} Sync now</button><button id="setSignOut" class="btn-line sm">${ic(IC.power)} Sign out</button></span></div>
-           <div class="set-hint">Playlists, settings, blocked tracks and follows sync through the private app folder of your Google Drive — same account on any device stays in sync, anywhere. Your audio files are not uploaded (use “Share over WiFi” for those).</div>`
+           <div class="set-hint">Playlists, settings, blocked tracks and follows sync through the private app folder of your Google Drive. Audio files are never uploaded; use Backup to move the app's metadata manually.</div>`
         : `<div class="set-hint">Sign in with Google to sync your playlists / settings / blocked / follows across your devices through your own Google Drive (nothing goes to us). Audio files aren't uploaded.<br><br><b>One-time setup:</b> create a free OAuth client at <b>console.cloud.google.com</b> → APIs &amp; Services → Credentials → <i>Create OAuth client ID</i> → application type <b>Desktop app</b>, enable the <b>Google Drive API</b>, then paste the Client ID (and secret) below.</div>
            <div class="set-row"><label>Google OAuth Client ID</label><input type="text" id="setGdId" class="text-in" placeholder="…apps.googleusercontent.com" value="${esc(s.gdriveClientId)}"></div>
            <div class="set-row"><label>Client secret <span class="set-sub">(Desktop app)</span></label><input type="text" id="setGdSecret" class="text-in" placeholder="GOCSPX-…" value="${esc(s.gdriveClientSecret)}"></div>
@@ -6410,6 +6502,16 @@ function openSettings() {
         playlistSelector: `<select id="setCleanupPlaylist" class="sel sm-sel wide" aria-label="Playlist to clean"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>`,
       })}
       <div class="set-hint">Blocked entries are deleted from the app; local files are removed only after the confirmation. Duplicate-file cleanup keeps the playlist-preferred copy.</div>
+    </div>
+    </section>
+    <section class="set-pane" data-pane="data">
+    <div class="set-group data-transfer-card"><div class="set-title">Your Music Player data</div>
+      <div class="set-hint">Export one portable JSON backup containing settings, playlists, library metadata, follows, listening history, statistics and online-track metadata. Audio files are never copied.</div>
+      <div class="data-transfer-actions">
+        <button id="setBackupExport" class="btn">${ic(IC.upload)} Export backup</button>
+        <button id="setBackupImport" class="btn-line">${ic(IC.dl)} Import backup</button>
+      </div>
+      <div id="setBackupStatus" class="set-hint" aria-live="polite"></div>
     </div>
     </section>
     <section class="set-pane" data-pane="system">
@@ -6490,6 +6592,8 @@ function openSettings() {
     });
   }
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
+  $("#setBackupExport")?.addEventListener("click", exportBackup);
+  $("#setBackupImport")?.addEventListener("click", importBackup);
   $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
   for (const [id, key] of [["setCustBg", "customBg"], ["setCustPanel", "customPanel"], ["setCustText", "customText"]]) {
     $("#" + id).addEventListener("input", e => {
@@ -6530,7 +6634,7 @@ function openSettings() {
     ["setUiSources", "uiSources"], ["setUiSrcBtns", "uiSrcButtons"], ["setUiPlaylists", "uiPlaylists"],
     ["setUiImport", "uiImportBtn"], ["setUiSort", "uiSortSel"], ["setUiDock", "npDocked"],
     ["setUiNavHistory", "uiNavHistory"], ["setUiNavStats", "uiNavStats"], ["setUiNavYtFeed", "uiNavYtFeed"],
-    ["setUiNavShare", "uiNavShare"], ["setUiPlayerShuffle", "uiPlayerShuffle"], ["setUiPlayerRepeat", "uiPlayerRepeat"],
+    ["setUiPlayerShuffle", "uiPlayerShuffle"], ["setUiPlayerRepeat", "uiPlayerRepeat"],
     ["setUiPlayerVolume", "uiPlayerVolume"], ["setUiPlayerProgress", "uiPlayerProgress"], ["setUiPlayerNow", "uiPlayerNow"],
   ]) {
     $("#" + id).addEventListener("change", e => { SETTINGS.setSetting(key, e.target.checked); applyUiPrefs(); });
@@ -7553,7 +7657,7 @@ async function init() {
     }
   });
 
-  $("#importBtn")?.addEventListener("click", openImportPick);
+  $("#importPlaylistBtn")?.addEventListener("click", openImportPick);
   $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
@@ -7567,7 +7671,6 @@ async function init() {
   $("#plDetailClose").addEventListener("click", closePlaylistDetail);
   $("#plDetailModal").addEventListener("click", e => { if (e.target.id === "plDetailModal") closePlaylistDetail(); });
   $("#plDetailImport").addEventListener("click", () => importPlaylistDetail(true));
-  $("#navShare").addEventListener("click", openShare);
   // Sources dropdown (topbar): toggle on click, close on outside click / Esc.
   $("#navSources")?.addEventListener("click", e => {
     e.stopPropagation();
@@ -7583,11 +7686,6 @@ async function init() {
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") { const d = $("#srcDrop"); if (d && !d.hidden) { d.hidden = true; $("#navSources").classList.remove("active"); } }
   });
-  $("#shareClose").addEventListener("click", () => $("#shareModal").hidden = true);
-  $("#shareModal").addEventListener("click", e => { if (e.target.id === "shareModal") $("#shareModal").hidden = true; });
-  $("#shareHostStart").addEventListener("click", shareHostStart);
-  $("#shareHostStop").addEventListener("click", shareHostStop);
-  $("#shareConnect").addEventListener("click", shareConnect);
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
 
@@ -7600,7 +7698,7 @@ async function init() {
   $("#impAll").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = true); updateImpCount(); });
   $("#impNone").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = false); updateImpCount(); });
   $("#impList").addEventListener("change", updateImpCount);
-  $("#impFollow").addEventListener("change", updateImpCount);
+  document.querySelectorAll('input[name="impFollow"]').forEach(input => input.addEventListener("change", updateImpCount));
   $("#impGo").addEventListener("click", impGo);
   $("#dlAction").addEventListener("click", dlStop);
   $("#dlRetry").addEventListener("click", dlRetry);

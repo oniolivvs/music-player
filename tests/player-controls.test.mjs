@@ -76,7 +76,7 @@ test("UI customization exposes layout and player visibility controls", async () 
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(settings, /uiLayout:\s*["']balanced["']/);
-  for (const key of ["uiNavStats", "uiNavShare", "uiPlayerShuffle", "uiPlayerRepeat", "uiPlayerVolume", "uiPlayerProgress"]) {
+  for (const key of ["uiNavStats", "uiImportBtn", "uiPlayerShuffle", "uiPlayerRepeat", "uiPlayerVolume", "uiPlayerProgress"]) {
     assert.match(settings, new RegExp(`${key}:`));
     assert.match(main, new RegExp(key));
   }

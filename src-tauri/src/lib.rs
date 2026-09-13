@@ -10,6 +10,7 @@ pub mod library;
 mod mpris;
 mod rpc;
 mod store;
+mod transfer;
 mod stream;
 mod share;
 mod ota;
@@ -919,6 +920,7 @@ pub fn run() {
             library::canon_path, library::canon_paths, library::folder_size, library::register_roots,
             library::find_duplicate_files, library::confirm_delete_duplicates,
             store::store_load, store::store_save,
+            transfer::backup_export, transfer::backup_import,
             rpc::rpc_update, rpc::rpc_clear,
             importer::import_spotify,
             diagnostics::diag_write, diagnostics::diag_tail,

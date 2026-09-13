@@ -9,9 +9,9 @@ export function buildLibraryActions({ downloadableCount = 0 } = {}) {
     },
     {
       id: "libUrlBtn",
-      title: "Add a YouTube video or playlist by URL",
+      title: "Import one YouTube video",
       icon: "link",
-      label: "Add from URL",
+      label: "Import video",
       handler: "addUrl",
     },
     {

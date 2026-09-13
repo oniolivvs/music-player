@@ -1,7 +1,7 @@
 // App settings: an in-memory object persisted via the generic store ("settings").
 // loadSettings() is awaited once at startup; setSetting() persists immediately.
 
-import { storeLoad, storeSaveQuietly } from "./store.js";
+import { storeLoad, storeSave, storeSaveQuietly } from "./store.js";
 
 export const THEMES = {
   dark:     { "--bg-0": "#0b0b0f", "--bg-1": "#121218", "--bg-2": "#17171f", "--bg-3": "#20202b", "--bg-4": "#2a2a38", "--tx-1": "#f4f5f8", "--tx-2": "#a6a9b8", "--tx-3": "#6d7080" },
@@ -74,11 +74,11 @@ const DEFAULTS = {
   uiSources: true,       // show the Sources section
   uiSrcButtons: true,    // show "Add folder…" / "Enter a path manually"
   uiPlaylists: true,     // show the Playlists section
+  uiImportBtn: true,     // show the dedicated Import playlist hot-bar action
   uiSortSel: true,       // show the sort selector
   uiNavHistory: true,    // show Recent in the top navigation
   uiNavStats: true,      // show Stats in the top navigation
   uiNavYtFeed: true,     // show YouTube in the top navigation
-  uiNavShare: true,      // show Share in the top navigation
   uiPlayerShuffle: true, // show Shuffle in the player controls
   uiPlayerRepeat: true,  // show Repeat in the player controls
   uiPlayerVolume: true,  // show the volume control
@@ -169,6 +169,15 @@ export async function loadSettings() {
 }
 
 export function getSettings() { return _s; }
+
+export async function replaceSettings(values) {
+  const incoming = values && typeof values === "object" && !Array.isArray(values) ? values : {};
+  const known = Object.fromEntries(Object.entries(incoming).filter(([key]) => Object.hasOwn(DEFAULTS, key)));
+  _s = { ...DEFAULTS, ...known };
+  _s.artworkTransitionMs = normalizeArtworkTransitionMs(_s.artworkTransitionMs);
+  await storeSave("settings", JSON.stringify(_s));
+  return _s;
+}
 
 let _saveTimer = null;
 export function setSetting(key, value) {

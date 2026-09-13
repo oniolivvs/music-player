@@ -30,14 +30,20 @@ then run `npm install` and `npm run build`.
 
 - Plays your **local audio files** (mp3, flac, wav, ogg/opus, m4a, aac) through a
   real native audio engine (Rust `rodio` → system audio device), not a WebView `<audio>`.
-- Manages **playlists** (create / edit / reorder / import / export), mixing local
-  files and online tracks freely.
+- Manages **playlists** (create / edit / reorder / import), mixing local files
+  and online tracks freely. The hot bar keeps playlist import separate from
+  single-video music import and asks whether the imported playlist should be followed.
+- **Portable backups** export/import settings, playlists, library metadata,
+  follows, history, listening statistics and online-track metadata as JSON.
+  Audio files are never embedded in a backup.
 - **YouTube integration via yt-dlp** (same approach as the owner's
   `play_yt_audio.sh` desktop script — personal use):
   - **Search**: type in the search bar and press Enter to search YouTube; results
     show thumbnail + channel and can be played or added to playlists.
-  - **Playlist import**: paste a playlist URL (sidebar → *Import from URL…*),
-    tick the tracks you want, import into a new or existing playlist.
+  - **Playlist import**: use *Import playlist* in the hot bar, choose whether to
+    follow future tracks, then import selected tracks into a new or existing playlist.
+  - **Music import**: *Import video* accepts exactly one YouTube video at a time;
+    playlist URLs are intentionally handled only by the dedicated playlist flow.
   - **Instant streaming**: tracks stream over HTTP range requests straight into
     the rodio engine (no full download first); resolved stream URLs are cached
     and the next queue entry is pre-resolved + pre-queued for gapless playback.

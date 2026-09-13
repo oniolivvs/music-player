@@ -8,6 +8,29 @@ test("playlist sidebar has no legacy import button", async () => {
   assert.match(html, /id="importModal"/);
 });
 
+test("hot bar owns playlist import and Share is absent from the UI", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(html, /id="importPlaylistBtn"[^>]*>[\s\S]*?Import playlist/);
+  assert.doesNotMatch(html, /id="navShare"|id="shareModal"|>Share<\/span>/);
+  assert.doesNotMatch(main, /uiNavShare|#navShare/);
+});
+
+test("playlist import explicitly asks whether future tracks should be followed", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  assert.match(html, /Follow future tracks\?/);
+  assert.match(html, /id="impFollowNo"[^>]*checked/);
+  assert.match(html, /id="impFollowYes"/);
+});
+
+test("settings expose full backup import and export", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /id="setBackupExport"/);
+  assert.match(main, /id="setBackupImport"/);
+  assert.match(main, /createBackup\(\{/);
+  assert.match(main, /parseBackup\(/);
+});
+
 test("volume percentage is rendered inside one bordered field", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
