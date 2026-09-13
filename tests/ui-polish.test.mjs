@@ -60,10 +60,12 @@ test("every layout keeps the hot bar full width and aligns Now Playing below it"
   assert.doesNotMatch(css, /body\.artwork-theme\.has-bg[^}]*\.nav-bar\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff/s);
 });
 
-test("hot bar actions share equal space except Settings and buttons use dynamic states", async () => {
+test("hot bar actions keep natural widths with equal gaps except Settings", async () => {
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*1 1 0/s);
-  assert.match(css, /\.top-nav \.nav-right\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.nav-bar\s*\{[^}]*gap:\s*10px/s);
+  assert.match(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.top-nav \.nav-right\s*\{[^}]*margin-left:\s*auto/s);
+  assert.doesNotMatch(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*1 1 0/s);
   assert.match(css, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\):not\(:disabled\):hover\s*\{[^}]*translateY\(-2px\)/s);
   assert.match(css, /\.btn\.timer-armed::before\s*\{[^}]*animation:\s*button-countdown 5s linear forwards/s);
 });

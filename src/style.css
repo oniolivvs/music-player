@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.126 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.127 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1730,7 +1730,7 @@ body:not(.has-bg) {
 .nav-bar {
   margin: var(--shell-gap) var(--shell-gap) 0;
   padding: 9px;
-  gap: 5px;
+  gap: 10px;
   border: 1px solid var(--bd);
   border-radius: calc(var(--r) + 4px);
   background: color-mix(in srgb, var(--bg-1) 92%, var(--accent) 8%);
@@ -1919,16 +1919,13 @@ body:not(.has-bg) {
 }
 .top-nav > .nav-item:not(.nav-right),
 .top-nav > .top-drop-wrap {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 auto;
 }
-.top-nav > .nav-item:not(.nav-right),
 .top-nav > .top-drop-wrap > .nav-item {
-  width: 100%;
-  justify-content: center;
+  width: auto;
 }
 .top-nav .nav-import { margin-left: 0; }
-.top-nav .nav-right { flex: 0 0 auto; margin-left: 7px; }
+.top-nav .nav-right { flex: 0 0 auto; margin-left: auto; }
 
 #navLibrary { --button-color: #a78bfa; }
 #navHistory { --button-color: #60a5fa; }
@@ -2054,7 +2051,5 @@ body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
   .btn::after, .btn.timer-armed::before { animation: none; transition: none; }
 }
 @media (max-width: 700px) {
-  .top-nav > .nav-item:not(.nav-right), .top-nav > .top-drop-wrap { flex: 0 0 auto; }
-  .top-nav > .nav-item:not(.nav-right), .top-nav > .top-drop-wrap > .nav-item { width: auto; }
   .top-nav .nav-right { margin-left: 0; }
 }
