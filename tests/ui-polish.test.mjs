@@ -21,6 +21,7 @@ test("playlist import explicitly asks whether future tracks should be followed",
   assert.match(html, /Follow future tracks\?/);
   assert.match(html, /id="impFollowNo"[^>]*checked/);
   assert.match(html, /id="impFollowYes"/);
+  assert.match(html, /id="pickJson"[\s\S]*From a JSON music list/);
 });
 
 test("settings expose full backup import and export", async () => {

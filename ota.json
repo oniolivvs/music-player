@@ -1,5 +1,5 @@
 {
-  "version": "0.22.129",
+  "version": "0.22.130",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -11,11 +11,12 @@
     "cleanup.mjs",
     "player-controls.mjs",
     "library-actions.mjs",
-    "ui-controls.mjs"
+    "ui-controls.mjs",
+    "music-list.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Makes every two-choice action group use equal button dimensions in settings and popups.",
+  "notes": "Makes active playback modes unmistakable and imports HDD music JSON lists while downloading only missing titles.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }

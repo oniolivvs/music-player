@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.129 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.130 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -2061,6 +2061,34 @@ body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
   min-height: 46px;
   justify-content: center;
 }
+
+/* Stateful playback controls: the enabled mode must remain unmistakable over
+   dark, light and artwork-driven themes, including while hovered. */
+.ctrl.state-ctrl {
+  border: 1px solid color-mix(in srgb, var(--bd-2) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-3) 72%, transparent);
+}
+.ctrl.state-ctrl:hover { border-color: color-mix(in srgb, var(--accent-2) 45%, var(--bd-2)); }
+.ctrl.state-ctrl.active,
+body.has-bg .ctrl.state-ctrl.active,
+.ctrl.state-ctrl.active:hover {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent-2) 75%, #fff);
+  background: linear-gradient(145deg, #8b5cf6, #3b82f6 58%, #06b6d4);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 7px 20px color-mix(in srgb, var(--accent) 42%, transparent);
+  transform: translateY(-1px) scale(1.04);
+}
+.ctrl.state-ctrl.active::after {
+  content: "";
+  position: absolute;
+  left: 50%; bottom: 2px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 7px #fff;
+  transform: translateX(-50%);
+}
+.ctrl.state-ctrl.active:active { transform: scale(.94); }
 @media (prefers-reduced-motion: reduce) {
   :where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) { transition: none; }
   .btn::after, .btn.timer-armed::before { animation: none; transition: none; }

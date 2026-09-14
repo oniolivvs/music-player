@@ -27,12 +27,17 @@ const assert = require('node:assert/strict');
         const importer = document.querySelector('#importPlaylistBtn').getBoundingClientRect();
         const paired = [...document.querySelectorAll('.data-transfer-actions > button')]
           .map(button => button.getBoundingClientRect());
+        const shuffle = document.querySelector('#shuffleBtn');
+        shuffle.classList.add('active');
+        const activeShuffle = getComputedStyle(shuffle);
         return {
           bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           navBottom: nav.bottom, mainTop: main.top, mainBottom: main.bottom, playerTop: player.top,
           importerWidth: importer.width,
           pairedWidthDelta: Math.abs(paired[0].width - paired[1].width),
           pairedHeightDelta: Math.abs(paired[0].height - paired[1].height),
+          activeShuffleBackground: activeShuffle.backgroundImage,
+          activeShuffleShadow: activeShuffle.boxShadow,
           shareCount: document.querySelectorAll('#navShare, #shareModal').length,
         };
       });
@@ -42,6 +47,8 @@ const assert = require('node:assert/strict');
       assert.ok(result.importerWidth > 0, JSON.stringify({ viewport, result }));
       assert.ok(result.pairedWidthDelta <= 1, JSON.stringify({ viewport, result }));
       assert.ok(result.pairedHeightDelta <= 1, JSON.stringify({ viewport, result }));
+      assert.match(result.activeShuffleBackground, /linear-gradient/);
+      assert.notEqual(result.activeShuffleShadow, 'none');
       assert.equal(result.shareCount, 0, JSON.stringify({ viewport, result }));
       results.push({ viewport, ...result });
       await page.close();

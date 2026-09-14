@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const VERSION = "0.22.129";
+const VERSION = "0.22.130";
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 
 test("native and OTA release markers stay synchronized", async () => {
@@ -18,6 +18,7 @@ test("native and OTA release markers stay synchronized", async () => {
   ]);
 
   assert.equal(JSON.parse(ota).version, VERSION);
+  assert.ok(JSON.parse(ota).modules.includes("music-list.mjs"));
   assert.match(main, new RegExp(`const SRC_VERSION = "${VERSION.replaceAll(".", "\\.")}";`));
   assert.match(css, new RegExp(`^/\\* MP_CSS ${VERSION.replaceAll(".", "\\.")}`));
   assert.match(cargo, new RegExp(`^version = "${VERSION.replaceAll(".", "\\.")}"$`, "m"));

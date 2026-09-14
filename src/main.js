@@ -12,6 +12,7 @@ import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
 import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
+import { parseMusicList } from "./music-list.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -44,7 +45,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.129";
+const SRC_VERSION = "0.22.130";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -193,10 +194,20 @@ const ICON_PLAY = `<svg viewBox="0 0 24 24" width="16" height="16" fill="current
 const ICON_PAUSE = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
 const ICON_REPEAT = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`;
 function setPlayIcon(on) { $("#playBtn").innerHTML = on ? ICON_PAUSE : ICON_PLAY; }
+function updateShuffleBtn() {
+  const b = $("#shuffleBtn");
+  b.classList.toggle("active", shuffle);
+  b.setAttribute("aria-pressed", String(shuffle));
+  b.title = `Shuffle: ${shuffle ? "on" : "off"}`;
+  b.setAttribute("aria-label", b.title);
+}
 function updateRepeatBtn() {
   const b = $("#repeatBtn");
   b.classList.toggle("active", repeatMode !== "off");
+  b.setAttribute("aria-pressed", String(repeatMode !== "off"));
+  b.dataset.mode = repeatMode;
   b.title = `Repeat: ${repeatMode}`;
+  b.setAttribute("aria-label", b.title);
   b.innerHTML = ICON_REPEAT + (repeatMode === "one" ? `<span class="rep-one">1</span>` : "");
 }
 
@@ -1054,7 +1065,7 @@ async function restorePlayback() {
   st.queue = q;
   queue = st.queue;
   curIndex = Math.min(Math.max(0, st.index), queue.length - 1);
-  shuffle = !!st.shuffle; $("#shuffleBtn").classList.toggle("active", shuffle);
+  shuffle = !!st.shuffle; updateShuffleBtn();
   const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
   if (!t) { queue = []; curIndex = -1; return; }
   _resumePos = Math.max(0, st.position || 0);
@@ -2569,6 +2580,55 @@ function openExtImport() {
   extStatus(""); $("#extBar").hidden = true; $("#extBarFill").style.width = "0%";
   $("#extCancel").hidden = true; $("#extGo").disabled = false;
   $("#extModal").hidden = false; $("#extInput").focus();
+}
+
+async function importJsonMusicList() {
+  if (!IS_NATIVE) { flash("JSON import needs the Windows app"); return; }
+  $("#pickModal").hidden = true;
+  try {
+    const defaultPath = await invoke("yt_download_root", { dir: String(S().downloadDir || "") }).catch(() => "");
+    const path = await T.core.invoke("plugin:dialog|open", { options: {
+      directory: false, multiple: false, title: "Import a JSON music list",
+      defaultPath: defaultPath || undefined,
+      filters: [{ name: "JSON music list", extensions: ["json"] }],
+    } });
+    if (!path) return;
+    const { tracks, invalid, duplicates } = parseMusicList(await invoke("backup_import", { path }));
+    const name = baseName(path).replace(/\.json$/i, "").trim() || "Imported music list";
+    let playlist = PL.getPlaylists().find(item => item.name.toLowerCase() === name.toLowerCase());
+    if (!playlist) playlist = PL.createPlaylist(name);
+
+    const merged = new Map(playlist.paths.map(item => [videoIdOf(item) || item, item]));
+    const missing = [];
+    let existing = 0, unavailable = 0;
+    for (const track of tracks) {
+      const current = onlineIndex.get(track.path);
+      onlineIndex.set(track.path, current ? { ...track, ...current } : track);
+      const local = libraryLocalFor(ytId(track.path));
+      merged.set(ytId(track.path), local || track.path);
+      if (local) existing++;
+      else if (dlBlock[ytId(track.path)]) unavailable++;
+      else missing.push(track.path);
+    }
+    playlist.paths = [...merged.values()];
+    await Promise.all([PL.persist({ strict: true }), saveOnline({ strict: true })]);
+    renderPlaylists(); openPlaylist(playlist.id);
+
+    const skipped = invalid + duplicates;
+    flash(`Imported ${tracks.length} tracks into “${name}”${skipped ? ` · ${skipped} skipped` : ""}`);
+    if (!missing.length) {
+      flash(unavailable
+        ? `Music list imported · ${existing} local · ${unavailable} unavailable skipped`
+        : "Music list imported · every title is already downloaded");
+      return;
+    }
+    const confirmed = await askConfirm(
+      `Download ${missing.length} missing title${missing.length === 1 ? "" : "s"}?`,
+      `${existing} already exist locally${unavailable ? ` · ${unavailable} unavailable skipped` : ""}. Only missing YouTube IDs will be queued as mp3.`,
+      "Download missing", "Not now",
+    );
+    if (confirmed) downloadTracks(missing, true);
+  } catch (error) { flash(`JSON music list import failed: ${error}`); }
 }
 function extStatus(msg, err) { const el = $("#extStatus"); el.textContent = msg; el.style.color = err ? "#f59e0b" : ""; }
 function extDone() { _extBusy = false; $("#extGo").disabled = false; $("#extCancel").hidden = true; }
@@ -6096,7 +6156,7 @@ function applySettings() {
   document.body.classList.toggle("smooth", S().smoothScroll);
   normalize = S().normalizeDefault;
   invoke("set_agc", { on: normalize }).catch(() => {});
-  shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
+  shuffle = S().shuffleDefault; updateShuffleBtn();
   repeatMode = ["off", "all", "one"].includes(S().repeatDefault) ? S().repeatDefault : "off";
   updateRepeatBtn();
   // Sans PI usager : pas un if — .catch(() => {}) évite un rejet non trappé si
@@ -6635,7 +6695,7 @@ function openSettings() {
   $("#setSmoothAmt").addEventListener("input", e => SETTINGS.setSetting("smoothStrength", Number(e.target.value)));
   $("#setVol").addEventListener("change", e => { const level = clampVolumePercent(e.target.value); SETTINGS.setSetting("defaultVolume", level); $("#volume").value = level; $("#volumePct").value = String(Math.round(level)); $("#volume").style.setProperty("--fill", `${level}%`); invoke("set_volume", { level: volumeGainFromPercent(level) }).catch(() => {}); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
-  $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
+  $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; updateShuffleBtn(); if (curIndex >= 0) schedulePreload(); });
   $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
   $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
@@ -7554,7 +7614,7 @@ async function init() {
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
   $("#prevBtn").addEventListener("click", prev);
-  $("#shuffleBtn").addEventListener("click", () => { shuffle = !shuffle; $("#shuffleBtn").classList.toggle("active", shuffle); if (shuffle) buildShuffle(curIndex); if (curIndex >= 0) schedulePreload(); renderNpPanel(); flash(shuffle ? "Shuffle on" : "Shuffle off"); });
+  $("#shuffleBtn").addEventListener("click", () => { shuffle = !shuffle; updateShuffleBtn(); if (shuffle) buildShuffle(curIndex); if (curIndex >= 0) schedulePreload(); renderNpPanel(); flash(shuffle ? "Shuffle on" : "Shuffle off"); });
   $("#repeatBtn").addEventListener("click", () => {
     repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
     SETTINGS.setSetting("repeatDefault", repeatMode);
@@ -7658,6 +7718,7 @@ async function init() {
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
   $("#pickSp").addEventListener("click", () => { $("#pickModal").hidden = true; openExtImport(); });
+  $("#pickJson").addEventListener("click", importJsonMusicList);
   $("#extClose").addEventListener("click", () => { if (!_extBusy) $("#extModal").hidden = true; });
   $("#extModal").addEventListener("click", e => { if (e.target.id === "extModal" && !_extBusy) $("#extModal").hidden = true; });
   $("#extGo").addEventListener("click", runExtImport);

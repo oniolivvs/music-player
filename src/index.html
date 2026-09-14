@@ -117,7 +117,7 @@
         </div>
       </div>
       <div class="controls">
-        <button id="shuffleBtn" class="ctrl" title="Shuffle">
+        <button id="shuffleBtn" class="ctrl state-ctrl" title="Shuffle: off" aria-label="Shuffle: off" aria-pressed="false">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></svg>
         </button>
         <button id="prevBtn" class="ctrl" title="Previous">
@@ -129,7 +129,7 @@
         <button id="nextBtn" class="ctrl" title="Next">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg>
         </button>
-        <button id="repeatBtn" class="ctrl" title="Repeat"></button>
+        <button id="repeatBtn" class="ctrl state-ctrl" title="Repeat: off" aria-label="Repeat: off" aria-pressed="false"></button>
       </div>
       <div class="volume">
         <button id="dlToggle" class="dl-toggle" hidden title="Downloads"><span data-ic="dl"></span> <span id="dlBadge"></span></button>
@@ -355,6 +355,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
       <div class="modal-body">
         <button class="pick-opt" id="pickYt"><span class="bic" data-ic="globe"></span><span class="pick-txt"><b>From YouTube</b><span class="pick-sub">Search, or paste a YouTube / YT Music playlist link</span></span></button>
         <button class="pick-opt" id="pickSp"><span class="bic" data-ic="link"></span><span class="pick-txt"><b>From Spotify or another app</b><span class="pick-sub">Paste a Spotify link, or a list of songs</span></span></button>
+        <button class="pick-opt" id="pickJson"><span class="bic" data-ic="folder"></span><span class="pick-txt"><b>From a JSON music list</b><span class="pick-sub">Choose music.json on any HDD; downloaded titles are skipped</span></span></button>
       </div>
     </div>
   </div>

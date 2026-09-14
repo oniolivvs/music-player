@@ -80,6 +80,17 @@ test("shuffle search defaults to the current playlist or library scope", async (
   assert.match(settings, /shuffleSearchOnly:\s*false/);
 });
 
+test("shuffle and repeat expose unmistakable active states", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(html, /id="shuffleBtn"[^>]*state-ctrl[^>]*aria-pressed="false"/);
+  assert.match(html, /id="repeatBtn"[^>]*state-ctrl[^>]*aria-pressed="false"/);
+  assert.match(main, /function updateShuffleBtn\(\)[\s\S]*aria-pressed/);
+  assert.match(main, /function updateRepeatBtn\(\)[\s\S]*aria-pressed/);
+  assert.match(stylesheet, /\.ctrl\.state-ctrl\.active[\s\S]*linear-gradient[\s\S]*box-shadow/);
+});
+
 test("UI customization exposes layout and player visibility controls", async () => {
   const settings = await readFile(new URL("../src/settings.js", import.meta.url), "utf8");
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
