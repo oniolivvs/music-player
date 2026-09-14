@@ -44,7 +44,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.128";
+const SRC_VERSION = "0.22.129";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -6495,7 +6495,7 @@ function openSettings() {
     <section class="set-pane" data-pane="data">
     <div class="set-group data-transfer-card"><div class="set-title">Your Music Player data</div>
       <div class="set-hint">Export one portable JSON backup containing settings, playlists, library metadata, follows, listening history, statistics and online-track metadata. Audio files are never copied.</div>
-      <div class="data-transfer-actions">
+      <div class="data-transfer-actions paired-actions">
         <button id="setBackupExport" class="btn">${ic(IC.upload)} Export backup</button>
         <button id="setBackupImport" class="btn-line">${ic(IC.dl)} Import backup</button>
       </div>

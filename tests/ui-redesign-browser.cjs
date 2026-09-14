@@ -13,15 +13,26 @@ const assert = require('node:assert/strict');
       const page = await browser.newPage({ viewport });
       await page.setContent(html);
       await page.addStyleTag({ content: css });
+      await page.evaluate(() => {
+        const actions = document.createElement('div');
+        actions.className = 'data-transfer-actions paired-actions';
+        actions.style.width = '500px';
+        actions.innerHTML = '<button class="btn">Export backup</button><button class="btn-line">Import backup</button>';
+        document.body.append(actions);
+      });
       const result = await page.evaluate(() => {
         const nav = document.querySelector('.nav-bar').getBoundingClientRect();
         const main = document.querySelector('.main').getBoundingClientRect();
         const player = document.querySelector('.player').getBoundingClientRect();
         const importer = document.querySelector('#importPlaylistBtn').getBoundingClientRect();
+        const paired = [...document.querySelectorAll('.data-transfer-actions > button')]
+          .map(button => button.getBoundingClientRect());
         return {
           bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           navBottom: nav.bottom, mainTop: main.top, mainBottom: main.bottom, playerTop: player.top,
           importerWidth: importer.width,
+          pairedWidthDelta: Math.abs(paired[0].width - paired[1].width),
+          pairedHeightDelta: Math.abs(paired[0].height - paired[1].height),
           shareCount: document.querySelectorAll('#navShare, #shareModal').length,
         };
       });
@@ -29,6 +40,8 @@ const assert = require('node:assert/strict');
       assert.ok(result.navBottom <= result.mainTop + 1, JSON.stringify({ viewport, result }));
       assert.ok(result.mainBottom <= result.playerTop + 1, JSON.stringify({ viewport, result }));
       assert.ok(result.importerWidth > 0, JSON.stringify({ viewport, result }));
+      assert.ok(result.pairedWidthDelta <= 1, JSON.stringify({ viewport, result }));
+      assert.ok(result.pairedHeightDelta <= 1, JSON.stringify({ viewport, result }));
       assert.equal(result.shareCount, 0, JSON.stringify({ viewport, result }));
       results.push({ viewport, ...result });
       await page.close();

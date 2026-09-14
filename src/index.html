@@ -189,7 +189,7 @@
         <p class="dlg-msg">yt-dlp will read the YouTube cookies of the account logged in that browser and act as that account.
 Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
         <div id="ckList" class="ck-list"></div>
-        <div class="setup-actions">
+        <div class="setup-actions paired-actions">
           <button id="ckCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
           <button id="ckOk" class="btn" disabled><span data-ic="check"></span> <span id="ckOkLbl">Accept (5)</span></button>
         </div>
@@ -203,7 +203,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
       <div class="modal-body">
         <p id="dlgMsg" class="dlg-msg" hidden></p>
         <input type="text" id="dlgInput" class="text-in dlg-in" hidden autocomplete="off">
-        <div class="setup-actions">
+        <div class="setup-actions paired-actions">
           <button id="dlgCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
           <button id="dlgOk" class="btn"><span data-ic="check"></span> OK</button>
         </div>
@@ -223,7 +223,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <input type="checkbox" id="dlPromptCheck" checked>
           <span>Download immediately as MP3</span>
         </label>
-        <div class="setup-actions">
+        <div class="setup-actions paired-actions">
           <button id="dlPromptCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
           <button id="dlPromptOk" class="btn"><span data-ic="dl"></span> Continue</button>
         </div>
@@ -246,7 +246,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             <span>Also delete duplicate MP3 files from disk</span>
           </label>
         </div>
-        <div class="setup-actions">
+        <div class="setup-actions paired-actions">
           <button id="dupCancel" class="btn-line"><span data-ic="x"></span> Cancel</button>
           <button id="dupConfirm" class="btn"><span data-ic="trash"></span> Remove duplicates</button>
         </div>
@@ -261,7 +261,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
         <div class="setup-step" data-step="0">
           <p class="setup-p">First launch! Do you want to configure the app now (yt-dlp binary, browser cookies, download folder), or start with the defaults?</p>
           <p class="setup-hint">Everything stays editable later in <b>Settings</b>.</p>
-          <div class="setup-actions">
+          <div class="setup-actions paired-actions">
             <button id="suDefaults" class="btn-line"><span data-ic="check"></span> Use defaults</button>
             <button id="suConfigure" class="btn"><span data-ic="gear"></span> Configure now</button>
           </div>

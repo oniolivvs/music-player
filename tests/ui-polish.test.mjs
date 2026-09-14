@@ -24,9 +24,15 @@ test("playlist import explicitly asks whether future tracks should be followed",
 });
 
 test("settings expose full backup import and export", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(main, /id="setBackupExport"/);
   assert.match(main, /id="setBackupImport"/);
+  assert.match(main, /class="data-transfer-actions paired-actions"/);
+  assert.match(html, /class="setup-actions paired-actions"/);
+  assert.match(css, /\.paired-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.paired-actions\s*>\s*button\s*\{[^}]*width:\s*100%[^}]*min-height:\s*46px/s);
   assert.match(main, /createBackup\(\{/);
   assert.match(main, /parseBackup\(/);
 });

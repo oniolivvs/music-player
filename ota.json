@@ -1,5 +1,5 @@
 {
-  "version": "0.22.128",
+  "version": "0.22.129",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -15,7 +15,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Makes Music Player Windows-only, removes Linux and Android releases, and fixes incomplete test prerequisites and version drift.",
+  "notes": "Makes every two-choice action group use equal button dimensions in settings and popups.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }
