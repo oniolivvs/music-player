@@ -44,7 +44,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.127";
+const SRC_VERSION = "0.22.128";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2261,9 +2261,9 @@ function openSourceCtx(x, y, folder) {
 // ─── Sources (folders) ───
 function renderSources() {
   const host = $("#sourcesList");
-  // A source that currently holds no media is hidden from the list — it is
-  // dropped for good on the next save.
-  const shown = folders.filter(f => library.some(t => inFolder(t, f)));
+  // Empty sources stay visible: users often register a destination before
+  // copying or downloading music into it.
+  const shown = folders;
   if (!shown.length) { host.innerHTML = `<div class="src-empty">No folders yet — add one above.</div>`; return; }
   host.innerHTML = shown.map(f => {
     const count = library.filter(t => inFolder(t, f)).length;
@@ -2333,7 +2333,6 @@ async function diffFolder(folder) {
 async function rescanFolder(folder) {
   flash(`Checking ${baseName(folder)}…`);
   const fresh = await diffFolder(folder);
-  pruneEmptySources();      // a folder the diff just emptied leaves the Sources list now
   await saveLibrary();
   renderSources();
   const gone = !folders.includes(folder);
@@ -4234,6 +4233,9 @@ async function dlPump() {
         if (d.id && suppressedSet.delete(d.id)) saveSuppressed();
         if (d.id && dlDeclined.delete(d.id)) saveDeclined();
         dir = dirOf(file);
+        // The download destination is a source too. Persist it immediately so
+        // it stays selectable even while temporarily empty later.
+        if (dir && !folders.includes(dir)) folders.push(dir);
         PL.replacePath(d.path, file); // playlists now point at the local file
         const meta = onlineIndex.get(d.path) || {};
         if (!library.some(x => x.path === file)) {
@@ -5848,18 +5850,6 @@ async function normalizeLibraryPaths() {
   }
   if (changed) { await saveLibrary(); console.warn("[library] paths normalized / duplicates removed"); }
 }
-// Drop a source folder + its tracks with NO prompt (internal cleanup path for
-// folders that hold no media at all — the interactive path is removeSource).
-function dropSource(folder) {
-  folders = folders.filter(f => f !== folder);
-  library = library.filter(t => !inFolder(t, folder));
-}
-// A folder is a source only while it holds something playable.
-function pruneEmptySources() {
-  let changed = false;
-  for (const f of [...folders]) if (!library.some(t => inFolder(t, f))) { dropSource(f); changed = true; }
-  return changed;
-}
 // Suppressed ids (downloads deleted on purpose): their online entry stays out
 // of the library and every playlist — scans/adoption/relinks would undo the
 // deletion at every launch without this. Returns true when something changed.
@@ -5904,25 +5894,24 @@ async function addSource(path) {
   // gets scanned twice under two spellings and every track doubles.
   if (IS_NATIVE) { try { path = await invoke("canon_path", { path }); } catch {} }
   flash(`Scanning ${baseName(path)}…`);
-  const tracks = await invoke("scan", { paths: [path] });
+  let tracks;
+  try { tracks = await invoke("scan", { paths: [path] }); }
+  catch (error) {
+    console.error("[source] add", error);
+    flash(`Could not add ${baseName(path)} · ${error}`);
+    return false;
+  }
   const found = Array.isArray(tracks) ? tracks : [];
   const seen = new Set(library.map(t => t.path));
   library = library.concat(found.filter(t => !seen.has(t.path)));
   applySuppressedFilter(); // a rescan must not resurrect a deleted-on-purpose track
-  if (found.length) {
-    if (!folders.includes(path)) folders.push(path);
-  } else if (folders.includes(path)) {
-    // A source that holds no audio/video file is useless — never keep it.
-    dropSource(path);
-  } else {
-    flash(`Nothing playable in ${baseName(path)} — not added as a source`);
-    return;
-  }
+  if (!folders.includes(path)) folders.push(path);
   await saveLibrary();
   renderSources();
   if (folders.includes(path)) openSource(path);
   else showLibrary();
   flash(`Added ${baseName(path)} · ${found.length} song${found.length === 1 ? "" : "s"}`);
+  return true;
 }
 async function rescanAll() {
   if (!folders.length) { flash("No sources to refresh"); return; }
@@ -5933,7 +5922,6 @@ async function rescanAll() {
     taskUpdate(tid, { detail: baseName(list[i]), pct: (i / list.length) * 100 });
     total += await diffFolder(list[i]);
   }
-  pruneEmptySources(); // folders the diffs left empty disappear from Sources now
   await saveLibrary(); renderSources();
   // Refresh the view only if the user is still looking at the library/source.
   if (active.type === "source" && folders.includes(active.id)) openSource(active.id);
@@ -5958,7 +5946,7 @@ async function pickFolder() {
   } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: IS_ANDROID ? ANDROID_MUSIC_DIR : "Folder path" }); if (p) await addSource(p); }
   finally { btn.disabled = false; }
 }
-async function addManual() { const p = await askText("Add a folder", { placeholder: "/path/to/music" }); if (p) addSource(p); }
+async function addManual() { const p = await askText("Add a folder", { placeholder: "/path/to/music" }); if (p) await addSource(p); }
 
 // ─── Settings ───
 function applyAccent() {
@@ -7484,7 +7472,15 @@ async function init() {
     const roots = [...folders];
     try {
       const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
-      if (downloadRoot) roots.push(downloadRoot);
+      if (downloadRoot) {
+        roots.push(downloadRoot);
+        // The Music/MusicPlayer destination is a source from the first launch,
+        // including while empty. This also repairs older installs that lost it.
+        if (!folders.includes(downloadRoot)) {
+          folders.push(downloadRoot);
+          await saveLibrary();
+        }
+      }
     }
     catch (e) { console.warn("[download root]", e); }
     try { if (roots.length) await invoke("register_roots", { paths: roots }); }
@@ -7522,9 +7518,6 @@ async function init() {
   // Suppressed ids (downloads deleted on purpose): their online entries leave
   // the library AND every playlist, or scans/adoption would undo the deletion.
   if (applySuppressedFilter()) await saveLibrary();
-  // Sources saved while empty (no audio/video file at scan time) are dropped —
-  // they only clutter the sidebar. Cheap, library-scoped: no disk scan here.
-  if (pruneEmptySources()) saveLibrary();
   if (IS_ANDROID && !folders.length) {
     // Give the permission dialog a moment, then adopt the shared Music folder.
     setTimeout(() => { addSource(ANDROID_MUSIC_DIR).catch(() => {}); }, 4000);
