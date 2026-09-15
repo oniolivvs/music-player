@@ -15,9 +15,9 @@ const assert = require('node:assert/strict');
       await page.addStyleTag({ content: css });
       await page.evaluate(() => {
         const actions = document.createElement('div');
-        actions.className = 'data-transfer-actions triple-actions';
+        actions.className = 'data-transfer-actions paired-actions';
         actions.style.width = '500px';
-        actions.innerHTML = '<button class="btn">Export backup</button><button class="btn-line">Import backup</button><button class="btn-line">Import music list</button>';
+        actions.innerHTML = '<button class="btn">Export backup</button><button class="btn-line">Import backup</button>';
         document.body.append(actions);
       });
       const result = await page.evaluate(() => {

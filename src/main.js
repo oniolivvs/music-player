@@ -45,7 +45,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.133";
+const SRC_VERSION = "0.22.134";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2333,15 +2333,25 @@ function remapMovedPaths(pathMap) {
   saveHistory(); savePlays(); savePlayback();
 }
 
-async function moveLocalFiles(paths, playlistId = "") {
+function sharedLocalFiles() {
+  const references = new Map();
+  for (const playlist of PL.getPlaylists()) {
+    const unique = new Set(playlist.paths.map(localFileFor).filter(path => path && !isOnline(path)));
+    for (const path of unique) references.set(path, (references.get(path) || 0) + 1);
+  }
+  return [...references].filter(([, count]) => count > 1).map(([path]) => path);
+}
+
+async function moveLocalFiles(paths, playlistId = "", destinationOverride = "") {
   const local = [...new Set(paths.map(localFileFor).filter(path => path && !isOnline(path)))];
   if (!local.length) { flash("No local file to move"); return 0; }
   const playlist = PL.getPlaylists().find(item => item.id === playlistId);
-  const destination = await pickMusicDirectory(
+  const destination = destinationOverride || await pickMusicDirectory(
     local.length === 1 ? "Move this audio file to…" : `Move ${local.length} audio files to…`,
     playlist?.downloadDir || S().downloadDir || "",
   );
   if (!destination) return 0;
+  if (destinationOverride) await invoke("register_roots", { paths: [destination] });
   if (playlist) PL.setDownloadDir(playlist.id, destination);
   const moved = new Map(); const failed = [];
   for (const path of local) {
@@ -2695,18 +2705,8 @@ function openExtImport() {
   $("#extModal").hidden = false; $("#extInput").focus();
 }
 
-async function importJsonMusicList() {
-  if (!IS_NATIVE) { backupStatus("JSON import needs the Windows app.", true); return; }
-  backupStatus("Choose a JSON music list…");
-  try {
-    const defaultPath = await invoke("yt_download_root", { dir: String(S().downloadDir || "") }).catch(() => "");
-    const path = await T.core.invoke("plugin:dialog|open", { options: {
-      directory: false, multiple: false, title: "Import a JSON music list",
-      defaultPath: defaultPath || undefined,
-      filters: [{ name: "JSON music list", extensions: ["json"] }],
-    } });
-    if (!path) { backupStatus(""); return; }
-    const { tracks, invalid, duplicates } = parseMusicList(await invoke("backup_import", { path }));
+async function importJsonMusicList(raw, path) {
+    const { tracks, invalid, duplicates } = parseMusicList(raw);
     const name = baseName(path).replace(/\.json$/i, "").trim() || "Imported music list";
     let playlist = PL.getPlaylists().find(item => item.name.toLowerCase() === name.toLowerCase());
     if (!playlist) playlist = PL.createPlaylist(name);
@@ -2743,7 +2743,6 @@ async function importJsonMusicList() {
       const downloadDir = await choosePlaylistDirectory(playlist.id, `Choose where “${playlist.name}” stores mp3 files`);
       if (downloadDir) downloadTracks(missing, true, downloadDir);
     }
-  } catch (error) { backupStatus(`JSON music list import failed: ${error}`, true); }
 }
 function extStatus(msg, err) { const el = $("#extStatus"); el.textContent = msg; el.style.color = err ? "#f59e0b" : ""; }
 function extDone() { _extBusy = false; $("#extGo").disabled = false; $("#extCancel").hidden = true; }
@@ -3804,7 +3803,7 @@ async function deleteBlockedTracks() {
   flash(`Removed ${summary.entries} blocked entr${summary.entries === 1 ? "y" : "ies"} · ${summary.failed} failed`);
 }
 async function cleanupRoots() {
-  const roots = [...folders];
+  const roots = [...folders, S().sharedTracksDir, ...PL.getPlaylists().map(playlist => playlist.downloadDir)];
   const downloadRoot = await invoke("yt_cleanup_download_root", { dir: String(S().downloadDir || "") });
   if (downloadRoot) roots.push(downloadRoot);
   const uniqueRoots = [...new Set(roots.filter(Boolean))];
@@ -4321,7 +4320,9 @@ function downloadTracks(paths, tryLocal = false, targetDir = "") {
     // tryLocal lets direct explicit attempts ("Download track locally") through.
     if (suppressedSet.has(ytId(p))) unsuppressNow(ytId(p));
     const t = onlineIndex.get(p);
-    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", dir: targetDir || "", status: "queued", pct: 0 });
+    const references = PL.getPlaylists().filter(playlist => playlist.paths.some(path => ytId(path) === ytId(p))).length;
+    const destination = references > 1 && S().sharedTracksDir ? S().sharedTracksDir : targetDir;
+    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", dir: destination || "", status: "queued", pct: 0 });
     added++;
   }
   const skipNote = blocked ? ` · ${blocked} unavailable skipped` : "";
@@ -6411,11 +6412,19 @@ async function importBackup() {
   backupStatus("Choose a Music Player backup…");
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: {
-      directory: false, multiple: false, title: "Import Music Player backup",
-      filters: [{ name: "Music Player backup", extensions: ["json"] }],
+      directory: false, multiple: false, title: "Import Music Player backup or music list",
+      filters: [{ name: "Music Player JSON", extensions: ["json"] }],
     } });
     if (!path) { backupStatus(""); return; }
-    const backup = parseBackup(await invoke("backup_import", { path }));
+    const raw = await invoke("backup_import", { path });
+    let backup;
+    try { backup = parseBackup(raw); }
+    catch (backupError) {
+      // One unified Import action: full backups restore everything; legacy HDD
+      // music lists are detected automatically and merged into one playlist.
+      try { await importJsonMusicList(raw, path); return; }
+      catch { throw backupError; }
+    }
     const summary = backupSummary(backup);
     const confirmed = await askConfirm(
       "Replace current Music Player data?",
@@ -6455,18 +6464,16 @@ function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
     <nav class="set-nav">
-      <button class="set-tab on" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
-      <button class="set-tab" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
-      <button class="set-tab" data-tab="playback">${ic(IC.play)}<span>Playback</span></button>
-      <button class="set-tab" data-tab="youtube">${ic(IC.globe)}<span>YouTube</span></button>
-      <button class="set-tab" data-tab="downloads">${ic(IC.dl)}<span>Downloads</span></button>
-      <button class="set-tab" data-tab="integrations">${ic(IC.radio)}<span>Integrations</span></button>
-      <button class="set-tab" data-tab="library">${ic(IC.note)}<span>Library</span></button>
+      <div class="set-nav-group">Customisation</div>
+      <button class="set-tab set-tab-sub on" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
+      <button class="set-tab set-tab-sub" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
+      <div class="set-nav-group">Storage</div>
+      <button class="set-tab" data-tab="disk">${ic(IC.folder)}<span>Disk</span></button>
+      <div class="set-nav-group">Data</div>
       <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
-      <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
     </nav>
     <div class="set-panes">
-    <section class="set-pane on" data-pane="appearance">
+    <section class="set-pane" data-pane="appearance">
     <div class="set-group"><div class="set-title">Theme</div>
       <div class="set-row"><label>Theme</label>
         <select id="setTheme" class="sel sm-sel wide">${Object.keys(SETTINGS.THEMES).map(k => `<option value="${k}" ${s.theme === k ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}<option value="custom" ${s.theme === "custom" ? "selected" : ""}>Custom</option></select></div>
@@ -6519,7 +6526,7 @@ function openSettings() {
       <div class="set-hint">Put any image on the slider knob — a face, a logo, an emoji screenshot… Square images look best.</div>
     </div>
     </section>
-    <section class="set-pane" data-pane="interface">
+    <section class="set-pane on" data-pane="interface">
     <div class="set-group"><div class="set-title">Interface</div>
       <div class="set-title set-title-sub">Navigation visibility</div>
       <div class="set-row"><label>Recent tab</label><input type="checkbox" id="setUiNavHistory" ${s.uiNavHistory !== false ? "checked" : ""}></div>
@@ -6618,61 +6625,26 @@ function openSettings() {
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">${ic(IC.refresh)} Run again…</button></div>
     </div>
     </section>
-    <section class="set-pane" data-pane="downloads">
-    <div class="set-group"><div class="set-title">Downloads</div>
-      <div class="set-row"><label>Download folder</label>
+    <section class="set-pane" data-pane="disk">
+    <div class="set-group"><div class="set-title">Disk storage</div>
+      <div class="set-row"><label>Root MP3 folder</label>
         <span class="dir-pick">
           <input type="text" id="setDlDir" class="text-in" placeholder="~/Music/MusicPlayer" value="${esc(s.downloadDir)}">
           <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">${ic(IC.folder)}</button>
         </span></div>
-      <div class="set-row"><label>Download quality</label>
-        <select id="setDlQuality" class="sel sm-sel">${[["best","Best available"],["320","320 kbps"],["256","256 kbps"],["192","192 kbps"],["128","128 kbps (smallest)"]].map(([v,l]) => `<option value="${v}" ${(s.downloadQuality||"best")===v?"selected":""}>${l}</option>`).join("")}</select></div>
-      <div class="set-hint">Applies to single tracks and whole-playlist downloads. Lower = smaller files. On desktop with yt-dlp it caps the mp3 bitrate; the built-in engine picks the closest audio stream.</div>
-      <div class="set-row"><label>Simultaneous downloads</label>
-        <select id="setDlConcurrency" class="sel sm-sel">${[1,2,3,4].map(v => `<option value="${v}" ${(Number(s.dlConcurrency) || 3) === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
-      <div class="set-hint">More parallel downloads clear a big queue faster, but raise the chance YouTube rate-limits you.</div>
+      <div class="set-row"><label>Shared tracks folder</label>
+        <span class="dir-pick">
+          <input type="text" id="setSharedDir" class="text-in" placeholder="Optional · shared_tracks" value="${esc(s.sharedTracksDir || "")}">
+          <button id="setSharedPick" class="btn-line sm" title="Choose the shared-tracks folder">${ic(IC.folder)}</button>
+        </span></div>
+      <div class="set-row"><label>Tracks used by several playlists <span class="set-sub">(${sharedLocalFiles().length})</span></label><button id="setSharedMove" class="btn-line sm" ${!s.sharedTracksDir || !sharedLocalFiles().length ? "disabled" : ""}>${ic(IC.folder)} Organize shared tracks</button></div>
+      <div class="set-hint">Several playlists point to one physical file. New shared titles use this folder; Organize moves existing shared files and updates every playlist reference.</div>
       <div class="set-row"><label>Storage cap <span class="set-sub">(max MB of audio per source folder · 0 = unlimited)</span></label><input type="number" id="setStorageCap" class="num-in" min="0" max="1000000" step="500" value="${s.storageCapMb ?? 0}"></div>
-      <div class="set-hint" id="setStorageUse">When the download folder reaches this size, new downloads are skipped so it never overflows.</div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
-      <div class="set-row"><label>New tracks in followed playlists</label>
-        <select id="setNewTracks" class="sel sm-sel wide">
-          <option value="ask" ${(s.newTrackBehavior || "ask") === "ask" ? "selected" : ""}>Ask before downloading</option>
-          <option value="auto" ${s.newTrackBehavior === "auto" ? "selected" : ""}>Download automatically</option>
-          <option value="off" ${s.newTrackBehavior === "off" ? "selected" : ""}>Never — manual checks only</option>
-        </select></div>
-      <div class="set-hint">When a check spots new upstream tracks: “ask” proposes them once (declined ones are never proposed again), “auto” downloads with no prompt, “off” leaves everything to you.</div>
-      <div class="set-row"><label>Tracks never proposed again</label><button id="setDeclined" class="btn-line sm">Forget ${dlDeclined.size}</button></div>
-      <div class="set-row"><label>Downloads deleted &amp; suppressed</label><button id="setSuppr" class="btn-line sm">Forget ${suppressedSet.size}</button></div>
-      <div class="set-hint">Deleting a downloaded file from the app tells it to stop bringing that track back. “Forget” clears both memories.</div>
-      <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
-      <div class="set-hint">Where downloads are saved. Pick any folder with the folder picker. Empty = <b>${IS_ANDROID ? "/storage/emulated/0/Music/MusicPlayer" : "~/Music/MusicPlayer"}</b>. The folder is added as a source automatically after a download.</div>
+      <div class="set-hint">Empty root = <b>~/Music/MusicPlayer</b>. Save locally always asks for a playlist folder when none is configured.</div>
     </div>
-    </section>
-    <section class="set-pane" data-pane="integrations">
-    <div class="set-group"><div class="set-title">Account &amp; cloud sync</div>
-      ${s.gdriveTokens?.refresh_token
-        ? `<div class="set-row"><label>Signed in</label><b>${esc(s.gdriveTokens.email || "Google account")}</b></div>
-           <div class="set-row"><label>Auto-sync <span class="set-sub">(on launch + after changes)</span></label><input type="checkbox" id="setSyncAuto" ${s.syncAuto !== false ? "checked" : ""}></div>
-           <div class="set-row"><label>${s.syncAt ? "Last synced " + new Date(s.syncAt).toLocaleString() : "Never synced"}</label>
-             <span class="dir-pick"><button id="setSyncNow" class="btn-line sm">${ic(IC.refresh)} Sync now</button><button id="setSignOut" class="btn-line sm">${ic(IC.power)} Sign out</button></span></div>
-           <div class="set-hint">Playlists, settings, blocked tracks and follows sync through the private app folder of your Google Drive. Audio files are never uploaded; use Backup to move the app's metadata manually.</div>`
-        : `<div class="set-hint">Sign in with Google to sync your playlists / settings / blocked / follows across your devices through your own Google Drive (nothing goes to us). Audio files aren't uploaded.<br><br><b>One-time setup:</b> create a free OAuth client at <b>console.cloud.google.com</b> → APIs &amp; Services → Credentials → <i>Create OAuth client ID</i> → application type <b>Desktop app</b>, enable the <b>Google Drive API</b>, then paste the Client ID (and secret) below.</div>
-           <div class="set-row"><label>Google OAuth Client ID</label><input type="text" id="setGdId" class="text-in" placeholder="…apps.googleusercontent.com" value="${esc(s.gdriveClientId)}"></div>
-           <div class="set-row"><label>Client secret <span class="set-sub">(Desktop app)</span></label><input type="text" id="setGdSecret" class="text-in" placeholder="GOCSPX-…" value="${esc(s.gdriveClientSecret)}"></div>
-           <button id="setSignIn" class="btn">${ic(IC.user)} Sign in with Google</button>`}
-    </div>
-    <div class="set-group"><div class="set-title">Notifications</div>
-      <div class="set-row"><label>Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
-      <div class="set-hint">Tip: your desktop's media widget already shows the track (MPRIS) — turn this off if you see two popups.</div>
-    </div>
-    <div class="set-group"><div class="set-title">Discord Rich Presence</div>
-      <div class="set-row"><label>Show what I'm listening to</label><input type="checkbox" id="setRpc" ${s.rpcEnabled ? "checked" : ""}></div>
-      <div class="set-row"><label>Discord Application ID</label><input type="text" id="setRpcId" class="text-in" placeholder="Discord app client id" value="${esc(s.rpcClientId)}"></div>
-      <div class="set-hint">Create an app at <b>discord.com/developers</b> → copy its <b>Application ID</b>. Requires the Discord desktop app running.</div>
-      <div class="set-row"><label>Show delay on a new track <span class="set-sub">(seconds)</span></label><input type="number" id="setRpcDelay" class="num-in" min="0" max="60" step="1" value="${s.rpcDelay ?? 0}"></div>
-      <div class="set-hint">Wait this long before updating Discord — skipping quickly through tracks then won't spam it (only what you settle on shows).</div>
-      <div class="set-row"><label>Remove when paused after <span class="set-sub">(seconds · 0 = at once)</span></label><input type="number" id="setRpcPause" class="num-in" min="0" max="3600" step="5" value="${s.rpcPauseClear ?? 0}"></div>
-      <div class="set-hint">When you pause, how long before the presence disappears from Discord. It comes back instantly on resume.</div>
+    <div class="set-group"><div class="set-title">Playlist folders</div>
+      <div class="disk-playlists">${PL.getPlaylists().length ? PL.getPlaylists().map(playlist => `<div class="disk-playlist-row"><span><b>${esc(playlist.name)}</b><small>${esc(playlist.downloadDir || s.downloadDir || "Default MP3 folder")}</small></span><span class="dir-pick"><button class="btn-line sm" data-disk-folder="${playlist.id}">${ic(IC.folder)} Folder</button><button class="btn-line sm" data-disk-move="${playlist.id}" ${playlist.paths.some(localFileFor) ? "" : "disabled"}>Move files</button></span></div>`).join("") : `<div class="set-hint">No playlist yet.</div>`}</div>
     </div>
     </section>
     <section class="set-pane" data-pane="library">
@@ -6701,11 +6673,10 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="data">
     <div class="set-group data-transfer-card"><div class="set-title">Your Music Player data</div>
-      <div class="set-hint">Export one portable JSON backup containing settings, playlists, library metadata, follows, listening history, statistics and online-track metadata. Audio files are never copied.</div>
-      <div class="data-transfer-actions triple-actions">
+      <div class="set-hint">One portable JSON contains settings, the complete music list, playlists, library metadata, follows, history, statistics and online-track metadata. Import also detects legacy music-list JSON automatically. Audio files are never copied.</div>
+      <div class="data-transfer-actions paired-actions">
         <button id="setBackupExport" class="btn">${ic(IC.upload)} Export backup</button>
         <button id="setBackupImport" class="btn-line">${ic(IC.dl)} Import backup</button>
-        <button id="setMusicListImport" class="btn-line">${ic(IC.folder)} Import music list</button>
       </div>
       <div id="setBackupStatus" class="set-hint" aria-live="polite"></div>
     </div>
@@ -6790,7 +6761,13 @@ function openSettings() {
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
   $("#setBackupExport")?.addEventListener("click", exportBackup);
   $("#setBackupImport")?.addEventListener("click", importBackup);
-  $("#setMusicListImport")?.addEventListener("click", importJsonMusicList);
+  body.querySelectorAll("[data-disk-folder]").forEach(button => button.addEventListener("click", async () => {
+    if (await choosePlaylistDirectory(button.dataset.diskFolder)) openSettings();
+  }));
+  body.querySelectorAll("[data-disk-move]").forEach(button => button.addEventListener("click", () => {
+    const playlist = PL.getPlaylists().find(item => item.id === button.dataset.diskMove);
+    if (playlist) void moveLocalFiles(playlist.paths, playlist.id);
+  }));
   $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
   for (const [id, key] of [["setCustBg", "customBg"], ["setCustPanel", "customPanel"], ["setCustText", "customText"]]) {
     $("#" + id).addEventListener("input", e => {
@@ -6846,7 +6823,7 @@ function openSettings() {
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; updateShuffleBtn(); if (curIndex >= 0) schedulePreload(); });
   $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
-  $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
+  $("#setNotify")?.addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
   const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); if (!el) return; el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
   const ytTest = async () => {
@@ -6908,15 +6885,15 @@ function openSettings() {
   $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
   $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
   $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else { void storeSaveQuietly("playback", ""); void storeSaveQuietly("playbackq", ""); _lastQueueSig = ""; } });
-  $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else void storeSaveQuietly("dlqueue", ""); });
+  $("#setResumeDl")?.addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else void storeSaveQuietly("dlqueue", ""); });
   $("#setHist").addEventListener("change", e => {
     const v = Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0)));
     e.target.value = v; SETTINGS.setSetting("historyLimit", v);
     if (!v) { history2 = []; saveHistory(); } else if (history2.length > v) { history2.length = v; saveHistory(); }
     applyUiPrefs();
   });
-  $("#setRpcDelay").addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
-  $("#setRpcPause").addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
+  $("#setRpcDelay")?.addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
+  $("#setRpcPause")?.addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
   $("#setCompactTop").addEventListener("change", e => { SETTINGS.setSetting("compactTopbar", e.target.checked); document.body.classList.toggle("compact-top", e.target.checked); });
   for (const [id, key] of [["setAccA", "customAccentA"], ["setAccB", "customAccentB"]]) {
     // Two pickers make one "custom" accent, applied live; swatch ring drops.
@@ -6945,16 +6922,27 @@ function openSettings() {
   });
   $("#setThumbClear").addEventListener("click", () => { SETTINGS.setSetting("sliderImage", ""); $("#setThumbImg").value = ""; applyThumbImage(S()); });
   initVersionSwitcher();
-  $("#setDlDir").addEventListener("change", e => SETTINGS.setSetting("downloadDir", e.target.value.trim()));
-  $("#setDlPick").addEventListener("click", async () => {
-    if (!IS_NATIVE) { flash("Folder picker needs the native app"); return; }
-    try {
-      const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose the download folder" } });
-      if (path) { SETTINGS.setSetting("downloadDir", path); $("#setDlDir").value = path; }
-    } catch (e) { console.error("[dl dir]", e); }
+  $("#setDlDir").addEventListener("change", async e => {
+    const path = e.target.value.trim();
+    SETTINGS.setSetting("downloadDir", path);
+    if (path) await invoke("register_roots", { paths: [path] }).catch(() => {});
   });
-  $("#setRpc").addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
-  $("#setRpcId").addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
+  $("#setDlPick").addEventListener("click", async () => {
+    const path = await pickMusicDirectory("Choose the root MP3 folder", S().downloadDir || "");
+    if (path) { SETTINGS.setSetting("downloadDir", path); $("#setDlDir").value = path; }
+  });
+  $("#setSharedDir").addEventListener("change", async e => {
+    const path = e.target.value.trim();
+    SETTINGS.setSetting("sharedTracksDir", path);
+    if (path) await invoke("register_roots", { paths: [path] }).catch(() => {});
+  });
+  $("#setSharedPick").addEventListener("click", async () => {
+    const path = await pickMusicDirectory("Choose the shared-tracks folder", S().sharedTracksDir || S().downloadDir || "");
+    if (path) { SETTINGS.setSetting("sharedTracksDir", path); $("#setSharedDir").value = path; openSettings(); }
+  });
+  $("#setSharedMove").addEventListener("click", () => { void moveLocalFiles(sharedLocalFiles(), "", S().sharedTracksDir || ""); });
+  $("#setRpc")?.addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
+  $("#setRpcId")?.addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
   $("#setFollowIv").addEventListener("change", e => SETTINGS.setSetting("followInterval", e.target.value));
   $("#setFollowCheck").addEventListener("click", () => checkForNewTracks(true));
   renderFollowList();
@@ -7678,7 +7666,7 @@ async function init() {
   // ask it to. Resolve the actual writable download destination here too: an
   // empty fresh setting must register the default/fallback, not the empty string.
   if (IS_NATIVE) {
-    const roots = [...folders, ...PL.getPlaylists().map(playlist => playlist.downloadDir).filter(Boolean)];
+    const roots = [...folders, S().sharedTracksDir, ...PL.getPlaylists().map(playlist => playlist.downloadDir).filter(Boolean)].filter(Boolean);
     try {
       const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
       if (downloadRoot) {

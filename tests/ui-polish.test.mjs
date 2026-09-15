@@ -24,20 +24,31 @@ test("playlist import explicitly asks whether future tracks should be followed",
   assert.doesNotMatch(html, /id="pickJson"/);
 });
 
-test("settings expose full backup import and export", async () => {
+test("settings expose one unified backup import and export", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(main, /id="setBackupExport"/);
   assert.match(main, /id="setBackupImport"/);
-  assert.match(main, /class="data-transfer-actions triple-actions"/);
-  assert.match(main, /id="setMusicListImport"/);
+  assert.match(main, /class="data-transfer-actions paired-actions"/);
+  assert.doesNotMatch(main, /id="setMusicListImport"/);
+  assert.match(main, /try \{ backup = parseBackup\(raw\); \}[\s\S]*await importJsonMusicList\(raw, path\)/);
   assert.match(html, /class="setup-actions paired-actions"/);
   assert.match(css, /\.paired-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(css, /\.paired-actions\s*>\s*button\s*\{[^}]*width:\s*100%[^}]*min-height:\s*46px/s);
-  assert.match(css, /\.triple-actions\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(main, /createBackup\(\{/);
   assert.match(main, /parseBackup\(/);
+});
+
+test("settings navigation is Customisation, Disk, then Backup", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const nav = main.match(/<nav class="set-nav">([\s\S]*?)<\/nav>/)?.[1] || "";
+  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "disk", "data"]);
+  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*Disk[\s\S]*Backup/);
+  assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Integrations|Library|System/);
+  assert.doesNotMatch(main, /id="setSignIn"|Sign in with Google/);
+  assert.match(main, /data-pane="disk"[\s\S]*id="setDlDir"[\s\S]*id="setSharedDir"[\s\S]*id="setAutoSave"/);
+  assert.doesNotMatch(main.match(/data-pane="disk"([\s\S]*?)<\/section>/)?.[1] || "", /setDlQuality|setDlConcurrency|setResumeDl|setCookies|setYtPath/);
 });
 
 test("playlist storage supports folder selection, physical moves, and shared-file reuse", async () => {

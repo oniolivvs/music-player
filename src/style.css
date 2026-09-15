@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.133 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.134 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -630,7 +630,10 @@ body.has-bg .volume-pct input { background: transparent; background-color: trans
 .modal.settings .modal-body { flex-direction: row; padding: 0; gap: 0; overflow: hidden; }
 .set-nav { flex: 0 0 178px; display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; border-right: 1px solid var(--bd); overflow-y: auto; background: rgba(255, 255, 255, .015); }
 body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
+.set-nav-group { margin: 12px 10px 4px; color: var(--tx-3); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.set-nav-group:first-child { margin-top: 2px; }
 .set-tab { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border: 0; border-radius: 9px; background: transparent; color: var(--tx-2); font-size: 13px; font-weight: 600; cursor: pointer; transition: background .13s, color .13s; }
+.set-tab-sub { padding-left: 22px; }
 .set-tab .bic { color: var(--tx-3); transition: color .13s; display: inline-flex; }
 .set-tab:hover { background: rgba(255, 255, 255, .05); color: var(--tx-1); }
 .set-tab:hover .bic { color: var(--tx-2); }
@@ -639,6 +642,10 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
 .set-panes { flex: 1 1 auto; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .set-pane { display: none; flex-direction: column; gap: 12px; }
 .set-pane.on { display: flex; }
+.disk-playlists { display: flex; flex-direction: column; gap: 8px; }
+.disk-playlist-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--bd); border-radius: 10px; background: var(--row); }
+.disk-playlist-row > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.disk-playlist-row small { color: var(--tx-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {
   /* Fill the whole viewport with inset:0 instead of width:100vw + grid
      centering — a centered item that's even 1px wider than the viewport gets
@@ -648,7 +655,9 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
   .modal.settings .modal-head { padding-top: calc(12px + var(--safe-top)); }
   .modal.settings .modal-body { flex-direction: column; min-width: 0; overflow-x: hidden; }
   .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
+  .set-nav-group { display: none; }
   .set-tab { width: auto; white-space: nowrap; flex: 0 0 auto; }
+  .set-tab-sub { padding-left: 11px; }
   .set-tab.on { box-shadow: inset 0 -2px 0 var(--accent); }
   .set-panes { padding-bottom: calc(18px + var(--safe-bottom)); min-width: 0; overflow-x: hidden; }
   .set-pane, .set-group { min-width: 0; max-width: 100%; }
@@ -658,6 +667,7 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
   .cleanup-delete-actions { grid-template-columns: 1fr; }
   .cleanup-playlist-scope { grid-template-columns: 1fr; gap: 6px; }
   .text-in, .num-in, .sel.wide, .dir-pick { max-width: 100%; }
+  .disk-playlist-row { align-items: flex-start; flex-direction: column; }
   .text-in { width: 100%; }
   /* Full-screen modals on mobile: give them safe-area breathing room. */
   .modal-backdrop { padding: 0; }
@@ -2062,19 +2072,6 @@ body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
   min-height: 46px;
   justify-content: center;
 }
-.triple-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 10px;
-}
-.triple-actions > button {
-  width: 100%;
-  min-width: 0;
-  min-height: 46px;
-  justify-content: center;
-}
-
 /* Stateful playback controls: the enabled mode must remain unmistakable over
    dark, light and artwork-driven themes, including while hovered. */
 .ctrl.state-ctrl {
@@ -2110,5 +2107,5 @@ body.has-bg .ctrl.state-ctrl.active,
   .top-nav .nav-right { margin-left: 0; }
 }
 @media (max-width: 520px) {
-  .paired-actions, .triple-actions { grid-template-columns: 1fr; }
+  .paired-actions { grid-template-columns: 1fr; }
 }

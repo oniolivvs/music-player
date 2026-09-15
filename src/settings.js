@@ -52,6 +52,7 @@ const DEFAULTS = {
   thumbSize: 12,         // slider thumb diameter (px)
   pbPad: 17,             // player control icon size (px) — "Player icon size" slider
   downloadDir: "",       // empty = ~/Music/MusicPlayer (resolved by the backend)
+  sharedTracksDir: "",   // optional central folder for tracks referenced by several playlists
   preferLocal: true,     // play the local file when an online track is downloaded
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog
   newTrackBehavior: "ask", // new tracks in followed playlists: ask (propose once) | auto (download, no prompt) | off (manual only)
