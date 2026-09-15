@@ -584,14 +584,50 @@ fn vr_duration(v: &serde_json::Value) -> u64 {
         .unwrap_or(0)
 }
 
+fn page_number_after(body: &str, key: &str) -> Option<u64> {
+    let needle = format!("\"{key}\"");
+    body.match_indices(&needle).find_map(|(start, _)| {
+        let rest = &body[start + needle.len()..];
+        let colon = rest.find(':')?;
+        let mut value = rest[colon + 1..].trim_start();
+        if value.starts_with('\"') { value = &value[1..]; }
+        let digits = value.bytes().take_while(|b| b.is_ascii_digit()).count();
+        (digits > 0).then(|| value[..digits].parse::<u64>().ok()).flatten()
+    })
+}
+
+/// The VR player endpoint is the best stream resolver but can return
+/// LOGIN_REQUIRED when YouTube rotates its bot checks. The public watch page
+/// still embeds the duration, so use it as a metadata-only fallback.
+fn watch_duration(id: &str) -> Result<u64, String> {
+    let page = format!("https://www.youtube.com/watch?v={id}");
+    let body = ureq::get(&page)
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")
+        .set("Accept-Language", "en-US,en;q=0.9")
+        .set("Cookie", "SOCS=CAISEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+")
+        .call()
+        .map_err(|e| format!("watch page: {e}"))?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    let seconds = page_number_after(&body, "lengthSeconds")
+        .or_else(|| page_number_after(&body, "approxDurationMs").map(|ms| ms / 1000))
+        .filter(|seconds| *seconds > 0)
+        .ok_or("watch page did not contain a duration")?;
+    Ok(seconds)
+}
+
 /// Resolve only the duration for imported online tracks whose JSON metadata
 /// did not contain one. This keeps the playback bar truthful without forcing
 /// the user to re-import the music list.
 pub async fn video_duration(id: &str) -> Result<u64, String> {
     let id = id.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let v = vr_player(&id)?;
-        Ok(vr_duration(&v))
+        match vr_player(&id) {
+            Ok(v) if vr_duration(&v) > 0 => Ok(vr_duration(&v)),
+            Ok(_) => watch_duration(&id),
+            Err(primary) => watch_duration(&id)
+                .map_err(|fallback| format!("player duration: {primary}; {fallback}")),
+        }
     }).await.map_err(|e| format!("native yt duration worker failed: {e}"))?
 }
 

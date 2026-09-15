@@ -110,10 +110,14 @@ test("unknown YouTube durations are hydrated and replace the one-second fallback
   assert.match(rust, /async fn yt_duration\(id: String\)/);
   assert.match(native, /pub async fn video_duration\(id: &str\)/);
   assert.match(native, /v\["videoDetails"\]\["lengthSeconds"\]/);
+  assert.match(native, /fn watch_duration\(id: &str\)/);
+  assert.match(native, /approxDurationMs/);
 });
 
 test("artwork player text and controls stay readable, vivid, and frosted", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.has-bg button:not\(\.swatch\)\s*\{[\s\S]*border-radius:\s*5px !important[\s\S]*background:\s*linear-gradient/);
+  assert.match(stylesheet, /body\.artwork-theme\.has-bg \.track :where\(\.meta \.t, \.meta \.s, \.album, \.dur\)/);
   assert.match(stylesheet, /body\.artwork-theme \.brand > span:last-child\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);
   assert.match(stylesheet, /body\.artwork-theme \.player :where\(\.now-title, \.time, \.volume-pct, \.volume-pct input\)\s*\{[^}]*var\(--tx-1\)/s);
   assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*linear-gradient[^}]*var\(--accent-2\)[^}]*box-shadow/s);

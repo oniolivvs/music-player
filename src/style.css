@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.140 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.143 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -2290,3 +2290,60 @@ body.has-bg .sort-ico {
   -webkit-backdrop-filter: blur(16px) saturate(1.35);
 }
 button:disabled { box-shadow: none; }
+
+/* Last cascade layer: wallpaper-specific rules above used to replace the
+   shared skin with a flat pale `--icon-surface`. Keep every button square,
+   frosted and visibly gradient-driven even when the artwork scheme is light. */
+body.has-bg button:not(.swatch) {
+  border-radius: 5px !important;
+  border-color: color-mix(in srgb, var(--accent-2) 68%, var(--bd)) !important;
+  color: var(--tx-1);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 46%, var(--bg-2)),
+    color-mix(in srgb, var(--accent-2) 34%, var(--bg-2))) !important;
+  backdrop-filter: blur(16px) saturate(1.45);
+  -webkit-backdrop-filter: blur(16px) saturate(1.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22),
+    0 6px 18px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+body.has-bg button:not(.swatch):not(:disabled):hover {
+  color: var(--tx-1);
+  border-color: color-mix(in srgb, var(--accent-2) 90%, var(--tx-1)) !important;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 62%, var(--bg-2)),
+    color-mix(in srgb, var(--accent-2) 52%, var(--bg-2))) !important;
+}
+body.has-bg button.btn,
+body.has-bg button.nav-import,
+body.has-bg button.ctrl.play,
+body.has-bg button.ctrl.state-ctrl.active {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent-2) 82%, #fff) !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2) 56%, #06b6d4) !important;
+}
+body.has-bg button.set-tab.on,
+body.has-bg button.nav-item.active {
+  color: var(--tx-1);
+  border-color: var(--accent-2) !important;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 58%, var(--bg-2)),
+    color-mix(in srgb, var(--accent-2) 42%, var(--bg-2))) !important;
+}
+body.has-bg button.swatch {
+  border-radius: 5px !important;
+  border-color: rgba(255,255,255,.5) !important;
+  backdrop-filter: blur(12px) saturate(1.35);
+  -webkit-backdrop-filter: blur(12px) saturate(1.35);
+}
+body.artwork-theme.has-bg .track :where(.meta .t, .meta .s, .album, .dur) {
+  color: var(--tx-1);
+  text-shadow: 0 1px min(2.5px, var(--text-shadow-blur, 2.5px)) var(--text-shadow-color),
+    0 0 1px var(--text-shadow-color);
+}
+body.artwork-theme.has-bg .track :where(.meta .s, .album, .dur) { color: var(--tx-2); }
+body.has-bg select.sel {
+  border-radius: 5px;
+  border-color: color-mix(in srgb, var(--accent-2) 58%, var(--bd));
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
