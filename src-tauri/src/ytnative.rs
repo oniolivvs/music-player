@@ -576,6 +576,25 @@ fn vr_title_artist(v: &serde_json::Value, id: &str) -> (String, String) {
     )
 }
 
+fn vr_duration(v: &serde_json::Value) -> u64 {
+    v["videoDetails"]["lengthSeconds"]
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| v["microformat"]["playerMicroformatRenderer"]["lengthSeconds"].as_str().and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(0)
+}
+
+/// Resolve only the duration for imported online tracks whose JSON metadata
+/// did not contain one. This keeps the playback bar truthful without forcing
+/// the user to re-import the music list.
+pub async fn video_duration(id: &str) -> Result<u64, String> {
+    let id = id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = vr_player(&id)?;
+        Ok(vr_duration(&v))
+    }).await.map_err(|e| format!("native yt duration worker failed: {e}"))?
+}
+
 /// Best playable stream URL via the ANDROID_VR client (directly fetchable).
 /// Streaming caps the bitrate at 96 kbps: audiophile formats are a waste here
 /// (the source is a compressed video track) and the higher the bitrate, the

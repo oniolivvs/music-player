@@ -100,6 +100,18 @@ test("track handoff resets the clock, buffer, timer and previous artwork immedia
   assert.match(main, /const retainReadyCover = el\.id === "npArt"[\s\S]*?el\.dataset\.album === albumKey\(t\)/);
 });
 
+test("unknown YouTube durations are hydrated and replace the one-second fallback", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const rust = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const native = await readFile(new URL("../src-tauri/src/ytnative.rs", import.meta.url), "utf8");
+  assert.match(main, /function hydrateOnlineDuration\(path, expectedTrack, expectedSeq\)/);
+  assert.match(main, /invoke\("yt_duration", \{ id \}\)/);
+  assert.match(main, /seek\.max = currentDuration;[\s\S]*renderSeek\(wallPos\(\)\)/);
+  assert.match(rust, /async fn yt_duration\(id: String\)/);
+  assert.match(native, /pub async fn video_duration\(id: &str\)/);
+  assert.match(native, /v\["videoDetails"\]\["lengthSeconds"\]/);
+});
+
 test("artwork player text and controls stay readable, vivid, and frosted", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /body\.artwork-theme \.brand > span:last-child\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);

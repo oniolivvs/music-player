@@ -271,6 +271,12 @@ async fn preload_stream(
     Ok(())
 }
 
+/// Fill missing duration metadata for an imported YouTube track.
+#[tauri::command]
+async fn yt_duration(id: String) -> Result<u64, String> {
+    ytnative::video_duration(&id).await
+}
+
 /// Resolve a stream URL into the cache without playing anything, so the actual
 /// play later is near-instant (called when the user selects an online track).
 #[tauri::command]
@@ -906,7 +912,7 @@ pub fn run() {
             latest_release, open_url, download_apk, install_apk, download_installer, run_installer,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
-            play_stream, preload_stream, prefetch_stream, play_direct, preload_direct, invalidate_stream,
+            play_stream, preload_stream, prefetch_stream, play_direct, preload_direct, invalidate_stream, yt_duration,
             reset_stream_progress,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_recommendations, youtube::yt_trending,
