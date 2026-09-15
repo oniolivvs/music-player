@@ -91,6 +91,15 @@ test("shuffle and repeat expose unmistakable active states", async () => {
   assert.match(stylesheet, /\.ctrl\.state-ctrl\.active[\s\S]*linear-gradient[\s\S]*box-shadow/);
 });
 
+test("track handoff resets the clock, buffer, timer and previous artwork immediately", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /function updateNowPlaying\(t, path\)[\s\S]*?else \{ setCurrentArtwork\("", artworkToken\); fetchCover\(t\); \}/);
+  assert.match(main, /function hardPlay\(i\)\s*\{[\s\S]*?commitPlay\(\);[\s\S]*?wallStart\(0\);/);
+  assert.match(main, /sk\.style\.setProperty\("--buf", "0%"\); _bufPct = 0;/);
+  assert.match(main, /\$\("#curTime"\)\.textContent = "0:00"; _lastTimeTxt = "0:00"; _lastSeekVal = 0;/);
+  assert.match(main, /const retainReadyCover = el\.id === "npArt"[\s\S]*?el\.dataset\.album === albumKey\(t\)/);
+});
+
 test("artwork player text and controls stay readable, vivid, and frosted", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /body\.artwork-theme \.brand > span:last-child\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);

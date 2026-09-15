@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.138";
+const SRC_VERSION = "0.22.139";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -601,7 +601,8 @@ function seams(diff, n, max) {
 }
 
 function setArtPlaceholder(el, t, artworkToken = "") {
-  const retainReadyCover = el.id === "npArt" && el.classList.contains("has-cover");
+  const retainReadyCover = el.id === "npArt" && el.classList.contains("has-cover")
+    && el.dataset.album === albumKey(t);
   if (artworkToken) el.dataset.playbackArtworkToken = artworkToken;
   if (!retainReadyCover) {
     el.classList.remove("has-cover"); el.style.backgroundImage = "";
@@ -5156,14 +5157,20 @@ function updateNowPlaying(t, path) {
     setArtPlaceholder(art, t, artworkToken);
     if (S().showArt) {
       if (t.thumbnail) setArtImg(art, t.thumbnail, artworkToken);
-      else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
+      else {
+        const cov = coverCache.get(albumKey(t));
+        if (cov) setArtImg(art, cov);
+        else { setCurrentArtwork("", artworkToken); fetchCover(t); }
+      }
     } else setCurrentArtwork("", artworkToken);
   } else setCurrentArtwork("", artworkToken);
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   const sk = $("#seek");
   sk.max = dur > 0 ? dur : 1; sk.value = 0; sk.style.setProperty("--fill", "0%");
-  $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
+  sk.style.setProperty("--buf", "0%"); _bufPct = 0;
+  $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00"; _lastSeekVal = 0;
+  _seekCap = { path: path || t?.path || null, cap: dur > 0 ? dur : Infinity };
   notifyTrack(t); mediaUpdate(t); renderNpPanel();
   // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
   // before the wall clock is re-anchored, so the RPC push happens at the real
@@ -5244,6 +5251,10 @@ async function hardPlay(i) {
   // Le morceau sortant est valide ICI, tant que wallPos() porte encore son
   // temps joue : hardPlay appelle wallStart(0) plus bas.
   commitPlay();
+  // The old progress loop can still run while the new track is resolving.
+  // Freeze that hand-off at zero so the previous track's position cannot be
+  // painted into the new track (e.g. 234:00 before the backend replies).
+  wallStart(0);
   // Blocked track chosen directly (or reached): skip to the next playable one.
   if (isBlocked(queue[i])) {
     const j = nextIndex(i, true);
