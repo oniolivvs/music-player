@@ -405,6 +405,93 @@ fn ensure_managed_file_is_current(opened: &ManagedFile) -> Result<(), String> {
     Ok(())
 }
 
+fn managed_destination_dir(path: &str) -> Result<std::path::PathBuf, String> {
+    let requested = std::path::Path::new(path);
+    if !requested.is_absolute() { return Err("destination folder must be absolute".into()); }
+    let metadata = std::fs::symlink_metadata(requested).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("destination must be a regular folder".into());
+    }
+    let canonical = std::fs::canonicalize(requested).map_err(|error| error.to_string())?;
+    let canonical_string = canon(&canonical.to_string_lossy());
+    let roots = MANAGED_ROOTS.lock().unwrap_or_else(|error| error.into_inner());
+    if !roots.iter().any(|root| root == &canonical_string) {
+        return Err("destination folder is not registered".into());
+    }
+    Ok(canonical)
+}
+
+fn available_move_target(dir: &std::path::Path, filename: &std::ffi::OsStr) -> std::path::PathBuf {
+    let first = dir.join(filename);
+    if !first.exists() { return first; }
+    let source = std::path::Path::new(filename);
+    let stem = source.file_stem().and_then(|value| value.to_str()).unwrap_or("track");
+    let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("");
+    for number in 2..10_000 {
+        let name = if extension.is_empty() { format!("{stem} ({number})") }
+            else { format!("{stem} ({number}).{extension}") };
+        let candidate = dir.join(name);
+        if !candidate.exists() { return candidate; }
+    }
+    dir.join(format!("{stem} (moved).{extension}"))
+}
+
+fn move_managed_audio_file(path: String, destination: String) -> Result<String, String> {
+    let source_path = std::path::PathBuf::from(&path);
+    let source_canonical = canon(&path);
+    let mut source = open_managed_file(&source_canonical)?;
+    let destination_dir = managed_destination_dir(&destination)?;
+    let filename = source_path.file_name().ok_or_else(|| "source filename is missing".to_string())?;
+    if std::path::Path::new(&source_canonical).parent() == Some(destination_dir.as_path()) {
+        return Ok(source_canonical);
+    }
+
+    let exact_target = destination_dir.join(filename);
+    if exact_target.exists() {
+        let target_path = canon(&exact_target.to_string_lossy());
+        let target = open_managed_file(&target_path)?;
+        if same_capability_file(&source.metadata, &target.metadata) { return Ok(target_path); }
+        let identical = source.metadata.len() == target.metadata.len()
+            && sha256_file(&source.file)? == sha256_file(&target.file)?
+            && files_equal(&source.file, &target.file)?;
+        drop(target);
+        if identical {
+            unlink_managed_file(source)?;
+            return Ok(target_path);
+        }
+    }
+
+    let target = available_move_target(&destination_dir, filename);
+    ensure_managed_file_is_current(&source)?;
+    std::io::Seek::seek(&mut source.file, std::io::SeekFrom::Start(0)).map_err(|error| error.to_string())?;
+    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|error| error.to_string())?;
+    let copied = match std::io::copy(&mut source.file, &mut output) {
+        Ok(copied) => copied,
+        Err(error) => { drop(output); let _ = std::fs::remove_file(&target); return Err(error.to_string()); }
+    };
+    if let Err(error) = output.sync_all() {
+        drop(output); let _ = std::fs::remove_file(&target); return Err(error.to_string());
+    }
+    drop(output);
+    if copied != source.metadata.len() {
+        let _ = std::fs::remove_file(&target);
+        return Err("moved file size verification failed".into());
+    }
+    if let Err(error) = unlink_managed_file(source) {
+        let _ = std::fs::remove_file(&target);
+        return Err(error);
+    }
+    Ok(canon(&target.to_string_lossy()))
+}
+
+/// Physically move one managed media file to a user-selected, registered folder.
+/// Copy + fsync + verified unlink works across drives and never overwrites a file.
+#[tauri::command]
+pub async fn move_audio_file(path: String, destination: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || move_managed_audio_file(path, destination))
+        .await.map_err(|error| error.to_string())?
+}
+
 /// Revalidate every planned pair immediately before unlinking. Discovery can
 /// run minutes before confirmation, so neither its path strings nor its hashes
 /// are authority to delete a file now.
@@ -1532,7 +1619,7 @@ mod duplicate_file_tests {
     use super::{
         canon, collect_duplicate_candidates, confirm_duplicate_deletions, duplicate_groups,
         duplicate_open_handle_stats, files_equal, find_duplicate_files, open_duplicate_candidate,
-        open_duplicate_file, open_duplicate_root, open_managed_file, register_root, safe_duplicate_input,
+        move_managed_audio_file, open_duplicate_file, open_duplicate_root, open_managed_file, register_root, safe_duplicate_input,
         reset_duplicate_open_handle_stats, unlink_managed_file, DuplicateDeletion,
     };
     use std::path::{Path, PathBuf};
@@ -1862,5 +1949,52 @@ mod duplicate_file_tests {
         }
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn managed_move_crosses_folders_without_overwriting() {
+        let root = temp_dir("managed-move");
+        let source_dir = root.join("source");
+        let destination_dir = root.join("destination");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+        let source = source_dir.join("song.mp3");
+        let occupied = destination_dir.join("song.mp3");
+        std::fs::write(&source, b"new-audio").unwrap();
+        std::fs::write(&occupied, b"old-audio").unwrap();
+        register_root(&canon(&source_dir.to_string_lossy()));
+        let destination_root = canon(&destination_dir.to_string_lossy());
+        register_root(&destination_root);
+
+        let moved = move_managed_audio_file(canon(&source.to_string_lossy()), destination_root).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"old-audio");
+        assert_eq!(std::fs::read(&moved).unwrap(), b"new-audio");
+        assert!(moved.ends_with("song (2).mp3"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn managed_move_reuses_identical_destination_file() {
+        let root = temp_dir("managed-move-dedupe");
+        let source_dir = root.join("source");
+        let destination_dir = root.join("destination");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+        let source = source_dir.join("song.mp3");
+        let existing = destination_dir.join("song.mp3");
+        std::fs::write(&source, b"same-audio").unwrap();
+        std::fs::write(&existing, b"same-audio").unwrap();
+        register_root(&canon(&source_dir.to_string_lossy()));
+        let destination_root = canon(&destination_dir.to_string_lossy());
+        register_root(&destination_root);
+
+        let moved = move_managed_audio_file(canon(&source.to_string_lossy()), destination_root).unwrap();
+
+        assert_eq!(moved, canon(&existing.to_string_lossy()));
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(existing).unwrap(), b"same-audio");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

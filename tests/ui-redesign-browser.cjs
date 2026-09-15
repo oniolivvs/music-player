@@ -15,9 +15,9 @@ const assert = require('node:assert/strict');
       await page.addStyleTag({ content: css });
       await page.evaluate(() => {
         const actions = document.createElement('div');
-        actions.className = 'data-transfer-actions paired-actions';
+        actions.className = 'data-transfer-actions triple-actions';
         actions.style.width = '500px';
-        actions.innerHTML = '<button class="btn">Export backup</button><button class="btn-line">Import backup</button>';
+        actions.innerHTML = '<button class="btn">Export backup</button><button class="btn-line">Import backup</button><button class="btn-line">Import music list</button>';
         document.body.append(actions);
       });
       const result = await page.evaluate(() => {
@@ -34,8 +34,8 @@ const assert = require('node:assert/strict');
           bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           navBottom: nav.bottom, mainTop: main.top, mainBottom: main.bottom, playerTop: player.top,
           importerWidth: importer.width,
-          pairedWidthDelta: Math.abs(paired[0].width - paired[1].width),
-          pairedHeightDelta: Math.abs(paired[0].height - paired[1].height),
+          pairedWidthDelta: Math.max(...paired.map(box => box.width)) - Math.min(...paired.map(box => box.width)),
+          pairedHeightDelta: Math.max(...paired.map(box => box.height)) - Math.min(...paired.map(box => box.height)),
           activeShuffleBackground: activeShuffle.backgroundImage,
           activeShuffleShadow: activeShuffle.boxShadow,
           shareCount: document.querySelectorAll('#navShare, #shareModal').length,

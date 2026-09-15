@@ -173,7 +173,10 @@ export function getSettings() { return _s; }
 export async function replaceSettings(values) {
   const incoming = values && typeof values === "object" && !Array.isArray(values) ? values : {};
   const known = Object.fromEntries(Object.entries(incoming).filter(([key]) => Object.hasOwn(DEFAULTS, key)));
-  _s = { ...DEFAULTS, ...known };
+  // Backups may come from an older release and legitimately omit newer keys.
+  // Preserve the current value for every unspecified setting instead of
+  // silently resetting it to the factory default.
+  _s = { ..._s, ...known };
   _s.artworkTransitionMs = normalizeArtworkTransitionMs(_s.artworkTransitionMs);
   await storeSave("settings", JSON.stringify(_s));
   return _s;

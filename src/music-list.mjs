@@ -41,9 +41,27 @@ export function parseMusicList(input) {
       album: String(item.album ?? "YouTube").trim() || "YouTube",
       duration_secs: Math.max(0, Number(item.duration_secs ?? item.duration ?? 0) || 0),
       gain: 1,
-      thumbnail: String(item.thumbnail ?? ""),
+      thumbnail: String(item.thumbnail ?? "").trim() || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
     });
   }
   if (!tracks.length) throw new Error("No valid YouTube IDs found in this music list.");
   return { tracks, invalid, duplicates };
+}
+
+function pathId(path) {
+  const direct = youtubeId(path);
+  if (direct) return direct;
+  return String(path || "").match(/\[([A-Za-z0-9_-]{11})\](?:\.[A-Za-z0-9]+)?$/)?.[1] || "";
+}
+
+export function mergeMusicListPaths(existingPaths, tracks, localPathFor = () => "") {
+  const merged = new Map((Array.isArray(existingPaths) ? existingPaths : []).map(path => [pathId(path) || path, path]));
+  for (const track of tracks || []) {
+    const id = pathId(track?.path);
+    if (!id) continue;
+    const current = merged.get(id);
+    const playlistLocal = current && !String(current).startsWith("yt:") ? current : "";
+    merged.set(id, localPathFor(id) || playlistLocal || track.path);
+  }
+  return [...merged.values()];
 }

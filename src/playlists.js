@@ -34,8 +34,9 @@ export async function persist({ strict = false } = {}) {
   }
 }
 
-export function createPlaylist(name) {
+export function createPlaylist(name, downloadDir = "") {
   const pl = { id: crypto.randomUUID(), name: (name || "").trim() || "New playlist", paths: [] };
+  if (downloadDir) pl.downloadDir = downloadDir;
   _cache.push(pl);
   _persist();
   return pl;
@@ -52,6 +53,14 @@ export function renamePlaylist(id, name) {
 export function setSourceUrl(id, url) {
   const pl = _cache.find(p => p.id === id);
   if (pl) { pl.sourceUrl = url; _persist(); }
+}
+
+// Optional physical destination for tracks downloaded for this playlist.
+// Playlist entries remain path pointers, so one local file may safely be shared
+// by several playlists without copying it.
+export function setDownloadDir(id, path) {
+  const pl = _cache.find(p => p.id === id);
+  if (pl) { if (path) pl.downloadDir = path; else delete pl.downloadDir; _persist(); }
 }
 
 // Custom cover image for a playlist (absolute local path, or "" to clear and

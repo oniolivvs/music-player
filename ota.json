@@ -1,5 +1,5 @@
 {
-  "version": "0.22.130",
+  "version": "0.22.133",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -16,7 +16,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Makes active playback modes unmistakable and imports HDD music JSON lists while downloading only missing titles.",
+  "notes": "Moves JSON list import into Backup/Data, loads YouTube covers, preserves unspecified settings and merges playlists non-destructively.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }

@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.130 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.133 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1094,6 +1094,7 @@ body.np-open:not(.np-push) .np-drawer { box-shadow: -14px 0 44px rgba(0, 0, 0, .
 #npPin.active { color: var(--accent-2); background: var(--bg-3); }
 .dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }
 .dlg-in { width: 100%; margin-top: 10px; }
+.dlg-save { margin-top: 14px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .modal.dlg { width: min(400px, 92vw); }
 .now { cursor: pointer; border-radius: 8px; padding: 2px 6px; margin: -2px -6px; transition: background .12s; }
 .now:hover { background: var(--bg-2); }
@@ -2061,6 +2062,18 @@ body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
   min-height: 46px;
   justify-content: center;
 }
+.triple-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+.triple-actions > button {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  justify-content: center;
+}
 
 /* Stateful playback controls: the enabled mode must remain unmistakable over
    dark, light and artwork-driven themes, including while hovered. */
@@ -2097,5 +2110,5 @@ body.has-bg .ctrl.state-ctrl.active,
   .top-nav .nav-right { margin-left: 0; }
 }
 @media (max-width: 520px) {
-  .paired-actions { grid-template-columns: 1fr; }
+  .paired-actions, .triple-actions { grid-template-columns: 1fr; }
 }

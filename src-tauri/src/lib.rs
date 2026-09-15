@@ -917,7 +917,7 @@ pub fn run() {
             youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::net_image, library::delete_file, library::open_path,
-            library::canon_path, library::canon_paths, library::folder_size, library::register_roots,
+            library::canon_path, library::canon_paths, library::folder_size, library::register_roots, library::move_audio_file,
             library::find_duplicate_files, library::confirm_delete_duplicates,
             store::store_load, store::store_save,
             transfer::backup_export, transfer::backup_import,

@@ -21,7 +21,7 @@ test("playlist import explicitly asks whether future tracks should be followed",
   assert.match(html, /Follow future tracks\?/);
   assert.match(html, /id="impFollowNo"[^>]*checked/);
   assert.match(html, /id="impFollowYes"/);
-  assert.match(html, /id="pickJson"[\s\S]*From a JSON music list/);
+  assert.doesNotMatch(html, /id="pickJson"/);
 });
 
 test("settings expose full backup import and export", async () => {
@@ -30,12 +30,32 @@ test("settings expose full backup import and export", async () => {
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(main, /id="setBackupExport"/);
   assert.match(main, /id="setBackupImport"/);
-  assert.match(main, /class="data-transfer-actions paired-actions"/);
+  assert.match(main, /class="data-transfer-actions triple-actions"/);
+  assert.match(main, /id="setMusicListImport"/);
   assert.match(html, /class="setup-actions paired-actions"/);
   assert.match(css, /\.paired-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(css, /\.paired-actions\s*>\s*button\s*\{[^}]*width:\s*100%[^}]*min-height:\s*46px/s);
+  assert.match(css, /\.triple-actions\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(main, /createBackup\(\{/);
   assert.match(main, /parseBackup\(/);
+});
+
+test("playlist storage supports folder selection, physical moves, and shared-file reuse", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const playlists = await readFile(new URL("../src/playlists.js", import.meta.url), "utf8");
+  const rust = await readFile(new URL("../src-tauri/src/library.rs", import.meta.url), "utf8");
+  assert.match(html, /id="dlgSaveLocal"/);
+  assert.match(main, /function pickMusicDirectory/);
+  assert.match(main, /data-move="1"/);
+  assert.match(main, /id="plMoveBtn"/);
+  assert.match(main, /invoke\("move_audio_file"/);
+  assert.match(main, /PL\.replaceMany\(pathMap\)/);
+  assert.match(main, /Smart pointer deduplication/);
+  assert.match(main, /fs_exists[\s\S]*PL\.replacePath\(d\.path, shared\)/);
+  assert.match(playlists, /function createPlaylist\(name, downloadDir = ""\)/);
+  assert.match(playlists, /export function setDownloadDir/);
+  assert.match(rust, /pub async fn move_audio_file/);
 });
 
 test("volume percentage is rendered inside one bordered field", async () => {

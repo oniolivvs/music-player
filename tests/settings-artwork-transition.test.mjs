@@ -21,6 +21,10 @@ test("artwork transition duration defaults to 500 ms and clamps persisted values
 
   await settings.loadSettings();
   assert.equal(settings.getSettings().artworkTransitionMs, 5000);
+  settings.setSetting("defaultVolume", 37);
+  await settings.replaceSettings({ theme: "light" });
+  assert.equal(settings.getSettings().theme, "light");
+  assert.equal(settings.getSettings().defaultVolume, 37, "an unspecified current setting must survive backup import");
   settings.resetSettings();
   assert.equal(settings.getSettings().artworkTransitionMs, 500);
 });

@@ -12,7 +12,7 @@ import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
 import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
-import { parseMusicList } from "./music-list.mjs";
+import { mergeMusicListPaths, parseMusicList } from "./music-list.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -45,7 +45,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.130";
+const SRC_VERSION = "0.22.133";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1341,7 +1341,7 @@ function relinkPlaylists() {
 }
 
 // ─── In-app dialogs (replaces the ugly native prompt()/confirm() popups) ───
-let _dlgResolve = null, _dlgHasInput = false;
+let _dlgResolve = null, _dlgHasInput = false, _dlgPlaylist = false;
 function dlgClose(val) {
   $("#dlgModal").hidden = true;
   const r = _dlgResolve; _dlgResolve = null;
@@ -1349,11 +1349,12 @@ function dlgClose(val) {
 }
 function askText(title, { placeholder = "", value = "", ok = "OK" } = {}) {
   return new Promise(res => {
-    _dlgResolve = res; _dlgHasInput = true;
+    _dlgResolve = res; _dlgHasInput = true; _dlgPlaylist = false;
     $("#dlgTitle").textContent = title;
     $("#dlgMsg").hidden = true;
     const inp = $("#dlgInput");
     inp.hidden = false; inp.placeholder = placeholder; inp.value = value;
+    $("#dlgSaveRow").hidden = true;
     $("#dlgOk").textContent = ok;
     $("#dlgCancel").textContent = "Cancel";
     $("#dlgModal").hidden = false;
@@ -1362,20 +1363,37 @@ function askText(title, { placeholder = "", value = "", ok = "OK" } = {}) {
 }
 function askConfirm(title, msg = "", ok = "OK", cancel = "Cancel") {
   return new Promise(res => {
-    _dlgResolve = res; _dlgHasInput = false;
+    _dlgResolve = res; _dlgHasInput = false; _dlgPlaylist = false;
     $("#dlgTitle").textContent = title;
     $("#dlgMsg").textContent = msg; $("#dlgMsg").hidden = !msg;
     $("#dlgInput").hidden = true;
+    $("#dlgSaveRow").hidden = true;
     $("#dlgOk").textContent = ok;
     $("#dlgCancel").textContent = cancel;
     $("#dlgModal").hidden = false;
     setTimeout(() => $("#dlgOk").focus(), 0);
   });
 }
+function askPlaylistName(title = "New playlist") {
+  return new Promise(res => {
+    _dlgResolve = res; _dlgHasInput = true; _dlgPlaylist = true;
+    $("#dlgTitle").textContent = title;
+    $("#dlgMsg").hidden = true;
+    const inp = $("#dlgInput");
+    inp.hidden = false; inp.placeholder = "Playlist name"; inp.value = "";
+    $("#dlgSaveLocal").checked = false; $("#dlgSaveRow").hidden = false;
+    $("#dlgOk").textContent = "Create"; $("#dlgCancel").textContent = "Cancel";
+    $("#dlgModal").hidden = false;
+    setTimeout(() => inp.focus(), 0);
+  });
+}
 function wireDialogs() {
-  $("#dlgOk").addEventListener("click", () => dlgClose(_dlgHasInput ? $("#dlgInput").value.trim() : true));
+  const value = () => _dlgPlaylist
+    ? { name: $("#dlgInput").value.trim(), saveLocally: $("#dlgSaveLocal").checked }
+    : (_dlgHasInput ? $("#dlgInput").value.trim() : true);
+  $("#dlgOk").addEventListener("click", () => dlgClose(value()));
   $("#dlgCancel").addEventListener("click", () => dlgClose(_dlgHasInput ? null : false));
-  $("#dlgInput").addEventListener("keydown", e => { if (e.key === "Enter") dlgClose($("#dlgInput").value.trim()); });
+  $("#dlgInput").addEventListener("keydown", e => { if (e.key === "Enter") dlgClose(value()); });
   $("#dlgModal").addEventListener("click", e => { if (e.target.id === "dlgModal") dlgClose(null); });
 }
 
@@ -2081,6 +2099,7 @@ function openContextMenu(x, y) {
     `<div class="ctx-item" data-play="1">${ic(IC.play)}Play</div>` +
     (nOnline ? `<div class="ctx-item" data-dl="1">${ic(IC.save)}Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
     (paths.length === 1 && localFileFor(paths[0]) && !IS_ANDROID ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
+    (nLocal && !IS_ANDROID ? `<div class="ctx-item" data-move="1">${ic(IC.folder)}Move local file${nLocal > 1 ? "s" : ""}…</div>` : "") +
     // ── removal / deletion ──
     // An online track in the library has no local file to delete and no playlist
     // to leave, so without this there would be no way to get rid of one — and
@@ -2109,6 +2128,7 @@ function openContextMenu(x, y) {
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline), true); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playInScope(i); closeCtx(); });
   menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
+  menu.querySelector("[data-move]")?.addEventListener("click", () => { closeCtx(); void moveLocalFiles(paths, inPlaylist ? active.id : ""); });
   menu.querySelector("[data-block]")?.addEventListener("click", (e) => {
     const on = e.currentTarget.dataset.block === "on";
     closeCtx();
@@ -2173,7 +2193,7 @@ function openContextMenu(x, y) {
   menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", async () => {
     let id = it.dataset.add;
     const isNew = id === "__new";
-    if (isNew) { closeCtx(); const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (!name) return; id = PL.createPlaylist(name).id; }
+    if (isNew) { closeCtx(); const playlist = await createPlaylistFlow(); if (!playlist) return; id = playlist.id; }
     else closeCtx();
     // Duplicate handling: if some are already in the target, ask add-again vs skip.
     let allowDup = false;
@@ -2213,6 +2233,8 @@ function openPlaylistCtx(x, y, id) {
     (pl.image ? `<div class="ctx-item" data-a="uncover">${ic(IC.x)}Remove cover</div>` : "") +
     `<div class="ctx-item" data-a="follow">${ic(IC.repeat)}${fw ? "Unfollow" : "Follow…"}</div>` +
     `<div class="ctx-item" data-a="save">${ic(IC.save)}Save locally</div>` +
+    `<div class="ctx-item" data-a="folder">${ic(IC.folder)}${pl.downloadDir ? "Change mp3 folder…" : "Choose mp3 folder…"}</div>` +
+    (pl.paths.some(localFileFor) ? `<div class="ctx-item" data-a="move">${ic(IC.folder)}Move local files…</div>` : "") +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-item ctx-danger" data-a="del">${ic(IC.trash)}Delete</div>`;
   placeCtx(menu, x, y);
@@ -2233,6 +2255,8 @@ function openPlaylistCtx(x, y, id) {
     else if (a === "uncover") { PL.setImage(id, ""); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover removed"); }
     else if (a === "follow") { if (fw) unfollowPlaylist(id); else followPlaylistFlow(id); }
     else if (a === "save") downloadPlaylist(id);
+    else if (a === "folder") { if (await choosePlaylistDirectory(id)) { renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Playlist folder saved"); } }
+    else if (a === "move") await moveLocalFiles(pl.paths, id);
     else if (a === "del") {
       if (await askConfirm("Delete this playlist?", `“${pl.name}” — its tracks stay in the library.`, "Delete")) {
         PL.deletePlaylist(id); renderPlaylists();
@@ -2248,6 +2272,90 @@ async function revealPath(path) {
   if (!path) return;
   try { await invoke("open_path", { path }); }
   catch (e) { flash(`Could not open location: ${e}`); }
+}
+
+async function pickMusicDirectory(title, defaultPath = "") {
+  if (!IS_NATIVE || IS_ANDROID) { flash("Folder selection needs the Windows app"); return ""; }
+  try {
+    let path = await T.core.invoke("plugin:dialog|open", { options: {
+      directory: true, multiple: false, title, defaultPath: defaultPath || undefined,
+    } });
+    if (!path) return "";
+    path = await invoke("canon_path", { path }).catch(() => path);
+    await invoke("register_roots", { paths: [path] });
+    return path;
+  } catch (error) {
+    flash(`Could not select folder: ${error}`);
+    return "";
+  }
+}
+
+async function createPlaylistFlow() {
+  const choice = await askPlaylistName();
+  if (!choice?.name) return null;
+  let downloadDir = "";
+  if (choice.saveLocally) {
+    downloadDir = await pickMusicDirectory(`Choose where “${choice.name}” stores mp3 files`, S().downloadDir || "");
+    if (!downloadDir) return null;
+  }
+  const playlist = PL.createPlaylist(choice.name, downloadDir);
+  renderPlaylists();
+  return playlist;
+}
+
+async function choosePlaylistDirectory(id, title = "Choose this playlist's mp3 folder") {
+  const playlist = PL.getPlaylists().find(item => item.id === id);
+  if (!playlist) return "";
+  const path = await pickMusicDirectory(title, playlist.downloadDir || S().downloadDir || "");
+  if (path) { PL.setDownloadDir(id, path); await PL.persist({ strict: true }); }
+  return path;
+}
+
+function remapMovedPaths(pathMap) {
+  if (!pathMap.size) return;
+  for (const track of library) if (pathMap.has(track.path)) track.path = pathMap.get(track.path);
+  PL.replaceMany(pathMap);
+  queue = queue.map(path => pathMap.get(path) || path);
+  history2 = history2.map(item => ({ ...item, path: pathMap.get(item.path) || item.path }));
+  const nextPlays = {};
+  for (const [path, value] of Object.entries(plays)) nextPlays[pathMap.get(path) || path] = value;
+  plays = nextPlays;
+  if (_curPlay?.path && pathMap.has(_curPlay.path)) _curPlay.path = pathMap.get(_curPlay.path);
+  const movedSelection = [...selected].map(path => pathMap.get(path) || path);
+  selected.clear(); movedSelection.forEach(path => selected.add(path));
+  const pins = S().pins || {}; let pinsChanged = false; const nextPins = {};
+  for (const [key, paths] of Object.entries(pins)) {
+    nextPins[key] = Array.isArray(paths) ? paths.map(path => pathMap.get(path) || path) : paths;
+    if (Array.isArray(paths) && nextPins[key].some((path, index) => path !== paths[index])) pinsChanged = true;
+  }
+  if (pinsChanged) SETTINGS.setSetting("pins", nextPins);
+  _localOk.clear(); _localIdx.built = false;
+  saveHistory(); savePlays(); savePlayback();
+}
+
+async function moveLocalFiles(paths, playlistId = "") {
+  const local = [...new Set(paths.map(localFileFor).filter(path => path && !isOnline(path)))];
+  if (!local.length) { flash("No local file to move"); return 0; }
+  const playlist = PL.getPlaylists().find(item => item.id === playlistId);
+  const destination = await pickMusicDirectory(
+    local.length === 1 ? "Move this audio file to…" : `Move ${local.length} audio files to…`,
+    playlist?.downloadDir || S().downloadDir || "",
+  );
+  if (!destination) return 0;
+  if (playlist) PL.setDownloadDir(playlist.id, destination);
+  const moved = new Map(); const failed = [];
+  for (const path of local) {
+    try {
+      const target = await invoke("move_audio_file", { path, destination });
+      if (target && target !== path) moved.set(path, target);
+    } catch (error) { failed.push(`${baseName(path)}: ${error}`); }
+  }
+  remapMovedPaths(moved);
+  await Promise.all([saveLibrary({ strict: true }), PL.persist({ strict: true })]);
+  renderSources(); renderPlaylists(); refreshView();
+  if (failed.length) flash(`Moved ${moved.size}/${local.length} · ${failed[0]}`);
+  else flash(`${moved.size || local.length} file${local.length === 1 ? "" : "s"} moved`);
+  return moved.size;
 }
 // Right-click menu for a source folder.
 function openSourceCtx(x, y, folder) {
@@ -2418,7 +2526,7 @@ function renderPlaylists() {
         <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">${IC.eye}</button>
         <button class="pl-del" data-del="${p.id}" title="Delete">${IC.x}</button></div>`;
     }).join("");
-  host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
+  host.querySelector("#plNew").addEventListener("click", () => { void createPlaylistFlow(); });
   host.querySelectorAll("[data-pl]").forEach(el => {
     el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined || e.target.dataset.eye !== undefined) return; openPlaylist(el.dataset.pl); });
     el.addEventListener("contextmenu", (e) => { e.preventDefault(); openPlaylistCtx(e.clientX, e.clientY, el.dataset.pl); });
@@ -2436,6 +2544,7 @@ function openPlaylist(id) {
   const byPath = new Map(library.map(t => [t.path, t]));
   selected.clear();
   const nDl = downloadablePaths(pl.paths).length;
+  const nLocalFiles = new Set(pl.paths.map(localFileFor).filter(path => path && !isOnline(path))).size;
   // Already attempted and permanently gone: reported separately, because a
   // button stuck at "3 mp3" after three failures reads as the app doing
   // nothing.
@@ -2462,11 +2571,15 @@ function openPlaylist(id) {
       // rotation reads as "working", and it only spins while the check runs.
       (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
       (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
+      `<button id="plFolderBtn" class="btn-line sm" title="${esc(pl.downloadDir || "Choose where this playlist stores mp3 files")}">${ic(IC.folder)} ${pl.downloadDir ? "Folder" : "Choose folder"}</button>` +
+      (nLocalFiles ? `<button id="plMoveBtn" class="btn-line sm" title="Physically move this playlist's local files">${ic(IC.folder)} Move files</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
   $("#plRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
   $("#plUrlBtn")?.addEventListener("click", () => addByUrl(id));
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
+  $("#plFolderBtn")?.addEventListener("click", async () => { if (await choosePlaylistDirectory(id)) openPlaylist(id); });
+  $("#plMoveBtn")?.addEventListener("click", () => { void moveLocalFiles(pl.paths, id); });
   $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
   $("#plCheckBtn")?.addEventListener("click", async (e) => {
     const f = followFor(id);
@@ -2583,8 +2696,8 @@ function openExtImport() {
 }
 
 async function importJsonMusicList() {
-  if (!IS_NATIVE) { flash("JSON import needs the Windows app"); return; }
-  $("#pickModal").hidden = true;
+  if (!IS_NATIVE) { backupStatus("JSON import needs the Windows app.", true); return; }
+  backupStatus("Choose a JSON music list…");
   try {
     const defaultPath = await invoke("yt_download_root", { dir: String(S().downloadDir || "") }).catch(() => "");
     const path = await T.core.invoke("plugin:dialog|open", { options: {
@@ -2592,29 +2705,28 @@ async function importJsonMusicList() {
       defaultPath: defaultPath || undefined,
       filters: [{ name: "JSON music list", extensions: ["json"] }],
     } });
-    if (!path) return;
+    if (!path) { backupStatus(""); return; }
     const { tracks, invalid, duplicates } = parseMusicList(await invoke("backup_import", { path }));
     const name = baseName(path).replace(/\.json$/i, "").trim() || "Imported music list";
     let playlist = PL.getPlaylists().find(item => item.name.toLowerCase() === name.toLowerCase());
     if (!playlist) playlist = PL.createPlaylist(name);
 
-    const merged = new Map(playlist.paths.map(item => [videoIdOf(item) || item, item]));
     const missing = [];
     let existing = 0, unavailable = 0;
     for (const track of tracks) {
       const current = onlineIndex.get(track.path);
       onlineIndex.set(track.path, current ? { ...track, ...current } : track);
       const local = libraryLocalFor(ytId(track.path));
-      merged.set(ytId(track.path), local || track.path);
       if (local) existing++;
       else if (dlBlock[ytId(track.path)]) unavailable++;
       else missing.push(track.path);
     }
-    playlist.paths = [...merged.values()];
+    playlist.paths = mergeMusicListPaths(playlist.paths, tracks, libraryLocalFor);
     await Promise.all([PL.persist({ strict: true }), saveOnline({ strict: true })]);
     renderPlaylists(); openPlaylist(playlist.id);
 
     const skipped = invalid + duplicates;
+    backupStatus(`Imported ${tracks.length} tracks into “${name}”${skipped ? ` · ${skipped} skipped` : ""}.`);
     flash(`Imported ${tracks.length} tracks into “${name}”${skipped ? ` · ${skipped} skipped` : ""}`);
     if (!missing.length) {
       flash(unavailable
@@ -2627,8 +2739,11 @@ async function importJsonMusicList() {
       `${existing} already exist locally${unavailable ? ` · ${unavailable} unavailable skipped` : ""}. Only missing YouTube IDs will be queued as mp3.`,
       "Download missing", "Not now",
     );
-    if (confirmed) downloadTracks(missing, true);
-  } catch (error) { flash(`JSON music list import failed: ${error}`); }
+    if (confirmed) {
+      const downloadDir = await choosePlaylistDirectory(playlist.id, `Choose where “${playlist.name}” stores mp3 files`);
+      if (downloadDir) downloadTracks(missing, true, downloadDir);
+    }
+  } catch (error) { backupStatus(`JSON music list import failed: ${error}`, true); }
 }
 function extStatus(msg, err) { const el = $("#extStatus"); el.textContent = msg; el.style.color = err ? "#f59e0b" : ""; }
 function extDone() { _extBusy = false; $("#extGo").disabled = false; $("#extCancel").hidden = true; }
@@ -2639,6 +2754,11 @@ async function runExtImport() {
   _extBusy = true; _extCancel = false;
   const name0 = $("#extName").value.trim();
   const dl = $("#extDl").checked;
+  let downloadDir = "";
+  if (dl) {
+    downloadDir = await pickMusicDirectory(`Choose where “${name0 || "Imported playlist"}” stores mp3 files`, S().downloadDir || "");
+    if (!downloadDir) { extDone(); return; }
+  }
   const sp = raw.match(/(?:https?:\/\/[^\s]*open\.spotify\.com\/[^\s]+|spotify:(?:playlist|album|track):[A-Za-z0-9]+)/);
   // Everything below runs in the background (Activity drawer): close the modal
   // right away so the user can keep using the app while tracks are matched.
@@ -2684,10 +2804,10 @@ async function runExtImport() {
   if (!resolved.length) { taskEnd(tid, { status: "error", detail: "no track matched on YouTube" }); extDone(); return; }
 
   resolved.forEach(t => onlineIndex.set(t.path, t));
-  const pl = PL.createPlaylist(name || "Imported playlist");
+  const pl = PL.createPlaylist(name || "Imported playlist", downloadDir);
   resolved.forEach(t => PL.addToPlaylist(pl.id, t.path));
   saveOnline(); renderPlaylists();
-  if (dl) downloadTracks(resolved.map(t => t.path));
+  if (dl) downloadTracks(resolved.map(t => t.path), false, downloadDir);
   extDone();
   taskEnd(tid, {
     detail: `${resolved.length} imported${missed.length ? ` · ${missed.length} not found` : ""}${_extCancel ? " (stopped)" : ""} — click to open`,
@@ -3427,7 +3547,17 @@ async function impGo() {
   const following = $("#impFollowYes").checked;
   if (!chosen.length && !following) { flash("No tracks selected"); return; }
   let dest = $("#impDest").value;
-  if (dest === "__new") dest = PL.createPlaylist($("#impDest").dataset.title).id;
+  let downloadDir = "";
+  if ($("#impDl").checked) {
+    const existing = PL.getPlaylists().find(item => item.id === dest);
+    downloadDir = await pickMusicDirectory(
+      `Choose where “${existing?.name || $("#impDest").dataset.title || "Imported playlist"}” stores mp3 files`,
+      existing?.downloadDir || S().downloadDir || "",
+    );
+    if (!downloadDir) return;
+  }
+  if (dest === "__new") dest = PL.createPlaylist($("#impDest").dataset.title, downloadDir).id;
+  else if (downloadDir) PL.setDownloadDir(dest, downloadDir);
   PL.setSourceUrl(dest, $("#impDest").dataset.url); // enables follow-after-import
   for (const t of chosen) { onlineIndex.set(t.path, t); PL.addToPlaylist(dest, t.path); }
   await saveOnline();
@@ -3449,7 +3579,7 @@ async function impGo() {
     ? `Imported ${chosen.length} track${chosen.length === 1 ? "" : "s"} into “${nm}”${following ? " · following" : ""}`
     : `Following “${nm}” — new tracks will be added automatically`);
   openPlaylist(dest);
-  if ($("#impDl").checked && chosen.length) downloadTracks(chosen.map(t => t.path)); // background batch
+  if ($("#impDl").checked && chosen.length) downloadTracks(chosen.map(t => t.path), false, downloadDir); // background batch
 }
 
 // ─── Download manager (queue + action bar, cancelable) ───
@@ -3813,8 +3943,8 @@ let _dlqSig = "";
 function saveDlQueue() {
   if (!S().resumeDownloads) { if (_dlqSig) { _dlqSig = ""; void storeSaveQuietly("dlqueue", ""); } return; }
   const pending = dlQueue.filter(d => d.status === "queued" || d.status === "active")
-    .map(d => ({ path: d.path, id: d.id, title: d.title }));
-  const sig = pending.map(p => p.path).join("|");
+    .map(d => ({ path: d.path, id: d.id, title: d.title, dir: d.dir || "" }));
+  const sig = pending.map(p => `${p.path}\u0000${p.dir}`).join("|");
   if (sig === _dlqSig) return;
   _dlqSig = sig;
   void storeSaveQuietly("dlqueue", pending.length ? JSON.stringify(pending) : "");
@@ -3838,7 +3968,10 @@ async function resumeDownloads() {
   const todo = items.filter(it => it.path && isOnline(it.path) && !libraryLocalFor(it.id));
   const paths = todo.map(it => it.path);
   const skipped = items.length - todo.length;
-  if (paths.length) { downloadTracks(paths); flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}${skipped ? ` · ${skipped} already on disk` : ""}…`); }
+  if (paths.length) {
+    for (const item of todo) downloadTracks([item.path], false, item.dir || "");
+    flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}${skipped ? ` · ${skipped} already on disk` : ""}…`);
+  }
 }
 
 // ─── Background tasks (search, imports, refreshes) ─────────────────────────
@@ -4144,7 +4277,8 @@ async function downloadPlaylist(id) {
   // mp3s that are already present or already known gone wears out any trust in
   // the number shown.
   if (!await askConfirm(`Save “${pl.name}” locally?`, `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3.${dead ? ` ${dead} already known unavailable ${dead === 1 ? "is" : "are"} skipped.` : ""}`, "Download")) return;
-  downloadTracks(online);
+  const downloadDir = pl.downloadDir || await choosePlaylistDirectory(id, `Choose where “${pl.name}” stores mp3 files`);
+  if (downloadDir) downloadTracks(online, false, downloadDir);
 }
 // A file for this video id already in the library (ANY source folder — the
 // desktop script and the app share the "Title [id].ext" naming convention).
@@ -4167,7 +4301,7 @@ function libraryLocalFor(id) {
   }
   return cand;
 }
-function downloadTracks(paths, tryLocal = false) {
+function downloadTracks(paths, tryLocal = false, targetDir = "") {
   if (!IS_NATIVE) { flash("Downloads need the native app"); return; }
   let added = 0, blocked = 0;
   for (const p of paths) {
@@ -4187,7 +4321,7 @@ function downloadTracks(paths, tryLocal = false) {
     // tryLocal lets direct explicit attempts ("Download track locally") through.
     if (suppressedSet.has(ytId(p))) unsuppressNow(ytId(p));
     const t = onlineIndex.get(p);
-    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", status: "queued", pct: 0 });
+    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", dir: targetDir || "", status: "queued", pct: 0 });
     added++;
   }
   const skipNote = blocked ? ` · ${blocked} unavailable skipped` : "";
@@ -4223,7 +4357,8 @@ async function dlPump() {
     return;
   }
 
-  let dir = "", ok = 0, cooldownIdx = 0, consecTransient = 0, capHit = false;
+  const touchedDirs = new Set();
+  let ok = 0, reused = 0, cooldownIdx = 0, consecTransient = 0, capHit = false;
   dlNotice = "";
   // Storage cap: skip new downloads once the target folder passes the limit.
   const capMb = Math.max(0, Number(S().storageCapMb) || 0);
@@ -4264,13 +4399,24 @@ async function dlPump() {
       // Claim it synchronously (no await above this line since the concurrency
       // check) so two runners can never grab the same queued item.
       d.status = "active"; d.pct = 0;
-      // Don't shortcut via libraryLocalFor here — it may return ghost paths
-      // for files no longer on disk. The Rust yt_download → find_existing
-      // does the real filesystem check and returns the path if already there.
+      // Smart pointer deduplication: if this YouTube id exists anywhere in the
+      // library, verify it on disk and make every playlist reference that one
+      // physical file. Never copy/download it again for another playlist folder.
+      const shared = libraryLocalFor(d.id);
+      if (shared && shared !== d.path) {
+        const exists = await invoke("fs_exists", { path: shared }).catch(() => -1);
+        if (exists === 1 || exists === true) {
+          _localOk.set(shared, true);
+          PL.replacePath(d.path, shared);
+          d.status = "done"; d.pct = 100; d.reused = true; reused++;
+          scheduleDlFlush(); dlRender();
+          continue;
+        }
+      }
       // Enforce the storage cap before spending bandwidth on a new file.
       if (capMb && IS_NATIVE) {
         try {
-          const dlDir = dir || S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
+          const dlDir = d.dir || S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
           if (dlDir) {
             const bytes = await invoke("folder_size", { path: dlDir });
             if (bytes >= capMb * 1024 * 1024) {
@@ -4286,13 +4432,14 @@ async function dlPump() {
       if (dlStopAll) { d.status = "canceled"; dlRender(); continue; }
       dlRender();
       try {
-        const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "", quality: S().downloadQuality || "best" });
+        const file = await invoke("yt_download", { id: d.id, dir: d.dir || S().downloadDir || "", quality: S().downloadQuality || "best" });
         d.status = "done"; d.pct = 100; ok++; cooldownIdx = 0; consecTransient = 0;
         // An explicit fresh download settles both memories: the "deleted on
         // purpose" suppression lifts and the track is never proposed again.
         if (d.id && suppressedSet.delete(d.id)) saveSuppressed();
         if (d.id && dlDeclined.delete(d.id)) saveDeclined();
-        dir = dirOf(file);
+        const dir = dirOf(file);
+        if (dir) touchedDirs.add(dir);
         // The download destination is a source too. Persist it immediately so
         // it stays selectable even while temporarily empty later.
         if (dir && !folders.includes(dir)) folders.push(dir);
@@ -4365,7 +4512,7 @@ async function dlPump() {
   // effect at the next pickup instead of waiting for a fresh dlPump() call.
   await Promise.all(Array.from({ length: MAX_DL_WORKERS }, runner));
 
-  if (dir) {
+  for (const dir of touchedDirs) {
     // No silent sources: downloading to a folder should never push it onto the
     // Sources list on its own. The rescan is required (otherwise the song has
     // no tags in the library), but the setting belongs in the sidebar.
@@ -4394,7 +4541,7 @@ async function dlPump() {
   dlRunning = false;
   dlRender();
   if (capHit) flash(`Storage cap reached (${capMb} MB) — remaining downloads skipped`);
-  else if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
+  else if (ok || reused) flash(`${ok} downloaded${reused ? ` · ${reused} shared file${reused === 1 ? "" : "s"} reused` : ""}`);
 
   await offerPurgeUnavailable();
 }
@@ -6555,9 +6702,10 @@ function openSettings() {
     <section class="set-pane" data-pane="data">
     <div class="set-group data-transfer-card"><div class="set-title">Your Music Player data</div>
       <div class="set-hint">Export one portable JSON backup containing settings, playlists, library metadata, follows, listening history, statistics and online-track metadata. Audio files are never copied.</div>
-      <div class="data-transfer-actions paired-actions">
+      <div class="data-transfer-actions triple-actions">
         <button id="setBackupExport" class="btn">${ic(IC.upload)} Export backup</button>
         <button id="setBackupImport" class="btn-line">${ic(IC.dl)} Import backup</button>
+        <button id="setMusicListImport" class="btn-line">${ic(IC.folder)} Import music list</button>
       </div>
       <div id="setBackupStatus" class="set-hint" aria-live="polite"></div>
     </div>
@@ -6642,6 +6790,7 @@ function openSettings() {
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
   $("#setBackupExport")?.addEventListener("click", exportBackup);
   $("#setBackupImport")?.addEventListener("click", importBackup);
+  $("#setMusicListImport")?.addEventListener("click", importJsonMusicList);
   $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
   for (const [id, key] of [["setCustBg", "customBg"], ["setCustPanel", "customPanel"], ["setCustText", "customText"]]) {
     $("#" + id).addEventListener("input", e => {
@@ -6936,7 +7085,7 @@ async function checkFollow(f, manual = false) {
   // ("Auto-download new tracks to the library") downloads right away, whatever
   // the global "new tracks" setting is — that setting gates the batched consent
   // prompt for follows that did NOT opt in, not this per-follow choice.
-  if (f.autoDownload) downloadTracks(wanted.map(t => t.path));
+  if (f.autoDownload) downloadTracks(wanted.map(t => t.path), false, pl?.downloadDir || "");
   const fb = brandNew.filter(t => !suppressedSet.has(ytId(t.path))).length;
   const ms = missing.filter(t => !suppressedSet.has(ytId(t.path))).length;
   const label = fb && ms
@@ -7529,7 +7678,7 @@ async function init() {
   // ask it to. Resolve the actual writable download destination here too: an
   // empty fresh setting must register the default/fallback, not the empty string.
   if (IS_NATIVE) {
-    const roots = [...folders];
+    const roots = [...folders, ...PL.getPlaylists().map(playlist => playlist.downloadDir).filter(Boolean)];
     try {
       const downloadRoot = await invoke("yt_download_root", { dir: String(S().downloadDir || "") });
       if (downloadRoot) {
@@ -7718,7 +7867,6 @@ async function init() {
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
   $("#pickSp").addEventListener("click", () => { $("#pickModal").hidden = true; openExtImport(); });
-  $("#pickJson").addEventListener("click", importJsonMusicList);
   $("#extClose").addEventListener("click", () => { if (!_extBusy) $("#extModal").hidden = true; });
   $("#extModal").addEventListener("click", e => { if (e.target.id === "extModal" && !_extBusy) $("#extModal").hidden = true; });
   $("#extGo").addEventListener("click", runExtImport);
