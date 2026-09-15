@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.143";
+const SRC_VERSION = "0.22.144";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -958,7 +958,7 @@ function proxyCovers(root) {
 // Online tracks live under pseudo-paths "yt:<videoId>" so queue/playlist/selection
 // logic works unchanged. Metadata for playlist members persists in store "online".
 const onlineIndex = new Map(); // "yt:<id>" -> track
-const onlineDurationPending = new Map();
+const durationPending = new Map();
 function isOnline(p) { return String(p || "").startsWith("yt:"); }
 function ytId(p) { return String(p).slice(3); }
 function onlineFromResult(r) { return { path: "yt:" + r.id, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail, views: r.views || 0 }; }
@@ -991,27 +991,31 @@ async function saveOnline({ strict = false } = {}) {
   }
 }
 
-function hydrateOnlineDuration(path, expectedTrack, expectedSeq) {
-  if (!IS_NATIVE || !isOnline(path) || Number(expectedTrack?.duration_secs) > 0) return;
-  const id = ytId(path);
-  if (!id) return;
-  let pending = onlineDurationPending.get(id);
+function hydrateMissingDuration(path, expectedTrack, expectedSeq) {
+  if (!IS_NATIVE || Number(expectedTrack?.duration_secs) > 0) return;
+  const onlinePath = isOnline(path);
+  const id = videoIdOf(path);
+  if (onlinePath && !id) return;
+  const key = onlinePath ? `yt:${id}` : `local:${path}`;
+  let pending = durationPending.get(key);
   if (!pending) {
-    pending = invoke("yt_duration", { id })
+    pending = (onlinePath
+      ? invoke("yt_duration", { id })
+      : invoke("local_duration", { path }).catch(() => id ? invoke("yt_duration", { id }) : 0))
       .then(value => Math.max(0, Math.floor(Number(value) || 0)))
       .catch(() => 0)
-      .finally(() => onlineDurationPending.delete(id));
-    onlineDurationPending.set(id, pending);
+      .finally(() => durationPending.delete(key));
+    durationPending.set(key, pending);
   }
   pending.then(duration => {
     if (!duration) return;
     let libraryChanged = false;
     for (const track of library) {
-      if (track.path === path || videoIdOf(track.path) === id) {
+      if (track.path === path || (id && videoIdOf(track.path) === id)) {
         if (!(Number(track.duration_secs) > 0)) { track.duration_secs = duration; libraryChanged = true; }
       }
     }
-    const online = onlineIndex.get(path);
+    const online = id ? onlineIndex.get(`yt:${id}`) : null;
     if (online && !(Number(online.duration_secs) > 0)) online.duration_secs = duration;
     if (libraryChanged) void saveLibrary();
     if (online) void saveOnline();
@@ -5310,7 +5314,7 @@ async function hardPlay(i) {
   const path = effectivePath(queue[i]);
   const t = trackByPath(path) || trackByPath(queue[i]);
   updateNowPlaying(t, path); updatePlayingRow(); // show metadata instantly
-  hydrateOnlineDuration(queue[i], t, seq);
+  hydrateMissingDuration(path, t, seq);
   if (isOnline(path)) {
     $("#nowSub").textContent += " · loading…";
     // New stream: zero the backend download counters and the buffer band so

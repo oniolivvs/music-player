@@ -134,6 +134,26 @@ fn open_track_source(path: &str) -> Result<StreamSource, String> {
     }).map(|dec| Box::new(dec.periodic_access(Duration::from_millis(100), |_| crate::stream::note_total(0))) as StreamSource)
 }
 
+/// Probe a local file with the same decoder used for playback. Some downloaded
+/// MP3s have no usable ID3 duration, while rodio can still decode and report
+/// their real length; the frontend uses this to calibrate the seek bar.
+pub fn local_duration(path: &str) -> Result<u64, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map(|m| m.len()).ok();
+    let mut builder = Decoder::builder()
+        .with_data(BufReader::new(file))
+        .with_seekable(true);
+    if let Some(bytes) = len {
+        builder = builder.with_byte_len(bytes);
+    }
+    let decoder = builder.build().map_err(|e| e.to_string())?;
+    decoder
+        .total_duration()
+        .map(|duration| duration.as_secs())
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| "decoder did not expose a duration".into())
+}
+
 fn open_url_source(url: String, rr: Option<ReResolve>, preload: bool, cancel: crate::stream::CancelCheck) -> Result<StreamSource, String> {
     // byte_len is mandatory here: symphonia's isomp4 demuxer refuses to probe
     // YouTube's moov-after-mdat m4a files without knowing the total size.

@@ -104,10 +104,12 @@ test("unknown YouTube durations are hydrated and replace the one-second fallback
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const rust = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const native = await readFile(new URL("../src-tauri/src/ytnative.rs", import.meta.url), "utf8");
-  assert.match(main, /function hydrateOnlineDuration\(path, expectedTrack, expectedSeq\)/);
+  assert.match(main, /function hydrateMissingDuration\(path, expectedTrack, expectedSeq\)/);
   assert.match(main, /invoke\("yt_duration", \{ id \}\)/);
+  assert.match(main, /invoke\("local_duration", \{ path \}\)/);
   assert.match(main, /seek\.max = currentDuration;[\s\S]*renderSeek\(wallPos\(\)\)/);
   assert.match(rust, /async fn yt_duration\(id: String\)/);
+  assert.match(rust, /async fn local_duration\(path: String\)/);
   assert.match(native, /pub async fn video_duration\(id: &str\)/);
   assert.match(native, /v\["videoDetails"\]\["lengthSeconds"\]/);
   assert.match(native, /fn watch_duration\(id: &str\)/);
