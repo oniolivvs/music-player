@@ -40,15 +40,17 @@ test("settings expose one unified backup import and export", async () => {
   assert.match(main, /parseBackup\(/);
 });
 
-test("settings navigation is Customisation, Disk, then Backup", async () => {
+test("settings navigation is Customisation, Disk, Backup, then System", async () => {
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const nav = main.match(/<nav class="set-nav">([\s\S]*?)<\/nav>/)?.[1] || "";
-  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "disk", "data"]);
-  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*Disk[\s\S]*Backup/);
-  assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Integrations|Library|System/);
+  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "disk", "data", "system"]);
+  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*Disk[\s\S]*Backup[\s\S]*System/);
+  assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Integrations|Library/);
   assert.doesNotMatch(main, /id="setSignIn"|Sign in with Google/);
   assert.match(main, /data-pane="disk"[\s\S]*id="setDlDir"[\s\S]*id="setSharedDir"[\s\S]*id="setAutoSave"/);
   assert.doesNotMatch(main.match(/data-pane="disk"([\s\S]*?)<\/section>/)?.[1] || "", /setDlQuality|setDlConcurrency|setResumeDl|setCookies|setYtPath/);
+  const system = main.match(/data-pane="system"([\s\S]*?)<\/section>/)?.[1] || "";
+  for (const id of ["setCurVer", "setUpdCheck", "diagList", "diagExport"]) assert.match(system, new RegExp(`id="${id}"`));
 });
 
 test("playlist storage supports folder selection, physical moves, and shared-file reuse", async () => {

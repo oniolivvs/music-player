@@ -45,7 +45,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.134";
+const SRC_VERSION = "0.22.135";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -6467,10 +6467,9 @@ function openSettings() {
       <div class="set-nav-group">Customisation</div>
       <button class="set-tab set-tab-sub on" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
       <button class="set-tab set-tab-sub" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
-      <div class="set-nav-group">Storage</div>
       <button class="set-tab" data-tab="disk">${ic(IC.folder)}<span>Disk</span></button>
-      <div class="set-nav-group">Data</div>
       <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
+      <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
     </nav>
     <div class="set-panes">
     <section class="set-pane" data-pane="appearance">
