@@ -98,6 +98,9 @@ test("artwork player text and controls stay readable, vivid, and frosted", async
   assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*linear-gradient[^}]*var\(--accent-2\)[^}]*box-shadow/s);
   assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-thumb[\s\S]*border-radius:\s*5px[\s\S]*linear-gradient/s);
   assert.match(stylesheet, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\)\s*\{[^}]*border-radius:\s*9px[^}]*backdrop-filter:\s*blur\(14px\)/s);
+  assert.match(stylesheet, /button\s*\{[^}]*border-radius:\s*9px[^}]*backdrop-filter:\s*blur\(16px\)/s);
+  assert.match(stylesheet, /button\.btn-line,\s*button\.pick-opt\s*\{[^}]*background:\s*linear-gradient/s);
+  assert.match(stylesheet, /button\.icon-btn,[\s\S]*button\.yc-play\s*\{[^}]*background:\s*linear-gradient/s);
 });
 
 test("UI customization exposes layout and player visibility controls", async () => {
