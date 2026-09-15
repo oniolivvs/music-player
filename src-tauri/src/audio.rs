@@ -671,6 +671,36 @@ mod tests {
         queue_preparation(&queue, current, 2, move || { fresh_tx.send(()).unwrap(); });
         fresh_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     }
+
+    #[test]
+    fn local_duration_decodes_a_local_audio_file() {
+        let path = std::env::temp_dir().join(format!(
+            "music-player-local-duration-{}.wav",
+            std::process::id()
+        ));
+        let sample_rate: u32 = 8_000;
+        let data_len = sample_rate * 2;
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.resize(44 + data_len as usize, 0);
+        std::fs::write(&path, wav).unwrap();
+
+        let duration = local_duration(path.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert_eq!(duration, 1);
+    }
+
     #[test]
     #[ignore = "explicit live YouTube network/decoder smoke test"]
     fn live_stream_starts_and_seeks_without_downloading_the_whole_track() {
