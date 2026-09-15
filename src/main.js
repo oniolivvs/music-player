@@ -45,7 +45,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.135";
+const SRC_VERSION = "0.22.136";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -883,7 +883,7 @@ const _artworkThemeState = createArtworkThemeState({
   begin: beginArtworkRequest,
   restore: restoreManualTheme,
   retain(error) {
-    diagnostics.record("warn", "theme", "artwork_retained", `Artwork replacement unusable; committed artwork retained: ${String(error || "").slice(0, 140)}`);
+    diagnostics.record("debug", "theme", "artwork_retained", `Artwork candidate skipped; previous artwork retained${error ? `: ${String(error).slice(0, 140)}` : ""}`);
   },
 });
 
@@ -4889,7 +4889,7 @@ async function _renderFeedSection(sec, host) {
   let tracks = _feedState[sec.id];
   if (tracks == null) {
     try { tracks = await _feedData(sec); }
-    catch (e) { console.warn("[feed]", sec.id, e); tracks = null; }
+    catch (e) { diagnostics.record("debug", "feed", `${sec.id}_unavailable`, String(e).slice(0, 500)); tracks = null; }
     if (active.type !== "ytfeed") return; // user navigated away mid-fetch
     if (sec.id in _feedState) _feedState[sec.id] = tracks;
   }
@@ -5973,7 +5973,7 @@ async function saveLibrary({ strict = false } = {}) {
       // Keep the winner's richer metadata (the loser may hold the local file).
     }
     if (dup) {
-      console.warn(`[library] merged ${dup} duplicate song entries (by identity, not path)`);
+      diagnostics.record("info", "library", "duplicates_merged", `${dup} duplicate song entries merged by musical identity`);
       const paths = new Set(); const out = [];
       for (const t of byKey.values()) if (!paths.has(t.path)) { paths.add(t.path); out.push(t); }
       library = out;

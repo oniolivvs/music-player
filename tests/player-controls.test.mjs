@@ -91,6 +91,15 @@ test("shuffle and repeat expose unmistakable active states", async () => {
   assert.match(stylesheet, /\.ctrl\.state-ctrl\.active[\s\S]*linear-gradient[\s\S]*box-shadow/);
 });
 
+test("artwork player text and controls stay readable, vivid, and frosted", async () => {
+  const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(stylesheet, /body\.artwork-theme \.brand > span:last-child\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);
+  assert.match(stylesheet, /body\.artwork-theme \.player :where\(\.now-title, \.time, \.volume-pct, \.volume-pct input\)\s*\{[^}]*var\(--tx-1\)/s);
+  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*linear-gradient[^}]*var\(--accent-2\)[^}]*box-shadow/s);
+  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-thumb[\s\S]*border-radius:\s*5px[\s\S]*linear-gradient/s);
+  assert.match(stylesheet, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\)\s*\{[^}]*border-radius:\s*9px[^}]*backdrop-filter:\s*blur\(14px\)/s);
+});
+
 test("UI customization exposes layout and player visibility controls", async () => {
   const settings = await readFile(new URL("../src/settings.js", import.meta.url), "utf8");
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");

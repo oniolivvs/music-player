@@ -627,8 +627,9 @@ pub async fn yt_recommendations(
 }
 
 /// The public YouTube trending feed, flat-extracted like a search. No native
-/// fallback (unlike yt_search): trending is a bonus for the home feed, so a
-/// failure just returns Err and the frontend hides that section silently.
+/// YouTube removed the old `/feed/trending` endpoint. Resolve this optional home
+/// section through the supported search path, which also retains the native
+/// fallback when yt-dlp is unavailable or rejected.
 #[tauri::command]
 pub async fn yt_trending(
     cfg: State<'_, YtCfg>,
@@ -636,28 +637,14 @@ pub async fn yt_trending(
     region: Option<String>,
 ) -> Result<Vec<OnlineTrack>, String> {
     let n = limit.unwrap_or(12).clamp(1, 50);
-    let range = format!("1:{n}");
-    // yt-dlp exposes no region filter for the trending feed; the frontend sends
-    // it for forward compatibility, so accept (and deliberately ignore) it here.
-    let _ = &region;
-    // Same flat extraction as yt_search / flat_extract: every line of stdout
-    // is one JSON entry, parsed into an OnlineTrack.
-    let out = run_ytdlp(
-        &cfg,
-        &[
-            "--flat-playlist",
-            "-j",
-            "--no-warnings",
-            "-I",
-            &range,
-            "https://www.youtube.com/feed/trending",
-        ],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| track_from_json(&v))
-        .collect())
+    let region = region.unwrap_or_default();
+    let region = region.trim();
+    let query = if region.is_empty() {
+        "trending music".to_string()
+    } else {
+        format!("trending music {region}")
+    };
+    yt_search(cfg, query, Some(n), Some(0)).await
 }
 
 #[tauri::command]

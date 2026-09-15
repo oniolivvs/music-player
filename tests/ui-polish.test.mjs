@@ -109,3 +109,13 @@ test("hot bar actions keep natural widths with equal gaps except Settings", asyn
   assert.match(css, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\):not\(:disabled\):hover\s*\{[^}]*translateY\(-2px\)/s);
   assert.match(css, /\.btn\.timer-armed::before\s*\{[^}]*animation:\s*button-countdown 5s linear forwards/s);
 });
+
+test("expected artwork and optional feed fallbacks do not pollute error logs", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const youtube = await readFile(new URL("../src-tauri/src/youtube.rs", import.meta.url), "utf8");
+  assert.match(main, /diagnostics\.record\("debug", "theme", "artwork_retained"/);
+  assert.match(main, /diagnostics\.record\("debug", "feed", `\$\{sec\.id\}_unavailable`/);
+  assert.match(main, /diagnostics\.record\("info", "library", "duplicates_merged"/);
+  assert.doesNotMatch(youtube, /youtube\.com\/feed\/trending/);
+  assert.match(youtube, /yt_search\(cfg, query, Some\(n\), Some\(0\)\)\.await/);
+});

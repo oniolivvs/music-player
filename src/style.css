@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.135 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.136 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -2099,6 +2099,84 @@ body.has-bg .ctrl.state-ctrl.active,
   transform: translateX(-50%);
 }
 .ctrl.state-ctrl.active:active { transform: scale(.94); }
+
+/* Readable dynamic player text + vivid frosted controls. The artwork palette
+   already computes WCAG-safe --tx-* colors; do not turn the brand transparent
+   and let an accent gradient accidentally blend into the cover underneath. */
+body.artwork-theme .brand > span:last-child {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: border-box;
+  -webkit-text-fill-color: var(--tx-1);
+  color: var(--tx-1);
+}
+body.artwork-theme .player :where(.now-title, .time, .volume-pct, .volume-pct input) { color: var(--tx-1); }
+body.artwork-theme .player :where(.now-sub, .vol-ico, .volume-pct-sign) { color: var(--tx-2); }
+
+/* Player ranges keep a visible high-contrast rail, a two-tone played gradient,
+   and an always-discoverable thumb instead of a faint YouTube-style hairline. */
+.player input[type="range"]::-webkit-slider-runnable-track {
+  height: 7px;
+  border: 1px solid color-mix(in srgb, var(--tx-1) 28%, transparent);
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    var(--accent) 0%,
+    var(--accent-2) var(--fill, 0%),
+    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--fill, 0%),
+    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--buf, var(--fill, 0%)),
+    color-mix(in srgb, var(--bg-4) 72%, transparent) var(--buf, var(--fill, 0%)));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .42), 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.player input[type="range"]::-webkit-slider-thumb,
+.volume input#volume::-webkit-slider-thumb {
+  width: 17px;
+  height: 17px;
+  margin-top: -6px;
+  border: 2px solid var(--tx-1);
+  border-radius: 5px;
+  opacity: .92;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent), 0 4px 10px rgba(0, 0, 0, .48);
+}
+.player .seekbar:hover::-webkit-slider-thumb,
+.player .seekbar:active::-webkit-slider-thumb { opacity: 1; }
+
+/* Square frosted geometry is shared by toolbar, player, modal and settings
+   actions. Palette variables keep the glass and border dynamic per artwork. */
+:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) {
+  border-radius: 9px;
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.ctrl { border-radius: 10px; }
+.ctrl.play { border-radius: 12px; }
+.btn-line {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bg-2) 72%, transparent), color-mix(in srgb, var(--accent) 12%, var(--bg-2))) padding-box,
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 72%, transparent), color-mix(in srgb, var(--accent-2) 42%, transparent)) border-box;
+}
+.top-nav .nav-item {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bg-2) 76%, transparent), color-mix(in srgb, var(--button-color, var(--accent)) 10%, var(--bg-2))) padding-box,
+    linear-gradient(135deg, color-mix(in srgb, var(--button-color, var(--accent)) 68%, transparent), color-mix(in srgb, var(--accent-2) 34%, transparent)) border-box;
+}
+body.artwork-theme .top-nav .nav-item,
+body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle) {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--icon-surface) 78%, transparent),
+    color-mix(in srgb, var(--accent) 24%, transparent));
+  color: var(--icon-fg);
+  border-color: color-mix(in srgb, var(--icon-border) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+}
+body.artwork-theme .top-nav .nav-item.active {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 42%, var(--icon-surface)), color-mix(in srgb, var(--accent-2) 28%, var(--icon-surface)));
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 8px 24px color-mix(in srgb, var(--accent) 26%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
   :where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) { transition: none; }
   .btn::after, .btn.timer-armed::before { animation: none; transition: none; }
