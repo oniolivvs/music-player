@@ -8,6 +8,7 @@ import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation, createPlaybackArtworkGate } from "./artwork-theme.mjs";
 import { clampVolumePercent, volumeGainFromPercent } from "./player-controls.mjs";
+import { buildShuffleOrder, shuffleSignature, uniqueQueuePaths } from "./shuffle.mjs";
 import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
@@ -45,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.137";
+const SRC_VERSION = "0.22.138";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5100,20 +5101,16 @@ function markActive() {
 // the upcoming order is stable, visible in "Up next", and never repeats a
 // track until the whole queue has played.
 let shufOrder = [];
+let shufQueueSignature = "";
 function buildShuffle(startIdx) {
-  shufOrder = queue.map((_, i) => i);
-  for (let i = shufOrder.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shufOrder[i], shufOrder[j]] = [shufOrder[j], shufOrder[i]];
-  }
-  if (startIdx >= 0) {
-    const p = shufOrder.indexOf(startIdx);
-    if (p > 0) { shufOrder.splice(p, 1); shufOrder.unshift(startIdx); }
-  }
+  shufQueueSignature = shuffleSignature(queue);
+  shufOrder = buildShuffleOrder(queue.length, startIdx);
 }
 function playOrder() {
   if (!shuffle) return queue.map((_, i) => i);
-  if (shufOrder.length !== queue.length) buildShuffle(curIndex);
+  if (shufOrder.length !== queue.length ||
+      shuffleSignature(queue) !== shufQueueSignature ||
+      (curIndex >= 0 && !shufOrder.includes(curIndex))) buildShuffle(curIndex);
   return shufOrder;
 }
 // Queue indexes that will play after the current track (repeat-aware).
@@ -5172,7 +5169,16 @@ function updateNowPlaying(t, path) {
   // before the wall clock is re-anchored, so the RPC push happens at the real
   // playback start (hardPlay / gapless advance) with an explicit position of 0.
 }
-async function playFrom(viewIdx) { _drainSkips = 0; queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
+async function playFrom(viewIdx) {
+  _drainSkips = 0;
+  const wanted = view[viewIdx]?.path;
+  queue = uniqueQueuePaths(view.map(t => t.path));
+  const startIdx = queue.indexOf(wanted);
+  if (startIdx < 0) return;
+  history = [];
+  if (shuffle) buildShuffle(startIdx);
+  await hardPlay(startIdx);
+}
 // New: when the view came from a search against a playlist/folder AND the user
 // picked a hit AND shuffle is NOT restricted to the search, we widen the queue
 // to the whole scope. Detection is *semantic*, not via a hidden marker:
@@ -5199,9 +5205,10 @@ async function playInScope(viewIdx) {
     const first = view[viewIdx];
     if (first) {
       const wanted = first.path;
-      queue = scopeList.map(t => t.path);
+      queue = uniqueQueuePaths(scopeList.map(t => t.path));
       history = [];
       const at = queue.indexOf(wanted);
+      if (at < 0) return;
       if (at > 0) { queue.splice(at, 1); queue.unshift(wanted); }
       if (shuffle) buildShuffle(0);
       await hardPlay(0);

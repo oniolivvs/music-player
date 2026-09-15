@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.137 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.138 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1006,11 +1006,14 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
      the track list keeps a usable share of the window. The 260px floor keeps
      the drawer itself readable on mid-size windows. */
   width: var(--np-eff, min(var(--np-w, 330px), 92vw));
+  min-width: 0; min-height: 0;
+  max-width: calc(100vw - 16px - var(--safe-left, 0px) - var(--safe-right, 0px));
+  box-sizing: border-box; overflow: hidden;
   background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
   padding: 14px 16px; display: flex; flex-direction: column; gap: 7px;
   box-shadow: -14px 0 44px rgba(0, 0, 0, .5);
 }
-.np-head { display: flex; align-items: center; justify-content: space-between; }
+.np-head { display: flex; align-items: center; justify-content: space-between; min-width: 0; flex: 0 0 auto; }
 .ov-art {
   /* Real height (see .yc-thumb: the padding-bottom ratio hack paints nothing
      on the old WebView). Fixed near-square fallback, exact square via
@@ -1036,7 +1039,8 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
    has found padding baked into the image and needs to show only part of it.
    They are the fallback for the moment before the scan finishes. */
 .ov-art.has-cover { background-size: cover; background-repeat: no-repeat !important; background-position: center; background-color: transparent !important; color: transparent; }
-.ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
+.ov-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 800; line-height: 1.25; }
+.ov-sub, .ov-meta { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
 /* Streaming vs local, coloured like the pill so the two agree at a glance. */
@@ -1060,8 +1064,8 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
    rows are badged keeps an even rhythm. */
 .track .meta .t { min-height: 1.35em; }
 .np-next-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-top: 6px; }
-.np-next { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.nx-row { display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+.np-next { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 2px; }
+.nx-row { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 100%; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
 .nx-row:hover { background: var(--bg-3); }
 .nx-row .art { width: 32px; height: 32px; font-size: 13px; flex-shrink: 0; }
 .nx-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }

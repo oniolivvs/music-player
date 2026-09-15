@@ -30,6 +30,13 @@ const assert = require('node:assert/strict');
         const shuffle = document.querySelector('#shuffleBtn');
         shuffle.classList.add('active');
         const activeShuffle = getComputedStyle(shuffle);
+        const nowPlaying = document.querySelector('#npPanel');
+        nowPlaying.hidden = false;
+        document.body.classList.add('np-open');
+        document.documentElement.style.setProperty('--nav-bottom', `${nav.bottom}px`);
+        document.documentElement.style.setProperty('--player-top', `${window.innerHeight - player.top}px`);
+        const npBox = nowPlaying.getBoundingClientRect();
+        const artBox = document.querySelector('#ovArt').getBoundingClientRect();
         return {
           bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           navBottom: nav.bottom, mainTop: main.top, mainBottom: main.bottom, playerTop: player.top,
@@ -38,6 +45,10 @@ const assert = require('node:assert/strict');
           pairedHeightDelta: Math.max(...paired.map(box => box.height)) - Math.min(...paired.map(box => box.height)),
           activeShuffleBackground: activeShuffle.backgroundImage,
           activeShuffleShadow: activeShuffle.boxShadow,
+          nowPlayingTop: npBox.top, nowPlayingRight: npBox.right, nowPlayingBottom: npBox.bottom,
+          nowPlayingArtRight: artBox.right, nowPlayingArtBottom: artBox.bottom,
+          nowPlayingFitsViewport: npBox.left >= -1 && npBox.right <= window.innerWidth + 1 && npBox.top >= nav.bottom,
+          nowPlayingFitsPlayer: npBox.bottom <= player.top + 1,
           shareCount: document.querySelectorAll('#navShare, #shareModal').length,
         };
       });
@@ -49,6 +60,10 @@ const assert = require('node:assert/strict');
       assert.ok(result.pairedHeightDelta <= 1, JSON.stringify({ viewport, result }));
       assert.match(result.activeShuffleBackground, /linear-gradient/);
       assert.notEqual(result.activeShuffleShadow, 'none');
+      assert.equal(result.nowPlayingFitsViewport, true, JSON.stringify({ viewport, result }));
+      assert.equal(result.nowPlayingFitsPlayer, true, JSON.stringify({ viewport, result }));
+      assert.ok(result.nowPlayingArtRight <= result.nowPlayingRight + 1, JSON.stringify({ viewport, result }));
+      assert.ok(result.nowPlayingArtBottom <= result.nowPlayingBottom + 1, JSON.stringify({ viewport, result }));
       assert.equal(result.shareCount, 0, JSON.stringify({ viewport, result }));
       results.push({ viewport, ...result });
       await page.close();
