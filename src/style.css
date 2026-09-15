@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.144 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.145 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -2346,4 +2346,88 @@ body.has-bg select.sel {
   border-color: color-mix(in srgb, var(--accent-2) 58%, var(--bd));
   backdrop-filter: blur(14px) saturate(1.3);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+
+/* Final accessibility layer: WebView/Windows paints the native option popup
+   independently of the select, so inheriting the field colour leaves light
+   themes with white text on a white menu. Keep every list surface on the same
+   palette-driven foreground, too. */
+select.sel option,
+.imp-foot select option {
+  color: var(--tx-1);
+  background-color: var(--bg-2);
+}
+body.has-bg select.sel option,
+body.has-bg .imp-foot select option {
+  color: var(--tx-1) !important;
+  background-color: var(--bg-2) !important;
+}
+body.bg-light.has-bg select.sel option,
+body.bg-light.has-bg .imp-foot select option {
+  color: #111318 !important;
+  background-color: #fff !important;
+}
+
+/* The high-specificity generic button rule above must not undo the primary
+   button foreground. This is deliberately explicit for light artwork, where
+   the old cascade produced a black label on the vivid import gradient. */
+body.has-bg button.nav-import,
+body.has-bg button.btn,
+body.has-bg button.ctrl.play,
+body.has-bg button.ctrl.state-ctrl.active {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .28);
+}
+body.has-bg button.nav-item.active,
+body.has-bg button.set-tab.on {
+  color: var(--tx-1) !important;
+  -webkit-text-fill-color: var(--tx-1) !important;
+}
+
+/* Explicit list colours prevent inherited/UA colours from disappearing over
+   bright covers. Variables are replaced by the artwork palette on every track
+   change, so primary and secondary text follow the current background. */
+body.has-bg .track:not(.playing) .meta .t,
+body.has-bg .track .album,
+body.has-bg .nx-meta .t,
+body.has-bg .pl-row,
+body.has-bg .plp-row,
+body.has-bg .src-row,
+body.has-bg .imp-meta .t,
+body.has-bg .pc-title,
+body.has-bg .yc-title {
+  color: var(--tx-1);
+  text-shadow: 0 1px min(2px, var(--text-shadow-blur, 2px)) var(--text-shadow-color);
+}
+body.has-bg .track .meta .s,
+body.has-bg .track .dur,
+body.has-bg .nx-meta .s,
+body.has-bg .nx-dur,
+body.has-bg .pl-count,
+body.has-bg .imp-meta .s,
+body.has-bg .pc-sub,
+body.has-bg .yc-sub,
+body.has-bg .list-sep,
+body.has-bg .nx-note {
+  color: var(--tx-2);
+  text-shadow: 0 1px min(2px, var(--text-shadow-blur, 2px)) var(--text-shadow-color);
+}
+
+/* On a narrow window Now Playing is a sheet, not a right-aligned fragment.
+   Centering it makes both outer gutters equal and keeps the artwork/list
+   visually aligned with the viewport. */
+@media (max-width: 560px) {
+  body.np-open .np-drawer {
+    left: 50%;
+    right: auto;
+    width: min(var(--np-w, 330px), calc(100vw - 16px - var(--safe-left, 0px) - var(--safe-right, 0px)));
+    transform: translateX(-50%);
+  }
+  body.np-open .np-drawer .ov-art {
+    /* A square fallback cannot fit between the mobile nav and player. Give
+       the panel a real vertical budget so the cover never escapes its border. */
+    height: min(272px, 32vh);
+    max-height: min(272px, 32vh);
+  }
 }
