@@ -2,15 +2,17 @@
 //! audio (DRM), but it CAN read a public Spotify playlist's *track list* — song
 //! title + artist — and then resolve each one to a YouTube stream (front-end).
 //!
-//! No API keys, two layers:
-//! 1. The public **embed** page inlines an anonymous Web-API `accessToken`.
+//! Optional user API keys plus two keyless fallbacks:
+//! 1. Client credentials use Spotify's official Web API when configured.
+//! 2. The public **embed** page inlines an anonymous Web-API `accessToken`.
 //!    With it we call the official paginated API → FULL playlists (the embed
 //!    track list itself caps out around 100 entries) + album & duration per
 //!    track (better YouTube matching).
-//! 2. If the token or the API ever breaks, fall back to parsing the embed
+//! 3. If the token or the API ever breaks, fall back to parsing the embed
 //!    page's own `trackList` like before. Worst case the user pastes an
 //!    "Artist - Title" list.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -84,6 +86,29 @@ fn api_get(token: &str, url: &str) -> Result<Value, String> {
         .into_string()
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&body).map_err(|e| e.to_string())
+}
+
+fn client_token(client_id: &str, client_secret: &str) -> Result<String, String> {
+    let id = client_id.trim();
+    let secret = client_secret.trim();
+    if id.is_empty() || secret.is_empty() {
+        return Err("Spotify Client ID and Client Secret are both required".into());
+    }
+    let auth = STANDARD.encode(format!("{id}:{secret}"));
+    let body = ureq::post("https://accounts.spotify.com/api/token")
+        .set("Authorization", &format!("Basic {auth}"))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .set("User-Agent", UA)
+        .send_form(&[("grant_type", "client_credentials")])
+        .map_err(|e| format!("Spotify credentials: {e}"))?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    let value: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    value["access_token"]
+        .as_str()
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "Spotify did not return an access token".into())
 }
 
 /// One API track object → ExtTrack. Playlist items wrap the track in `track`;
@@ -202,9 +227,26 @@ fn collect(v: &Value) -> Option<ExtImport> {
 }
 
 #[tauri::command]
-pub async fn import_spotify(url: String) -> Result<ExtImport, String> {
+pub async fn import_spotify(
+    url: String,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> Result<ExtImport, String> {
     let (kind, id) = parse_spotify(&url)
         .ok_or_else(|| "Not a Spotify playlist / album / track link.".to_string())?;
+
+    let configured_id = client_id.unwrap_or_default();
+    let configured_secret = client_secret.unwrap_or_default();
+    if !configured_id.trim().is_empty() || !configured_secret.trim().is_empty() {
+        if let Ok(token) = client_token(&configured_id, &configured_secret) {
+            if let Ok(imported) = via_api(&token, &kind, &id) {
+                if !imported.tracks.is_empty() {
+                    return Ok(imported);
+                }
+            }
+        }
+    }
+
     let embed = format!("https://open.spotify.com/embed/{kind}/{id}");
     let body = ureq::get(&embed)
         .set("User-Agent", UA)

@@ -61,17 +61,41 @@ test("settings expose one unified backup import and export", async () => {
   assert.match(main, /parseBackup\(/);
 });
 
-test("settings navigation is Customisation, Disk, Backup, then System", async () => {
+test("settings navigation includes APIs and Providers before storage", async () => {
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const nav = main.match(/<nav class="set-nav">([\s\S]*?)<\/nav>/)?.[1] || "";
-  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "disk", "data", "system"]);
-  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*Disk[\s\S]*Backup[\s\S]*System/);
-  assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Integrations|Library/);
+  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "providers", "disk", "data", "system"]);
+  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*APIs &amp; Providers[\s\S]*Disk[\s\S]*Backup[\s\S]*System/);
+  assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Library/);
   assert.doesNotMatch(main, /id="setSignIn"|Sign in with Google/);
   assert.match(main, /data-pane="disk"[\s\S]*id="setDlDir"[\s\S]*id="setSharedDir"[\s\S]*id="setAutoSave"/);
   assert.doesNotMatch(main.match(/data-pane="disk"([\s\S]*?)<\/section>/)?.[1] || "", /setDlQuality|setDlConcurrency|setResumeDl|setCookies|setYtPath/);
   const system = main.match(/data-pane="system"([\s\S]*?)<\/section>/)?.[1] || "";
   for (const id of ["setCurVer", "setUpdCheck", "diagList", "diagExport"]) assert.match(system, new RegExp(`id="${id}"`));
+});
+
+test("provider settings expose protected Spotify credentials and validated yt-dlp options", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const settings = await readFile(new URL("../src/settings.js", import.meta.url), "utf8");
+  const rust = await readFile(new URL("../src-tauri/src/youtube.rs", import.meta.url), "utf8");
+  const pane = main.match(/data-pane="providers"([\s\S]*?)<\/section>/)?.[1] || "";
+  assert.match(pane, /type="password" id="setSpotifyId"/);
+  assert.match(pane, /type="password" id="setSpotifySecret"/);
+  assert.match(pane, /Spotify Developer Dashboard[\s\S]*id="setYtPath"[\s\S]*id="setDlQuality"[\s\S]*id="setYtArgs"/);
+  assert.match(settings, /spotifyClientId:\s*""[\s\S]*spotifyClientSecret:\s*""[\s\S]*ytdlpArgs:\s*""/);
+  assert.match(main, /clientId:\s*S\(\)\.spotifyClientId[\s\S]*clientSecret:\s*S\(\)\.spotifyClientSecret/);
+  assert.match(main, /spotifyClientId: _spotifyId, spotifyClientSecret: _spotifySecret/);
+  assert.match(rust, /fn parse_custom_args[\s\S]*Custom yt-dlp option is managed or unsafe/);
+});
+
+test("scrolling is native and stats spotlight clips every text column", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.doesNotMatch(main, /function _smStep|delta \* step|_sm\.target/);
+  assert.match(main, /function onWheelSmooth[\s\S]*modal\.contains\(el\)[\s\S]*\}\n/);
+  assert.match(css, /body\.smooth \.tracklist[\s\S]*scroll-behavior:\s*smooth/);
+  assert.match(css, /\.st-spotlight\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.st-spotlight > \*\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/s);
 });
 
 test("playlist storage supports folder selection, physical moves, and shared-file reuse", async () => {

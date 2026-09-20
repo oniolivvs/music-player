@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.149";
+const SRC_VERSION = "0.22.150";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1757,10 +1757,6 @@ function _virtSlice() {
   padBot.style.height = `${Math.max(0, view.length - end) * v.rowH}px`;
   rowsCont.innerHTML = view.slice(start, end).map((t, k) => _rowHtml(t, start + k, nowPath)).join("");
 
-  // Only re-seed when no glide owns the position: a re-slice fires mid-wheel,
-  // and overwriting the target there would cut the animation short every time
-  // the rendered window moved.
-  if (!_sm.gliding) { _sm.target = host.scrollTop; _sm.expect = host.scrollTop; }
   // Artwork is deliberately NOT done here. hydrateCovers + proxyCovers each walk
   // the list with querySelectorAll and run a regex over every mounted row; at
   // ~90 rows that is hundreds of nodes touched per re-slice, and a re-slice
@@ -1856,14 +1852,6 @@ function renderTracks(list, presorted = false) {
     if (savedTop > 0) host.scrollTop = savedTop;
   }
 
-  // A full re-render replaces the rows outright — any glide aimed at the old
-  // content is meaningless, so drop it rather than let it pull the new list.
-  if (_sm.raf) { cancelAnimationFrame(_sm.raf); _sm.raf = 0; }
-  _sm.gliding = false;
-  _sm.el = host;
-  _sm.target = host.scrollTop;
-  _sm.expect = host.scrollTop;
-
   // Rows use event delegation (wired once in init) — attaching thousands of
   // per-row listeners on every render made big libraries stutter.
   updatePlayingRow();
@@ -1875,17 +1863,6 @@ function wireTrackList() {
   const host = $("#trackList");
   // Virtualized lists re-slice their window on scroll (one rAF max in flight).
   host.addEventListener("scroll", () => {
-    // A scroll the glide did not produce — scrollbar drag, keyboard, touch — has
-    // to TAKE OVER it, not be undone by it. The old guard skipped this whole
-    // branch while an animation was in flight, so the glide kept lerping toward
-    // its stale target; the browser's own drag tracking hid that frame by frame
-    // and then let it snap the view back the instant the button was released.
-    const ours = _sm.gliding && _sm.el === host && Math.abs(host.scrollTop - _sm.expect) <= 1;
-    if (!ours) {
-      if (_sm.raf) { cancelAnimationFrame(_sm.raf); _sm.raf = 0; }
-      _sm.gliding = false;
-      _sm.el = host; _sm.target = host.scrollTop; _sm.expect = host.scrollTop;
-    }
     if (!_virt || _virt.raf) return; // _virtSlice() itself drops _virt if the view is gone
     _virt.raf = requestAnimationFrame(() => { if (_virt) { _virt.raf = 0; _virtSlice(); } });
   }, { passive: true });
@@ -2843,7 +2820,11 @@ async function runExtImport() {
   let jobs = []; // { q, dur } — dur (secs) picks the best YouTube hit when known
   try {
     if (sp) {
-      const imp = await invoke("import_spotify", { url: sp[0] });
+      const imp = await invoke("import_spotify", {
+        url: sp[0],
+        clientId: S().spotifyClientId || "",
+        clientSecret: S().spotifyClientSecret || "",
+      });
       if (!name) name = imp.name;
       jobs = (imp.tracks || [])
         .map(t => ({ q: `${t.artist} ${t.title}`.trim(), dur: Number(t.duration_secs) || 0 }))
@@ -3028,22 +3009,8 @@ function fixThumbHeights(root) {
     if (widths[i]) els[i].style.height = Math.round(widths[i] * 9 / 16) + "px";
   }
 }
-// ─── Wheel smoothing ───
-// There used to be a second smoother here, smoothWheel(el), bound directly to
-// #trackList and .sidebar. It was removed: onWheelSmooth (see below) already
-// smooths every scrollable via scrollableFrom(), so the two ran on the same
-// element at once — both calling preventDefault(), both animating scrollTop
-// toward their own target, neither aware of the other or of the user.
-//
-// That duplicate was the cause of the "it scrolls back up on its own" bug. Its
-// tick() lerped toward a target it never re-checked, so any scroll the user
-// performed themselves — dragging the scrollbar above all — was undone frame by
-// frame. It also ignored the smoothScroll setting entirely (it gated only on
-// touch and reduced-motion), which is why turning that setting off changed
-// nothing.
-//
-// Rule for anything added here: scrollTop has exactly ONE owner at a time. If
-// you animate it, you must detect a scroll you did not produce and yield.
+// Wheel movement stays browser-native. Do not add an rAF scrollTop interpolator
+// here: it makes trackpad and scrollbar input fight a stale animation target.
 let _thumbRz = 0;
 window.addEventListener("resize", () => {
   clearTimeout(_thumbRz);
@@ -3281,7 +3248,8 @@ async function searchOnline(q, page = 0, bg = false) {
 // files are NOT synced (too big) — the local scan + LAN share bring those.
 const SYNC_DEVICE_KEYS = new Set([ // never overwritten from the cloud (per-device)
   "downloadDir", "sideW", "npW", "ytdlpPath", "cookiesBrowser", "gdriveTokens",
-  "gdriveClientId", "gdriveClientSecret", "startOnBoot", "uiScale", "syncAt",
+  "spotifyClientId", "spotifyClientSecret", "gdriveClientId", "gdriveClientSecret",
+  "startOnBoot", "uiScale", "syncAt",
 ]);
 function gdriveCreds() { return { clientId: S().gdriveClientId || "", clientSecret: S().gdriveClientSecret || "" }; }
 async function gdriveRestore() {
@@ -5659,20 +5627,10 @@ function startPolling() {
   }, 300);
 }
 
-// ─── Smooth wheel scrolling (Performance → Smooth scrolling + intensity) ───
-// CSS scroll-behavior only eases programmatic/keyboard scrolls, never the mouse
-// wheel — which is why it "didn't work". So we animate the wheel ourselves:
-// accumulate a target offset per container and lerp its scrollTop toward it each
-// frame. smoothStrength (1..5) sets both the wheel step and the glide length.
-// This handler also LOCKS the background: while a modal is open, a wheel over
-// anything not inside it is swallowed so the library/playlists don't scroll.
-// `gliding` says an animation owns the scroll position; `expect` is the exact
-// scrollTop the last frame wrote. A scroll event matching `expect` is our own
-// frame, anything else is the user. `gliding` must NOT be derived from `raf`:
-// _smStep clears raf on entry and re-arms it on exit, so a scroll event landing
-// between the two would read as "no glide" and let the listener fight the
-// animation frame by frame.
-const _sm = { el: null, target: 0, ease: 0.18, raf: 0, expect: -1, gliding: false };
+// Keep wheel input native and one-to-one. The previous rAF interpolator
+// multiplied deltas then kept chasing a stale target, which felt like skating
+// and fought scrollbar/touch input. CSS handles controlled smoothing for
+// keyboard and programmatic moves; this listener only protects modal isolation.
 function scrollableFrom(node) {
   let el = node;
   while (el && el.nodeType === 1 && el !== document.body) {
@@ -5684,47 +5642,12 @@ function scrollableFrom(node) {
   }
   return null;
 }
-function _smStep() {
-  _sm.raf = 0;
-  const el = _sm.el;
-  if (!el) return;
-  const diff = _sm.target - el.scrollTop;
-  if (Math.abs(diff) < 0.5) {
-    el.scrollTop = _sm.target;
-    _sm.expect = el.scrollTop; _sm.gliding = false;
-    return;
-  }
-  el.scrollTop += diff * _sm.ease;
-  // Read back rather than trusting the assignment: the browser clamps and
-  // rounds, and the listener compares against this exact value.
-  _sm.expect = el.scrollTop;
-  _sm.raf = requestAnimationFrame(_smStep);
-}
 function onWheelSmooth(e) {
   if (e.ctrlKey || e.defaultPrevented) return; // let pinch-zoom through
   const el = scrollableFrom(e.target);
   // Modal open → block the background from scrolling behind it.
   const modal = document.querySelector(".modal-backdrop:not([hidden])");
   if (modal && (!el || !modal.contains(el))) { e.preventDefault(); return; }
-  if (!S().smoothScroll || !el) return; // native scroll when smoothing is off
-  let delta = e.deltaY;
-  if (!delta) return; // horizontal / no-op wheels pass through
-  if (e.deltaMode === 1) delta *= 16;             // lines → px
-  else if (e.deltaMode === 2) delta *= el.clientHeight; // pages → px
-  const strength = Math.min(5, Math.max(1, S().smoothStrength ?? 3));
-  const step = 0.7 + strength * 0.28;         // 0.98 … 2.1 wheel-distance multiplier
-  _sm.ease = 0.34 - (strength - 1) * 0.04;    // 0.34 (snappy) … 0.18 (glide) — never sluggish
-  e.preventDefault();
-  // Re-seed the target on a fresh container or once the previous glide settled,
-  // so scrollbar drags / programmatic jumps don't fight the animation.
-  if (_sm.el !== el || !_sm.raf || Math.abs(_sm.target - el.scrollTop) > 150) { _sm.el = el; _sm.target = el.scrollTop; }
-  const max = el.scrollHeight - el.clientHeight;
-  _sm.target = Math.max(0, Math.min(max, _sm.target + delta * step));
-  // Claim ownership before the first frame runs, so the scroll events this
-  // glide is about to produce are recognised as ours and not as a user scroll.
-  _sm.gliding = true;
-  _sm.expect = el.scrollTop;
-  if (!_sm.raf) _sm.raf = requestAnimationFrame(_smStep);
 }
 function initSmoothScroll() {
   window.addEventListener("wheel", onWheelSmooth, { passive: false });
@@ -6475,8 +6398,9 @@ function backupStatus(message, error = false) {
 }
 
 function currentBackup() {
+  const { spotifyClientId: _spotifyId, spotifyClientSecret: _spotifySecret, ...portableSettings } = S();
   return createBackup({
-    settings: S(), playlists: PL.getPlaylists(), library: { folders, tracks: library },
+    settings: portableSettings, playlists: PL.getPlaylists(), library: { folders, tracks: library },
     follows, plays, history: history2, online: Object.fromEntries(onlineIndex),
     blocked: [...blockedKeys], suppressed: [...suppressedSet], declined: [...dlDeclined],
   });
@@ -6558,6 +6482,7 @@ function openSettings() {
       <div class="set-nav-group">Customisation</div>
       <button class="set-tab set-tab-sub on" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
       <button class="set-tab set-tab-sub" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
+      <button class="set-tab" data-tab="providers">${ic(IC.link)}<span>APIs &amp; Providers</span></button>
       <button class="set-tab" data-tab="disk">${ic(IC.folder)}<span>Disk</span></button>
       <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
       <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
@@ -6660,7 +6585,7 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Performance</div>
       <div class="set-hint">Turn these off on a slower machine or to save battery — the app stays fully functional.</div>
       <div class="set-row"><label>Smooth scrolling</label><input type="checkbox" id="setSmooth" ${s.smoothScroll ? "checked" : ""}></div>
-      <div class="set-row"><label>Smooth intensity <span class="set-sub">(subtle → long glide)</span></label><input type="range" id="setSmoothAmt" min="1" max="5" step="1" value="${s.smoothStrength ?? 3}"></div>
+      <div class="set-hint">Uses the browser's controlled native smoothing for keyboard and programmatic navigation. Mouse-wheel scrolling stays direct and precise.</div>
       <div class="set-row"><label>Interface animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
       <div class="set-row"><label>Album artwork</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
       <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
@@ -6683,20 +6608,7 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="youtube">
     <div class="set-group"><div class="set-title">YouTube</div>
-      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through a <b>built-in engine</b> — no setup needed.${IS_ANDROID ? "" : " yt-dlp below is an <b>optional</b> desktop booster (used first when present)."}</div>
-      ${IS_ANDROID ? "" : `<div class="set-row"><label>yt-dlp binary</label>
-        <span class="dir-pick">
-          <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
-          <button id="setYtPick" class="btn-line sm" title="Pick the binary">${ic(IC.folder)}</button>
-          <button id="setYtTest" class="btn-line sm" title="Test">${ic(IC.check)} Test</button>
-          <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)}Install</button>
-        </span></div>
-      <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>`}
-      ${IS_ANDROID
-        ? `<div class="set-hint">${ic(IC.alert)} <b>Account risk:</b> using your logged-in YouTube session for downloads is more traceable and often makes YouTube <b>block</b> extraction. The built-in engine works without it — browser cookies are a desktop-only option, so they're disabled here.</div>`
-        : `<div class="set-row"><label>Cookies from browser</label>
-        <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
-      <div class="set-hint">${ic(IC.alert)} A logged-in YouTube session often gets blocked (“format not available”) and is more traceable on your account — keep <b>None</b> unless you need age/member-restricted content. Failed calls retry without cookies automatically.</div>`}
+      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through the built-in engine. Advanced provider configuration is available in <b>APIs &amp; Providers</b>.</div>
       <div class="set-row"><label>Search results</label>
         <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row"><label>Show videos in search</label><input type="checkbox" id="setIncVid" ${s.ytIncludeVideos !== false ? "checked" : ""}></div>
@@ -6713,6 +6625,38 @@ function openSettings() {
       <div class="set-row"><label>Feed items per section <span class="set-sub">(online sections · 1–50)</span></label><input type="number" id="setYtFeedLimit" class="num-in" min="1" max="50" step="1" value="${Number(s.ytFeedLimit) || 12}"></div>
       <div class="set-row"><label>Feed region <span class="set-sub">(trending, empty = global)</span></label><input type="text" id="setYtFeedRegion" class="text-in" placeholder="e.g. US, FR" value="${esc(s.ytFeedRegion || "")}"></div>
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">${ic(IC.refresh)} Run again…</button></div>
+    </div>
+    </section>
+    <section class="set-pane" data-pane="providers">
+    <div class="set-group"><div class="set-title">Spotify API</div>
+      <div class="set-hint">Optional credentials enable the official Spotify API for complete playlist and album imports. They stay on this device and the secret is excluded from exported backups.</div>
+      <div class="set-row provider-secret-row"><label for="setSpotifyId">Client ID</label>
+        <span class="secret-field"><input type="password" id="setSpotifyId" class="text-in" autocomplete="off" spellcheck="false" value="${esc(s.spotifyClientId || "")}"><button type="button" class="btn-line sm" data-reveal="setSpotifyId">Show</button></span></div>
+      <div class="set-row provider-secret-row"><label for="setSpotifySecret">Client Secret</label>
+        <span class="secret-field"><input type="password" id="setSpotifySecret" class="text-in" autocomplete="off" spellcheck="false" value="${esc(s.spotifyClientSecret || "")}"><button type="button" class="btn-line sm" data-reveal="setSpotifySecret">Show</button></span></div>
+      <details class="provider-guide"><summary>How to get Spotify credentials</summary><ol>
+        <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">Spotify Developer Dashboard</a> and sign in.</li>
+        <li>Select <b>Create app</b>, enter any app name and description, then accept the terms.</li>
+        <li>Open the app's <b>Settings</b> and copy its Client ID.</li>
+        <li>Select <b>View client secret</b>, copy it here, then save by leaving the field.</li>
+      </ol></details>
+    </div>
+    <div class="set-group"><div class="set-title">yt-dlp</div>
+      <div class="set-hint">Optional Windows provider for search, streaming and audio extraction. The built-in engine remains the automatic fallback.</div>
+      ${IS_ANDROID ? `<div class="set-hint">yt-dlp configuration is desktop-only.</div>` : `<div class="set-row"><label for="setYtPath">Binary path</label>
+        <span class="dir-pick">
+          <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
+          <button id="setYtPick" class="btn-line sm" title="Pick the binary">${ic(IC.folder)}</button>
+          <button id="setYtTest" class="btn-line sm" title="Test">${ic(IC.check)} Test</button>
+          <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)} Install</button>
+        </span></div>
+      <div class="set-hint" id="setYtStatus">Empty = automatic detection. Test validates the binary and all custom arguments.</div>
+      <div class="set-row"><label for="setCookies">Cookies from browser</label>
+        <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
+      <div class="set-row"><label for="setDlQuality">MP3 extraction quality</label><select id="setDlQuality" class="sel sm-sel wide">${["best", "320", "256", "192", "128"].map(q => `<option value="${q}" ${s.downloadQuality === q ? "selected" : ""}>${q === "best" ? "Best available" : `${q} kbps`}</option>`).join("")}</select></div>
+      <div class="set-row"><label for="setDlConcurrency">Concurrent downloads</label><select id="setDlConcurrency" class="sel sm-sel wide">${[1, 2, 3, 4].map(n => `<option value="${n}" ${Number(s.dlConcurrency) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+      <div class="set-row provider-args-row"><label for="setYtArgs">Custom download arguments <span class="set-sub">(safe options only)</span></label><input type="text" id="setYtArgs" class="text-in provider-args" placeholder="--sleep-interval 1 --limit-rate 5M" value="${esc(s.ytdlpArgs || "")}"></div>
+      <div class="set-hint">Arguments that can execute commands, redirect files, expose cookies or replace the app's output/progress protocol are rejected.</div>`}
     </div>
     </section>
     <section class="set-pane" data-pane="disk">
@@ -6908,7 +6852,6 @@ function openSettings() {
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
-  $("#setSmoothAmt").addEventListener("input", e => SETTINGS.setSetting("smoothStrength", Number(e.target.value)));
   $("#setVol").addEventListener("change", e => { const level = clampVolumePercent(e.target.value); SETTINGS.setSetting("defaultVolume", level); $("#volume").value = level; $("#volumePct").value = String(Math.round(level)); $("#volume").style.setProperty("--fill", `${level}%`); invoke("set_volume", { level: volumeGainFromPercent(level) }).catch(() => {}); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; updateShuffleBtn(); if (curIndex >= 0) schedulePreload(); });
@@ -6923,6 +6866,7 @@ function openSettings() {
   };
   // yt-dlp controls only exist on desktop (hidden on Android) — guard every one.
   $("#setYtPath")?.addEventListener("change", e => { SETTINGS.setSetting("ytdlpPath", e.target.value.trim()); ytTest(); });
+  $("#setYtArgs")?.addEventListener("change", e => { SETTINGS.setSetting("ytdlpArgs", e.target.value.trim()); ytTest(); });
   $("#setYtTest")?.addEventListener("click", ytTest);
   $("#setYtInstall")?.addEventListener("click", async () => {
     const btn = $("#setYtInstall"); btn.disabled = true;
@@ -7017,6 +6961,16 @@ function openSettings() {
     SETTINGS.setSetting("downloadDir", path);
     if (path) await invoke("register_roots", { paths: [path] }).catch(() => {});
   });
+  $("#setSpotifyId")?.addEventListener("change", e => SETTINGS.setSetting("spotifyClientId", e.target.value.trim()));
+  $("#setSpotifySecret")?.addEventListener("change", e => SETTINGS.setSetting("spotifyClientSecret", e.target.value.trim()));
+  body.querySelectorAll("[data-reveal]").forEach(button => button.addEventListener("click", () => {
+    const input = $("#" + button.dataset.reveal);
+    if (!input) return;
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    button.textContent = reveal ? "Hide" : "Show";
+    button.setAttribute("aria-pressed", String(reveal));
+  }));
   $("#setDlPick").addEventListener("click", async () => {
     const path = await pickMusicDirectory("Choose the root MP3 folder", S().downloadDir || "");
     if (path) { SETTINGS.setSetting("downloadDir", path); $("#setDlDir").value = path; }
@@ -7510,7 +7464,7 @@ function wireCookieConsent() {
 // auto-detect (PATH, ~/Desktop/*/bin, removable drives, linuxbrew).
 async function ytConfigPush() {
   if (!IS_NATIVE) return "";
-  try { return await invoke("yt_config", { path: S().ytdlpPath || "", cookies: S().cookiesBrowser || "" }); }
+  try { return await invoke("yt_config", { path: S().ytdlpPath || "", cookies: S().cookiesBrowser || "", args: S().ytdlpArgs || "" }); }
   catch (e) { console.warn("[yt config]", e); throw e; }
 }
 // Download the standalone yt-dlp (self-contained) into ~/.local/bin. Clears any

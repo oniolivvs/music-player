@@ -30,7 +30,6 @@ const DEFAULTS = {
   animations: true,
   artworkTransitionMs: 500,
   smoothScroll: true,    // eased scrolling on lists/panels (Performance group)
-  smoothStrength: 3,     // smooth-scroll intensity 1 (subtle) … 5 (long glide)
   defaultVolume: 80,
   normalizeDefault: true,
   shuffleDefault: false,
@@ -57,7 +56,10 @@ const DEFAULTS = {
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog
   newTrackBehavior: "ask", // new tracks in followed playlists: ask (propose once) | auto (download, no prompt) | off (manual only)
   searchLimit: 20,       // YouTube search result count
+  spotifyClientId: "",  // optional Spotify Web API app credentials
+  spotifyClientSecret: "",
   ytdlpPath: "",         // explicit yt-dlp binary; empty = auto-detect
+  ytdlpArgs: "",         // optional validated download-only arguments
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
   startOnBoot: false,    // launch the app automatically at login (OS autostart; source of truth is the autostart plugin)
   setupDone: false,      // first-run wizard completed

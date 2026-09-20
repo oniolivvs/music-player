@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.149 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.150 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -56,8 +56,8 @@ body {
 /* Smooth scrolling (Performance → Smooth scrolling). Eases programmatic/keyboard
    scrolls; scroll containers also stop chaining so lists feel less jumpy. */
 .tracklist, .modal-body, .src-list, .playlists-list, .np-next, .ck-list, .imp-list, .side-section { overscroll-behavior: contain; }
-.tracklist { scroll-behavior: auto !important; }
-body.smooth .modal-body, body.smooth .src-list,
+.tracklist { scroll-behavior: auto; }
+body.smooth .tracklist, body.smooth .modal-body, body.smooth .set-panes, body.smooth .src-list,
 body.smooth .playlists-list, body.smooth .np-next, body.smooth .ck-list,
 body.smooth .imp-list, body.smooth .side-section { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { *, body.smooth * { scroll-behavior: auto !important; } }
@@ -695,6 +695,13 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 .transition-duration-control input[type="range"] { flex: 1 1 150px; min-width: 90px; }
 .transition-duration-control .num-in { width: 78px; text-align: right; }
 .set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
+.secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; width: min(100%, 330px); }
+.secret-field .text-in { width: 100%; min-width: 0; }
+.provider-guide { margin-top: 10px; border: 1px solid var(--bd); border-radius: 9px; background: color-mix(in srgb, var(--accent) 6%, transparent); overflow: hidden; }
+.provider-guide summary { padding: 10px 12px; color: var(--tx-1); font-size: 12px; font-weight: 750; cursor: pointer; }
+.provider-guide ol { margin: 0; padding: 0 16px 13px 32px; color: var(--tx-2); font-size: 12px; line-height: 1.55; }
+.provider-guide a { color: var(--accent-2); }
+.provider-args { width: min(100%, 330px); }
 .diag-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .diag-toolbar .text-in { flex: 1 1 150px; min-width: 120px; }
 .diag-list {
@@ -1910,7 +1917,11 @@ body:not(.has-bg) {
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--bd));
   border-radius: calc(var(--r) + 1px);
   background: color-mix(in srgb, var(--accent) 9%, var(--bg-2));
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
+.st-spotlight > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-spotlight-kicker { color: var(--accent-2); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .st-spotlight strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-spotlight > span:last-child { color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -111,6 +111,44 @@ pub struct PlaylistImport {
 pub struct YtCfg {
     bin: Arc<Mutex<Option<String>>>,
     cookies: Arc<Mutex<String>>, // browser name for --cookies-from-browser, "" = off
+    extra_args: Arc<Mutex<Vec<String>>>, // validated download-only options
+}
+
+fn parse_custom_args(raw: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in raw.chars() {
+        if escaped { current.push(ch); escaped = false; continue; }
+        if ch == '\\' && quote != Some('\'') { escaped = true; continue; }
+        if matches!(ch, '\'' | '"') {
+            if quote == Some(ch) { quote = None; }
+            else if quote.is_none() { quote = Some(ch); }
+            else { current.push(ch); }
+            continue;
+        }
+        if ch.is_whitespace() && quote.is_none() {
+            if !current.is_empty() { args.push(std::mem::take(&mut current)); }
+        } else { current.push(ch); }
+    }
+    if escaped { current.push('\\'); }
+    if quote.is_some() { return Err("Custom yt-dlp arguments contain an unclosed quote".into()); }
+    if !current.is_empty() { args.push(current); }
+    if args.len() > 32 || raw.len() > 1500 { return Err("Custom yt-dlp arguments are too long".into()); }
+    const BLOCKED: [&str; 17] = [
+        "--exec", "--exec-before-download", "--plugin-dirs", "--load-plugins",
+        "--cookies", "--cookies-from-browser", "--output", "-o", "--paths", "-p",
+        "--print", "--progress-template", "--newline", "--audio-format", "--audio-quality",
+        "--ffmpeg-location", "--config-locations",
+    ];
+    for arg in &args {
+        let option = arg.split('=').next().unwrap_or("").to_ascii_lowercase();
+        if BLOCKED.contains(&option.as_str()) {
+            return Err(format!("Custom yt-dlp option is managed or unsafe: {option}"));
+        }
+    }
+    Ok(args)
 }
 
 /// Record yt-dlp failures in the shared, redacted and rotating diagnostics log.
@@ -474,8 +512,10 @@ pub async fn detect_browsers() -> Vec<BrowserInfo> {
 /// Set (or auto-detect when `path` is empty) the yt-dlp binary + the cookies
 /// browser. Returns "path (version)" so the UI can show what's active.
 #[tauri::command]
-pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String) -> Result<String, String> {
+pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String, args: String) -> Result<String, String> {
+    let parsed_args = parse_custom_args(&args)?;
     *cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()) = cookies.trim().to_lowercase();
+    *cfg.extra_args.lock().unwrap_or_else(|e| e.into_inner()) = parsed_args;
     let p = path.trim();
     if !p.is_empty() {
         let v = check_bin(p).map_err(|e| format!("“{p}”: {e}"))?;
@@ -1257,16 +1297,17 @@ pub async fn yt_download(
         let bin = ensure_bin(&cfg)?;
         ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
         let cookies = cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let extra_args = cfg.extra_args.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if cookies.is_empty() {
-            download_clients(&app, &dls, &bin, &id, &dir, None, q)
+            download_clients(&app, &dls, &bin, &id, &dir, None, q, &extra_args)
         } else {
             // A logged-in session often makes YouTube withhold every format. If the
             // cookies attempt fails, the no-cookies attempt is the meaningful one —
             // surface ITS error, not the misleading "format not available" cookies one.
-            match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies), q) {
+            match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies), q, &extra_args) {
                 Ok(p) => Ok(p),
                 Err(e) if e == "canceled" => Err(e),
-                Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None, q),
+                Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None, q, &extra_args),
             }
         }
     })();
@@ -1298,6 +1339,7 @@ fn download_clients(
     dir: &str,
     cookies: Option<&str>,
     quality: &str,
+    extra_args: &[String],
 ) -> Result<String, String> {
     // `android,web` is the most reliable audio client, so try it right after the
     // default; the default's stream URL often 403s or is DRM-flagged while
@@ -1315,7 +1357,7 @@ fn download_clients(
         if dls.canceled.lock().unwrap_or_else(|e| e.into_inner()).contains(id) {
             return Err("canceled".into());
         }
-        match download_attempt(app, dls, bin, id, dir, cookies, client, quality) {
+        match download_attempt(app, dls, bin, id, dir, cookies, client, quality, extra_args) {
             Ok(p) => return Ok(p),
             Err(e) if e == "canceled" => return Err(e),
             Err(e) => {
@@ -1367,6 +1409,7 @@ fn download_attempt(
     cookies: Option<&str>,
     client: Option<&str>,
     quality: &str,
+    extra_args: &[String],
 ) -> Result<String, String> {
     let mut cmd = sys_cmd(bin);
     cmd.arg("--no-playlist");
@@ -1384,6 +1427,7 @@ fn download_attempt(
     if let Some(c) = cookies {
         cmd.arg("--cookies-from-browser").arg(c);
     }
+    cmd.args(extra_args);
     let out_tpl = format!("{dir}/%(title)s [%(id)s].%(ext)s");
     let page = format!("https://www.youtube.com/watch?v={id}");
     // Cap the mp3 bitrate when the user picked a quality; "best" leaves it to
@@ -1587,7 +1631,7 @@ pub async fn resolve_async(state: &YtState, cfg: &YtCfg, id: &str) -> Result<Str
 mod url_guard_tests {
     use super::{
         cached_url, cache_url, check_yt_id, check_yt_url, cleanup_download_root_candidates, existing_writable_dir,
-        invalidate_url,
+        invalidate_url, parse_custom_args,
         first_existing_writable_dir, yt_cleanup_download_root, yt_download_root,
     };
     use std::{
@@ -1596,6 +1640,17 @@ mod url_guard_tests {
     };
 
     static CLEANUP_TEST_ROOT_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn custom_download_args_support_quotes_but_reject_app_owned_or_executable_options() {
+        assert_eq!(
+            parse_custom_args("--sleep-interval 1 --limit-rate '5 M'").unwrap(),
+            vec!["--sleep-interval", "1", "--limit-rate", "5 M"],
+        );
+        for raw in ["--exec calc.exe", "--output elsewhere", "--cookies secret.txt", "--audio-format wav"] {
+            assert!(parse_custom_args(raw).is_err(), "must reject {raw}");
+        }
+    }
 
     #[test]
     fn invalidating_a_failed_stream_forces_the_next_play_to_resolve_again() {
