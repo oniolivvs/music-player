@@ -18,10 +18,31 @@ test("hot bar owns playlist import and Share is absent from the UI", async () =>
 
 test("playlist import explicitly asks whether future tracks should be followed", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(html, /Follow future tracks\?/);
+  assert.match(html, /class="imp-foot-row imp-import-actions"[\s\S]*class="follow-choice-options"[\s\S]*id="impDl"/);
   assert.match(html, /id="impFollowNo"[^>]*checked/);
   assert.match(html, /id="impFollowYes"/);
+  assert.match(css, /\.imp-import-actions\s*\{[^}]*align-items:\s*flex-end/s);
+  assert.match(css, /\.imp-import-actions \.imp-dl\s*\{[^}]*min-height:\s*34px/s);
   assert.doesNotMatch(html, /id="pickJson"/);
+});
+
+test("Now Playing uses a large non-stretched hero artwork", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(html, /class="ov-copy"[\s\S]*id="ovTitle"[\s\S]*id="ovSub"[\s\S]*id="ovMeta"/);
+  assert.match(css, /\.ov-art\s*\{[^}]*aspect-ratio:\s*16 \/ 9[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.ov-art\.has-cover::before[\s\S]*z-index:\s*0[^}]*background-size:\s*cover[^}]*filter:\s*blur\(16px\)/);
+  assert.match(css, /\.ov-art\.has-cover::after[\s\S]*inset:\s*0[^}]*background-size:\s*contain/);
+  assert.match(css, /\.ov-copy\s*\{[^}]*backdrop-filter:\s*blur\(12px\)/s);
+  assert.match(css, /\.ov-title\s*\{[^}]*color:\s*var\(--tx-1\)[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.ov-sub, \.ov-meta\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.np-next-head\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(main, /function paintArtImage\(el, url\)[\s\S]*--ov-art-image/);
+  assert.match(main, /FIT_EXEMPT = \[[^\]]*"ov-art"/);
+  assert.doesNotMatch(main, /function sizeNowPlayingArt/);
 });
 
 test("settings expose one unified backup import and export", async () => {

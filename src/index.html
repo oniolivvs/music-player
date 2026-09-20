@@ -87,9 +87,11 @@
       <span class="dl-title">Now playing</span>
     </div>
     <div class="ov-art" id="ovArt" data-ic="music"></div>
-    <div class="ov-title" id="ovTitle">Nothing playing</div>
-    <div class="ov-sub" id="ovSub"></div>
-    <div class="ov-meta" id="ovMeta"></div>
+    <div class="ov-copy">
+      <div class="ov-title" id="ovTitle">Nothing playing</div>
+      <div class="ov-sub" id="ovSub"></div>
+      <div class="ov-meta" id="ovMeta"></div>
+    </div>
     <div class="np-next-head">Up next</div>
     <div id="upNextList" class="np-next"></div>
   </aside>
@@ -333,11 +335,13 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             <label class="imp-lbl" for="impDest">Into</label>
             <select id="impDest"></select>
           </div>
-          <div class="imp-foot-row">
+          <div class="imp-foot-row imp-import-actions">
             <fieldset class="follow-choice" aria-label="Follow this playlist after import">
               <legend>Follow future tracks?</legend>
-              <label><input type="radio" id="impFollowNo" name="impFollow" value="once" checked><span>Import once</span></label>
-              <label><input type="radio" id="impFollowYes" name="impFollow" value="follow"><span>Yes, follow it</span></label>
+              <div class="follow-choice-options">
+                <label><input type="radio" id="impFollowNo" name="impFollow" value="once" checked><span>Import once</span></label>
+                <label><input type="radio" id="impFollowYes" name="impFollow" value="follow"><span>Yes, follow it</span></label>
+              </div>
             </fieldset>
             <label class="imp-dl" title="Also download the selected tracks as local mp3 files"><input type="checkbox" id="impDl"> Save locally (mp3)</label>
             <button id="impGo" class="btn"><span data-ic="dl"></span> Import</button>

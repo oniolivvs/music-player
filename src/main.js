@@ -13,7 +13,7 @@ import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
 import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
 import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
-import { mergeMusicListPaths, parseMusicList } from "./music-list.mjs";
+import { mergeMusicListPaths, parseMusicList, youtubeThumbnailFor } from "./music-list.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.145";
+const SRC_VERSION = "0.22.149";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -302,6 +302,15 @@ function pickStill(list, token, alive, done) {
   tryNext();
 }
 
+function paintArtImage(el, url) {
+  if (el.classList.contains("ov-art")) {
+    el.style.backgroundImage = "";
+    el.style.setProperty("--ov-art-image", `url("${url}")`);
+    return;
+  }
+  el.style.backgroundImage = `url("${url}")`;
+}
+
 function setArtImg(el, url, artworkToken = el?.dataset?.playbackArtworkToken) {
   if (el.id === "npArt" && artworkToken && !_playbackArtworkGate.isCurrent(artworkToken)) return;
   if (el.id === "npArt") setCurrentArtwork(url, artworkToken);
@@ -311,11 +320,11 @@ function setArtImg(el, url, artworkToken = el?.dataset?.playbackArtworkToken) {
     const list = ytStills(url);
     if (list.length > 1) {
       el.dataset.artWanted = url;
-      el.style.backgroundImage = `url("${url}")`;   // show something immediately
+      paintArtImage(el, url);                        // show something immediately
       fitArtRatio(el, url);
       pickStill(list, url, t => el.dataset.artWanted === t, (best, img) => {
         if (best === url) return;                   // already showing it
-        el.style.backgroundImage = `url("${best}")`;
+        paintArtImage(el, best);
         // The probe already holds the decoded image; measure that one, since a
         // larger still can carry different padding from the cropped variant.
         fitArtRatio(el, best, img);
@@ -330,11 +339,11 @@ function setArtImg(el, url, artworkToken = el?.dataset?.playbackArtworkToken) {
     // paint a network image will not decode it for measurement either.
     netThumb(url).then(d => {
       if (el.dataset.proxied !== url) return;
-      el.style.backgroundImage = `url("${d}")`;
+      paintArtImage(el, d);
       fitArtRatio(el, d);
     }).catch(() => {});
   } else {
-    el.style.backgroundImage = `url("${url}")`;
+    paintArtImage(el, url);
   }
   if (!(IS_ANDROID && /^https?:\/\//.test(url))) fitArtRatio(el, url);
 }
@@ -359,7 +368,7 @@ function setArtImg(el, url, artworkToken = el?.dataset?.playbackArtworkToken) {
 // heights is worse than a consistent 16:9 crop.
 const _artRatio = new Map();                       // url -> clamped ratio
 const RATIO_MIN = 0.55, RATIO_MAX = 2.4;
-const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "dl-cover", "pl-cover", "vh-icon"];
+const FIT_EXEMPT = ["yc-thumb", "art", "np-art", "ov-art", "dl-cover", "pl-cover", "vh-icon"];
 
 /**
  * @param {Element} el
@@ -606,6 +615,7 @@ function setArtPlaceholder(el, t, artworkToken = "") {
   if (artworkToken) el.dataset.playbackArtworkToken = artworkToken;
   if (!retainReadyCover) {
     el.classList.remove("has-cover"); el.style.backgroundImage = "";
+    el.style.removeProperty("--ov-art-image");
     el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t);
   }
   el.dataset.album = albumKey(t);
@@ -961,12 +971,15 @@ const onlineIndex = new Map(); // "yt:<id>" -> track
 const durationPending = new Map();
 function isOnline(p) { return String(p || "").startsWith("yt:"); }
 function ytId(p) { return String(p).slice(3); }
-function onlineFromResult(r) { return { path: "yt:" + r.id, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail, views: r.views || 0 }; }
+function onlineFromResult(r) {
+  const path = "yt:" + r.id;
+  return { path, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail || youtubeThumbnailFor(path), views: r.views || 0 };
+}
 function ensureOnlineTrack(p) {
   let t = trackByPath(p) || onlineIndex.get(p);
   if (!t && isOnline(p)) {
     const id = ytId(p);
-    t = { path: p, title: id ? `YouTube Track (${id})` : p, artist: "YouTube", album: "YouTube", duration_secs: 0, gain: 1, thumbnail: "" };
+    t = { path: p, title: id ? `YouTube Track (${id})` : p, artist: "YouTube", album: "YouTube", duration_secs: 0, gain: 1, thumbnail: youtubeThumbnailFor(p) };
     onlineIndex.set(p, t);
   }
   return t;
@@ -1033,7 +1046,21 @@ function hydrateMissingDuration(path, expectedTrack, expectedSeq) {
 }
 async function loadOnline() {
   const raw = await storeLoad("online");
-  if (raw) { try { const d = JSON.parse(raw); for (const k of Object.keys(d)) onlineIndex.set(k, d[k]); } catch {} }
+  if (raw) {
+    try {
+      const d = JSON.parse(raw);
+      let repaired = false;
+      for (const k of Object.keys(d)) {
+        const track = d[k];
+        if (track && !track.thumbnail) {
+          const thumbnail = youtubeThumbnailFor(k);
+          if (thumbnail) { track.thumbnail = thumbnail; repaired = true; }
+        }
+        onlineIndex.set(k, track);
+      }
+      if (repaired) await saveOnline();
+    } catch {}
+  }
 }
 
 // ─── Resume where you left off (Settings → Playback) ───
@@ -1345,12 +1372,15 @@ function enrichLibrary() {
     const m = String(t.path).match(/\[([A-Za-z0-9_-]{11})\]\.[a-z0-9]+$/);
     if (!m) continue;
     const o = onlineIndex.get("yt:" + m[1]);
-    if (!o) continue;
-    if (t.title.includes(`[${m[1]}]`)) t.title = o.title;
-    if (!t.artist || t.artist === "Unknown Artist") t.artist = o.artist;
-    if (!t.album || t.album === "Unknown Album") t.album = "YouTube";
-    t.thumbnail = o.thumbnail;
-    changed++;
+    let repaired = false;
+    if (o) {
+      if (o.title && t.title.includes(`[${m[1]}]`)) { t.title = o.title; repaired = true; }
+      if (o.artist && (!t.artist || t.artist === "Unknown Artist")) { t.artist = o.artist; repaired = true; }
+      if (!t.album || t.album === "Unknown Album") { t.album = "YouTube"; repaired = true; }
+    }
+    const thumbnail = o?.thumbnail || youtubeThumbnailFor(t.path);
+    if (thumbnail) { t.thumbnail = thumbnail; repaired = true; }
+    if (repaired) changed++;
   }
   return changed;
 }

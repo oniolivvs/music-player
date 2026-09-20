@@ -54,6 +54,11 @@ function pathId(path) {
   return String(path || "").match(/\[([A-Za-z0-9_-]{11})\](?:\.[A-Za-z0-9]+)?$/)?.[1] || "";
 }
 
+export function youtubeThumbnailFor(value) {
+  const id = pathId(value);
+  return id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : "";
+}
+
 export function mergeMusicListPaths(existingPaths, tracks, localPathFor = () => "") {
   const merged = new Map((Array.isArray(existingPaths) ? existingPaths : []).map(path => [pathId(path) || path, path]));
   for (const track of tracks || []) {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeMusicListPaths, parseMusicList } from "../src/music-list.mjs";
+import { mergeMusicListPaths, parseMusicList, youtubeThumbnailFor } from "../src/music-list.mjs";
 
 test("HDD music.json entries become unique YouTube tracks", () => {
   const result = parseMusicList(JSON.stringify([
@@ -20,6 +20,14 @@ test("music list accepts wrapped arrays and YouTube URLs", () => {
     { title: "Short", url: "https://youtu.be/9bZkp7q19f0" },
   ] });
   assert.deepEqual(result.tracks.map(track => track.path), ["yt:dQw4w9WgXcQ", "yt:9bZkp7q19f0"]);
+});
+
+test("legacy local downloads recover their YouTube cover from the filename", () => {
+  assert.equal(
+    youtubeThumbnailFor("C:\\Music\\Track [l2x087JvRsU].mp3"),
+    "https://i.ytimg.com/vi/l2x087JvRsU/mqdefault.jpg",
+  );
+  assert.equal(youtubeThumbnailFor("C:\\Music\\Track.mp3"), "");
 });
 
 test("music list rejects unrelated JSON", () => {

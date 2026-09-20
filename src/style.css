@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.145 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.149 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1015,32 +1015,35 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
 }
 .np-head { display: flex; align-items: center; justify-content: space-between; min-width: 0; flex: 0 0 auto; }
 .ov-art {
-  /* Real height (see .yc-thumb: the padding-bottom ratio hack paints nothing
-     on the old WebView). Fixed near-square fallback, exact square via
-     @supports on modern engines. */
-  width: 100%; height: 272px; border-radius: 12px; flex-shrink: 0;
-  background: var(--bg-3) center / cover no-repeat; overflow: hidden;
+  width: 100%; height: auto; min-height: 0; aspect-ratio: 16 / 9;
+  position: relative; isolation: isolate; flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--bd-2));
+  border-radius: 12px; overflow: hidden;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, var(--bg-3)), var(--bg-2));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .24), inset 0 1px 0 rgba(255, 255, 255, .12);
 }
-@supports (aspect-ratio: 1) { .ov-art { height: auto; aspect-ratio: 1; } }
-/* Big artwork: contain (not crop) on black — cover cropped the art off-centre.
-   The square above is only the starting shape: fitArtRatio() measures the real
-   image and writes an inline aspect-ratio, because a 16:9 YouTube thumbnail in a
-   square box turned ~140px of a 320px-wide drawer into black bars. `contain`
-   stays because the measured ratio is clamped, so an extreme asset letterboxes
-   slightly rather than crops. */
-/* The artwork fills its box, always. `contain` is gone and so is the black
-   plate behind it: between them they were the only things that could draw a
-   frame around a cover, whether as letterbox bars, as a hairline from sub-pixel
-   rounding, or as the panel showing through a translucent theme. The box is
-   given the image's measured ratio by fitArtRatio, so in the ordinary case
-   `cover` has nothing to crop — and where the ratio has to be clamped, losing a
-   sliver of an extreme image beats framing every normal one. */
-/* size and position carry no !important: applyArtBox writes both inline when it
-   has found padding baked into the image and needs to show only part of it.
-   They are the fallback for the moment before the scan finishes. */
-.ov-art.has-cover { background-size: cover; background-repeat: no-repeat !important; background-position: center; background-color: transparent !important; color: transparent; }
-.ov-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 800; line-height: 1.25; }
-.ov-sub, .ov-meta { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-art.has-cover { background: var(--bg-3) !important; color: transparent; }
+.ov-art.has-cover::before,
+.ov-art.has-cover::after {
+  content: ""; position: absolute; pointer-events: none;
+  background-image: var(--ov-art-image); background-position: center; background-repeat: no-repeat;
+}
+.ov-art.has-cover::before {
+  inset: -18px; z-index: 0; background-size: cover;
+  filter: blur(16px) brightness(.58) saturate(1.28); transform: scale(1.1);
+}
+.ov-art.has-cover::after {
+  inset: 0; z-index: 1; border-radius: inherit; background-size: contain;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, .42));
+}
+.ov-copy {
+  display: grid; gap: 2px; min-width: 0; flex: 0 0 auto; padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--bd-1)); border-radius: 9px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--bg-2) 82%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+  backdrop-filter: blur(12px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.ov-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 800; line-height: 1.25; color: var(--tx-1); flex: 0 0 auto; }
+.ov-sub, .ov-meta { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
 /* Streaming vs local, coloured like the pill so the two agree at a glance. */
@@ -1063,7 +1066,7 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
 /* Reserve the row's height regardless of the badge, so a list where only some
    rows are badged keeps an even rhythm. */
 .track .meta .t { min-height: 1.35em; }
-.np-next-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-top: 6px; }
+.np-next-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-top: 6px; flex: 0 0 auto; }
 .np-next { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 2px; }
 .nx-row { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 100%; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
 .nx-row:hover { background: var(--bg-3); }
@@ -1845,14 +1848,13 @@ body:not(.has-bg) {
 .set-tab { min-height: 42px; border-radius: calc(var(--r) - 2px); }
 .set-tab.on { background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .follow-choice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
   margin: 0;
   padding: 0;
   border: 0;
 }
-.follow-choice legend { font-size: 11px; font-weight: 700; color: var(--tx-3); margin-bottom: 5px; }
+.follow-choice legend { font-size: 11px; font-weight: 700; color: var(--tx-3); margin: 0 0 5px; padding: 0; }
+.follow-choice-options { display: flex; align-items: center; gap: 6px; }
 .follow-choice label { position: relative; cursor: pointer; }
 .follow-choice input { position: absolute; opacity: 0; pointer-events: none; }
 .follow-choice span {
@@ -1868,6 +1870,15 @@ body:not(.has-bg) {
 }
 .follow-choice input:checked + span { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 24%, transparent); }
 .follow-choice input:focus-visible + span { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.imp-import-actions { align-items: flex-end; flex-wrap: wrap; }
+.imp-import-actions .imp-dl {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--bd-2);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-2) 80%, transparent);
+  box-sizing: border-box;
+}
 .data-transfer-card { min-height: 240px; justify-content: center; display: flex; flex-direction: column; gap: 14px; }
 .data-transfer-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .data-transfer-actions .btn, .data-transfer-actions .btn-line { min-height: 42px; }
@@ -2425,9 +2436,6 @@ body.has-bg .nx-note {
     transform: translateX(-50%);
   }
   body.np-open .np-drawer .ov-art {
-    /* A square fallback cannot fit between the mobile nav and player. Give
-       the panel a real vertical budget so the cover never escapes its border. */
-    height: min(272px, 32vh);
-    max-height: min(272px, 32vh);
+    height: min(188px, 28vh); min-height: 116px; aspect-ratio: auto;
   }
 }

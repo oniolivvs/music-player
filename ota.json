@@ -1,5 +1,5 @@
 {
-  "version": "0.22.145",
+  "version": "0.22.149",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -16,7 +16,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Moves JSON list import into Backup/Data, loads YouTube covers, preserves unspecified settings and merges playlists non-destructively.",
+  "notes": "Keeps Now Playing artwork at its natural aspect ratio while preserving metadata, aligns Save locally controls, and restores legacy YouTube covers.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }
