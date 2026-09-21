@@ -261,25 +261,30 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
     <div class="modal setup">
       <div class="modal-head"><h2 id="setupTitle">Welcome</h2></div>
       <div class="modal-body">
+        <div class="setup-progress" aria-hidden="true"><i data-setup-progress="1"></i><i data-setup-progress="2"></i><i data-setup-progress="3"></i><i data-setup-progress="4"></i></div>
         <div class="setup-step" data-step="0">
-          <p class="setup-p">First launch! Do you want to configure the app now (yt-dlp binary, browser cookies, download folder), or start with the defaults?</p>
-          <p class="setup-hint">Everything stays editable later in <b>Settings</b>.</p>
+          <div class="setup-hero"><b>Your music, ready your way.</b><span>Check the media engine, choose storage, then configure playlist automation.</span></div>
+          <p class="setup-hint">The recommended defaults work immediately. Every choice stays editable in <b>Settings</b>.</p>
           <div class="setup-actions paired-actions">
-            <button id="suDefaults" class="btn-line"><span data-ic="check"></span> Use defaults</button>
-            <button id="suConfigure" class="btn"><span data-ic="gear"></span> Configure now</button>
+            <button id="suDefaults" class="btn-line"><span data-ic="check"></span> Quick start</button>
+            <button id="suConfigure" class="btn"><span data-ic="gear"></span> Custom setup</button>
           </div>
         </div>
         <div class="setup-step" data-step="1" hidden>
-          <p class="setup-p"><b>1/3 — yt-dlp</b> powers YouTube search, streaming and downloads.</p>
-          <div id="suYtStatus" class="setup-status">Detecting…</div>
+          <p class="setup-p"><b>1/4 — Media dependencies</b></p>
+          <p class="setup-hint">yt-dlp handles online sources; FFmpeg and FFprobe convert MP3 files and read media metadata.</p>
+          <div id="suDependencyList" class="dependency-grid"></div>
+          <div id="suDependencyStatus" class="setup-status">Checking…</div>
           <div class="setup-row">
             <button id="suYtPick" class="btn-line sm"><span data-ic="folder"></span> Pick the binary…</button>
             <button id="suYtRetry" class="btn-line sm"><span data-ic="refresh"></span> Re-detect</button>
+            <button id="suDepInstallAll" data-dependency-all="suDependencyList" class="btn sm"><span data-ic="dl"></span> Install all</button>
           </div>
           <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="2" hidden>
-          <p class="setup-p"><b>2/3 — Browser cookies</b> (optional): lets yt-dlp act as your logged-in browser for age/member-restricted tracks.</p>
+          <p class="setup-p"><b>2/4 — Online access</b></p>
+          <p class="setup-hint">Browser cookies are optional and only needed for age/member-restricted tracks.</p>
           <p class="setup-hint">A logged-in YouTube session often makes YouTube <b>block</b> extraction ("format not available"). Keep <b>None</b> unless you specifically need restricted content — the app falls back to no-cookies automatically if a call fails.</p>
           <div class="setup-row">
             <label class="imp-lbl" for="suCookies">Browser</label>
@@ -297,7 +302,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="3" hidden>
-          <p class="setup-p"><b>3/3 — Downloads & preferences</b></p>
+          <p class="setup-p"><b>3/4 — Storage</b></p>
           <div class="setup-row">
             <label class="imp-lbl">Folder</label>
             <input type="text" id="suDlDir" class="text-in grow" placeholder="~/Music/MusicPlayer">
@@ -306,6 +311,17 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <label class="setup-chk"><input type="checkbox" id="suPrefLocal" checked> Play the local file when a track is downloaded</label>
           <label class="setup-chk"><input type="checkbox" id="suAutoSave"> Tick “Save locally” by default when importing a playlist</label>
           <label class="setup-chk"><input type="checkbox" id="suNotify" checked> Desktop notification on track change</label>
+          <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
+        </div>
+        <div class="setup-step" data-step="4" hidden>
+          <p class="setup-p"><b>4/4 — Automation</b></p>
+          <label class="setup-chk"><input type="checkbox" id="suAutoFollow"> Follow newly imported playlists automatically</label>
+          <label class="setup-chk"><input type="checkbox" id="suFollowDl"> Download future tracks from new follows</label>
+          <div class="setup-row"><label class="imp-lbl" for="suFollowIv">Follow checks</label><select id="suFollowIv" class="sel grow"><option value="launch">On launch only</option><option value="1h">Every hour</option><option value="6h">Every 6 hours</option><option value="24h">Every day</option></select></div>
+          <div class="setup-row"><label class="imp-lbl" for="suNewTracks">New tracks</label><select id="suNewTracks" class="sel grow"><option value="ask">Ask before downloading</option><option value="auto">Download automatically</option><option value="off">Add only</option></select></div>
+          <label class="setup-chk"><input type="checkbox" id="suResumeDl" checked> Resume interrupted downloads</label>
+          <label class="setup-chk"><input type="checkbox" id="suDepCheck" checked> Check media dependencies on launch</label>
+          <label class="setup-chk"><input type="checkbox" id="suAutoDeps" checked> Download missing dependencies automatically</label>
           <div class="setup-actions"><button id="suFinish" class="btn"><span data-ic="check"></span> Finish</button></div>
         </div>
       </div>

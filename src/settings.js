@@ -54,12 +54,16 @@ const DEFAULTS = {
   sharedTracksDir: "",   // optional central folder for tracks referenced by several playlists
   preferLocal: true,     // play the local file when an online track is downloaded
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog
+  autoFollowImports: false, // preselect Follow when importing an online playlist
+  autoDownloadFollows: false, // new follows download future tracks automatically
   newTrackBehavior: "ask", // new tracks in followed playlists: ask (propose once) | auto (download, no prompt) | off (manual only)
   searchLimit: 20,       // YouTube search result count
   spotifyClientId: "",  // optional Spotify Web API app credentials
   spotifyClientSecret: "",
   ytdlpPath: "",         // explicit yt-dlp binary; empty = auto-detect
   ytdlpArgs: "",         // optional validated download-only arguments
+  dependencyCheckOnLaunch: true, // inspect yt-dlp/ffmpeg/ffprobe at startup
+  autoInstallDependencies: true, // repair missing downloadable tools automatically
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
   startOnBoot: false,    // launch the app automatically at login (OS autostart; source of truth is the autostart plugin)
   setupDone: false,      // first-run wizard completed

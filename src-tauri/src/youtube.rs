@@ -158,13 +158,72 @@ pub fn dbg_log(msg: &str) {
 
 fn check_bin(path: &str) -> Result<String, String> {
     let out = sys_cmd(path)
-        .arg("--version")
+        .arg(if path.to_ascii_lowercase().contains("ffmpeg") || path.to_ascii_lowercase().contains("ffprobe") { "-version" } else { "--version" })
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err("binary returned an error".into());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string())
+}
+
+#[derive(Serialize)]
+pub struct DependencyItem {
+    pub id: String,
+    pub label: String,
+    pub installed: bool,
+    pub version: String,
+    pub path: String,
+    pub managed: bool,
+    pub can_install: bool,
+}
+
+#[derive(Serialize)]
+pub struct DependencyReport {
+    pub items: Vec<DependencyItem>,
+    pub managed_dir: String,
+}
+
+fn managed_bin_dir() -> String {
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+    if cfg!(target_os = "windows") { format!("{home}\\AppData\\Local\\MusicPlayer\\bin") }
+    else { format!("{home}/.local/bin") }
+}
+
+fn detect_tool(name: &str, ytdlp: Option<&str>) -> Option<(String, String)> {
+    let file = if cfg!(target_os = "windows") { format!("{name}.exe") } else { name.to_string() };
+    let mut candidates = vec![name.to_string(), std::path::Path::new(&managed_bin_dir()).join(&file).to_string_lossy().into_owned()];
+    if let Some(bin) = ytdlp {
+        if let Some(parent) = std::path::Path::new(bin).parent() {
+            candidates.insert(0, parent.join(&file).to_string_lossy().into_owned());
+        }
+    }
+    candidates.into_iter().find_map(|path| check_bin(&path).ok().map(|version| (path, version)))
+}
+
+fn dependency_report(cfg: &YtCfg) -> DependencyReport {
+    let configured = cfg.bin.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let yt = configured.as_deref().and_then(|path| check_bin(path).ok().map(|version| (path.to_string(), version))).or_else(detect_bin);
+    let yt_path = yt.as_ref().map(|(path, _)| path.as_str());
+    let ffmpeg = detect_tool("ffmpeg", yt_path);
+    let ffprobe = detect_tool("ffprobe", yt_path);
+    let managed_dir = managed_bin_dir();
+    let item = |id: &str, label: &str, found: Option<(String, String)>| {
+        let (path, version) = found.unwrap_or_default();
+        DependencyItem {
+            id: id.into(), label: label.into(), installed: !path.is_empty(),
+            managed: !managed_dir.is_empty() && path.starts_with(&managed_dir),
+            version, path, can_install: cfg!(target_os = "windows") || cfg!(target_os = "linux") || id == "yt-dlp",
+        }
+    };
+    DependencyReport {
+        items: vec![
+            item("yt-dlp", "yt-dlp", yt),
+            item("ffmpeg", "FFmpeg", ffmpeg),
+            item("ffprobe", "FFprobe", ffprobe),
+        ],
+        managed_dir,
+    }
 }
 
 /// Candidate locations: PATH, ~/.local/bin, any "<dir>/bin/yt-dlp" under
@@ -512,7 +571,7 @@ pub async fn detect_browsers() -> Vec<BrowserInfo> {
 /// Set (or auto-detect when `path` is empty) the yt-dlp binary + the cookies
 /// browser. Returns "path (version)" so the UI can show what's active.
 #[tauri::command]
-pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String, args: String) -> Result<String, String> {
+pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String, args: String, auto_install: Option<bool>) -> Result<String, String> {
     let parsed_args = parse_custom_args(&args)?;
     *cfg.cookies.lock().unwrap_or_else(|e| e.into_inner()) = cookies.trim().to_lowercase();
     *cfg.extra_args.lock().unwrap_or_else(|e| e.into_inner()) = parsed_args;
@@ -526,11 +585,12 @@ pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String, arg
     // app works out of the box even after the drive holding it was unplugged.
     let (found, v) = match detect_bin() {
         Some(x) => x,
-        None => {
+        None if auto_install.unwrap_or(true) => {
             let p = install_bin()?;
             let v = check_bin(&p).unwrap_or_default();
             (p, v)
-        }
+        },
+        None => return Err("yt-dlp is missing — install it from Settings → Dependencies".into()),
     };
     *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(found.clone());
     Ok(format!("{found} ({v})"))
@@ -551,6 +611,29 @@ pub async fn yt_install(cfg: State<'_, YtCfg>) -> Result<String, String> {
         Err(e) => format!(" (ffmpeg not installed: {e})"),
     };
     Ok(format!("{path} ({v}){ff}"))
+}
+
+#[tauri::command]
+pub async fn dependency_status(cfg: State<'_, YtCfg>) -> Result<DependencyReport, String> {
+    Ok(dependency_report(&cfg))
+}
+
+#[tauri::command]
+pub async fn dependency_install(cfg: State<'_, YtCfg>, dependency: String) -> Result<DependencyReport, String> {
+    match dependency.as_str() {
+        "yt-dlp" => {
+            let path = install_bin()?;
+            *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+        },
+        "ffmpeg" | "ffprobe" => { install_ffmpeg()?; },
+        "all" => {
+            let path = install_bin()?;
+            *cfg.bin.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+            install_ffmpeg()?;
+        },
+        _ => return Err(format!("unknown dependency: {dependency}")),
+    }
+    Ok(dependency_report(&cfg))
 }
 
 fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<String, String> {

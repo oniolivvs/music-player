@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.150";
+const SRC_VERSION = "0.22.151";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2725,7 +2725,7 @@ async function followPlaylistFlow(id) {
     const local = pl.paths
       .map(p => (isOnline(p) ? ytId(p) : (String(p).match(/\[([A-Za-z0-9_-]{11})\]/) || [])[1]))
       .filter(Boolean);
-    addFollow({ url, title: res.title || pl.name, playlistId: id, autoDownload: S().autoSaveImports, knownIds: [...upstream, ...local] });
+    addFollow({ url, title: res.title || pl.name, playlistId: id, autoDownload: S().autoDownloadFollows || S().autoSaveImports, knownIds: [...upstream, ...local] });
     PL.setSourceUrl(id, url);
     renderPlaylists(); openPlaylist(id);
     flash(`Following “${res.title || pl.name}” — new tracks will be added automatically`);
@@ -3558,8 +3558,8 @@ async function impFetch() {
     $("#impDest").dataset.title = res.title;
     $("#impDest").dataset.url = url;
     const alreadyFollowed = follows.some(f => f.url === url && f.enabled !== false);
-    $("#impFollowYes").checked = alreadyFollowed;
-    $("#impFollowNo").checked = !alreadyFollowed;
+    $("#impFollowYes").checked = alreadyFollowed || S().autoFollowImports;
+    $("#impFollowNo").checked = !$("#impFollowYes").checked;
     $("#impFoot").hidden = false;
     updateImpCount();
     // Modal closed while fetching → park the ready picker in Activity.
@@ -3608,7 +3608,7 @@ async function impGo() {
     const pickedSet = new Set(chosen.map(t => t.path));
     addFollow({
       url: $("#impDest").dataset.url, title: $("#impDest").dataset.title,
-      playlistId: dest, autoDownload: $("#impDl").checked,
+      playlistId: dest, autoDownload: $("#impDl").checked || S().autoDownloadFollows,
       knownIds: impTracks.map(t => ytId(t.path)),
       skipIds: impTracks.filter(t => !pickedSet.has(t.path)).map(t => ytId(t.path)),
     });
@@ -6483,6 +6483,7 @@ function openSettings() {
       <button class="set-tab set-tab-sub on" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
       <button class="set-tab set-tab-sub" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
       <button class="set-tab" data-tab="providers">${ic(IC.link)}<span>APIs &amp; Providers</span></button>
+      <button class="set-tab" data-tab="dependencies">${ic(IC.dl)}<span>Dependencies</span></button>
       <button class="set-tab" data-tab="disk">${ic(IC.folder)}<span>Disk</span></button>
       <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
       <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
@@ -6659,6 +6660,23 @@ function openSettings() {
       <div class="set-hint">Arguments that can execute commands, redirect files, expose cookies or replace the app's output/progress protocol are rejected.</div>`}
     </div>
     </section>
+    <section class="set-pane" data-pane="dependencies">
+    <div class="set-group"><div class="set-title">Media dependencies</div>
+      <div class="set-hint">Live status for yt-dlp, FFmpeg and FFprobe. Installations stay in Music Player's private app folder and never modify the system PATH.</div>
+      <div id="dependencyList" class="dependency-grid"><div class="dependency-loading">Open this tab to check installed tools.</div></div>
+      <div class="dependency-toolbar">
+        <button id="dependencyRefresh" class="btn-line sm">${ic(IC.refresh)} Refresh</button>
+        <button id="dependencyInstallAll" data-dependency-all="dependencyList" class="btn sm">${ic(IC.dl)} Install / repair all</button>
+      </div>
+      <div id="dependencyStatus" class="set-hint" aria-live="polite"></div>
+      <div class="set-hint" data-dependency-managed></div>
+    </div>
+    <div class="set-group"><div class="set-title">Automatic maintenance</div>
+      <div class="set-row"><label>Check dependencies when Music Player starts</label><input type="checkbox" id="setDepCheck" ${s.dependencyCheckOnLaunch ? "checked" : ""}></div>
+      <div class="set-row"><label>Automatically download missing dependencies</label><input type="checkbox" id="setDepAuto" ${s.autoInstallDependencies ? "checked" : ""}></div>
+      <div class="set-hint">Automatic repair runs only when a required tool is missing. It never replaces a working system tool.</div>
+    </div>
+    </section>
     <section class="set-pane" data-pane="disk">
     <div class="set-group"><div class="set-title">Disk storage</div>
       <div class="set-row"><label>Root MP3 folder</label>
@@ -6683,6 +6701,8 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="library">
     <div class="set-group"><div class="set-title">Followed playlists</div>
+      <div class="set-row"><label>Follow newly imported playlists by default</label><input type="checkbox" id="setAutoFollow" ${s.autoFollowImports ? "checked" : ""}></div>
+      <div class="set-row"><label>Auto-download future tracks in new follows</label><input type="checkbox" id="setFollowAutoDl" ${s.autoDownloadFollows ? "checked" : ""}></div>
       <div class="set-row"><label>Check for new tracks</label>
         <select id="setFollowIv" class="sel sm-sel wide">
           <option value="launch" ${s.followInterval === "launch" ? "selected" : ""}>On launch only</option>
@@ -6690,6 +6710,12 @@ function openSettings() {
           <option value="6h" ${s.followInterval === "6h" ? "selected" : ""}>Every 6 hours</option>
           <option value="24h" ${s.followInterval === "24h" ? "selected" : ""}>Every day</option>
         </select></div>
+      <div class="set-row"><label>When new tracks are found</label><select id="setNewTracks" class="sel sm-sel wide">
+        <option value="ask" ${s.newTrackBehavior === "ask" ? "selected" : ""}>Ask before downloading</option>
+        <option value="auto" ${s.newTrackBehavior === "auto" ? "selected" : ""}>Download automatically</option>
+        <option value="off" ${s.newTrackBehavior === "off" ? "selected" : ""}>Add only · don't download</option>
+      </select></div>
+      <div class="set-row"><label>Resume interrupted downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
       <div id="setFollowList"></div>
       <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">${ic(IC.repeat)}Check all now</button></div>
       <div class="set-hint">Follow a playlist from <b>Import from URL…</b> (tick “Follow”). New upstream tracks land in the linked playlist; with the download option they are also downloaded to the library. Checks also run on launch.</div>
@@ -6770,6 +6796,7 @@ function openSettings() {
     body.querySelectorAll(".set-pane").forEach(p => p.classList.toggle("on", p.dataset.pane === name));
     body.querySelector(".set-panes").scrollTop = 0;
     if (name === "system") loadDiagnosticsPanel();
+    if (name === "dependencies") loadDependencyStatus();
   }));
   // "Launch at login": the autostart plugin owns the real OS state — reflect it
   // on open, and flip it (with rollback on failure) when the box is toggled.
@@ -6915,6 +6942,12 @@ function openSettings() {
   $("#setYtFeedLimit")?.addEventListener("change", e => { const v = Math.max(1, Math.min(50, Math.round(Number(e.target.value) || 12))); e.target.value = v; SETTINGS.setSetting("ytFeedLimit", v); _feedState.forYou = _feedState.trending = _feedState.current = null; if (active.type === "ytfeed") showYtFeed(); });
   $("#setYtFeedRegion")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedRegion", e.target.value.trim()); _feedState.trending = null; if (active.type === "ytfeed") showYtFeed(); });
   $("#setAutoSave").addEventListener("change", e => SETTINGS.setSetting("autoSaveImports", e.target.checked));
+  $("#setAutoFollow")?.addEventListener("change", e => SETTINGS.setSetting("autoFollowImports", e.target.checked));
+  $("#setFollowAutoDl")?.addEventListener("change", e => SETTINGS.setSetting("autoDownloadFollows", e.target.checked));
+  $("#setDepCheck")?.addEventListener("change", e => SETTINGS.setSetting("dependencyCheckOnLaunch", e.target.checked));
+  $("#setDepAuto")?.addEventListener("change", e => SETTINGS.setSetting("autoInstallDependencies", e.target.checked));
+  $("#dependencyRefresh")?.addEventListener("click", () => loadDependencyStatus());
+  $("#dependencyInstallAll")?.addEventListener("click", () => installDependency("all").catch(() => {}));
   $("#setNewTracks")?.addEventListener("change", e => SETTINGS.setSetting("newTrackBehavior", e.target.value));
   $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
   $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
@@ -7464,7 +7497,7 @@ function wireCookieConsent() {
 // auto-detect (PATH, ~/Desktop/*/bin, removable drives, linuxbrew).
 async function ytConfigPush() {
   if (!IS_NATIVE) return "";
-  try { return await invoke("yt_config", { path: S().ytdlpPath || "", cookies: S().cookiesBrowser || "", args: S().ytdlpArgs || "" }); }
+  try { return await invoke("yt_config", { path: S().ytdlpPath || "", cookies: S().cookiesBrowser || "", args: S().ytdlpArgs || "", autoInstall: S().autoInstallDependencies !== false }); }
   catch (e) { console.warn("[yt config]", e); throw e; }
 }
 // Download the standalone yt-dlp (self-contained) into ~/.local/bin. Clears any
@@ -7475,22 +7508,61 @@ async function ytInstall() {
   SETTINGS.setSetting("ytdlpPath", "");
   return r;
 }
+function renderDependencyReport(hostId, report) {
+  const host = $("#" + hostId);
+  if (!host) return;
+  host.innerHTML = (report?.items || []).map(dep => `
+    <article class="dependency-card ${dep.installed ? "ready" : "missing"}">
+      <span class="dependency-state" aria-hidden="true">${dep.installed ? IC.check : IC.alert}</span>
+      <span class="dependency-copy"><b>${esc(dep.label)}</b><small>${dep.installed ? esc(dep.version || "Ready") : "Not found"}</small><code title="${esc(dep.path || "")}">${esc(dep.path || "Install to the managed app folder")}</code></span>
+      <button class="btn-line sm" data-dependency-install="${esc(dep.id)}" ${dep.can_install ? "" : "disabled"}>${dep.installed ? "Repair" : "Install"}</button>
+    </article>`).join("");
+  host.querySelectorAll("[data-dependency-install]").forEach(button => button.addEventListener("click", () => installDependency(button.dataset.dependencyInstall, hostId)));
+  const path = report?.managed_dir || report?.managedDir;
+  const managed = host.parentElement?.querySelector("[data-dependency-managed]");
+  if (managed && path) managed.textContent = `Managed folder: ${path}`;
+}
+async function loadDependencyStatus(hostId = "dependencyList", statusId = "dependencyStatus") {
+  const status = $("#" + statusId);
+  if (!IS_NATIVE) { if (status) status.textContent = "Dependency management needs the desktop app."; return null; }
+  if (status) status.textContent = "Checking dependencies…";
+  try {
+    const report = await invoke("dependency_status");
+    renderDependencyReport(hostId, report);
+    const missing = (report.items || []).filter(item => !item.installed).length;
+    if (status) status.textContent = missing ? `${missing} dependency${missing === 1 ? "" : "ies"} missing.` : "Everything is ready.";
+    return report;
+  } catch (error) { if (status) status.textContent = `Check failed: ${error}`; return null; }
+}
+async function installDependency(dependency = "all", hostId = "dependencyList", statusId = hostId === "suDependencyList" ? "suDependencyStatus" : "dependencyStatus") {
+  const status = $("#" + statusId);
+  const buttons = document.querySelectorAll(`#${hostId} button, [data-dependency-all="${hostId}"]`);
+  buttons.forEach(button => { button.disabled = true; });
+  if (status) status.textContent = dependency === "all" ? "Downloading and installing dependencies… FFmpeg can take a few minutes." : `Installing ${dependency}…`;
+  try {
+    const report = await invoke("dependency_install", { dependency });
+    renderDependencyReport(hostId, report);
+    if (status) status.textContent = "Installation complete — all detected tools are shown above.";
+    SETTINGS.setSetting("ytdlpPath", "");
+    return report;
+  } catch (error) { if (status) status.textContent = `Installation failed: ${error}`; throw error; }
+  finally { buttons.forEach(button => { button.disabled = false; }); }
+}
+async function maintainDependencies() {
+  if (!IS_NATIVE || !S().dependencyCheckOnLaunch) return;
+  try {
+    const report = await invoke("dependency_status");
+    if (S().autoInstallDependencies && report.items?.some(item => !item.installed && item.can_install)) await invoke("dependency_install", { dependency: "all" });
+  } catch (error) { console.warn("[dependencies]", error); }
+}
 function setupStep(n) {
   document.querySelectorAll("#setupModal .setup-step").forEach(el => el.hidden = el.dataset.step !== String(n));
-  $("#setupTitle").textContent = n === 0 ? "Welcome" : "Setup";
+  document.querySelectorAll("#setupModal [data-setup-progress]").forEach(el => el.classList.toggle("on", Number(el.dataset.setupProgress) <= n));
+  $("#setupTitle").textContent = n === 0 ? "Welcome" : "Set up Music Player";
 }
 async function setupDetect() {
-  const st = $("#suYtStatus");
-  if (IS_ANDROID) { st.className = "setup-status ok"; st.textContent = "Built-in YouTube engine — nothing to set up on Android."; return; }
-  // yt_config auto-downloads a standalone copy when nothing is found, so this
-  // may take a few seconds on first run.
-  st.className = "setup-status"; st.textContent = "Setting up yt-dlp (downloading if needed)…";
-  try {
-    const r = await ytConfigPush();
-    st.classList.add("ok"); st.textContent = `Ready: ${r}`;
-  } catch (e) {
-    st.classList.add("bad"); st.textContent = `${e}`;
-  }
+  if (IS_ANDROID) { $("#suDependencyStatus").textContent = "The Android build includes its own media engine."; return; }
+  await loadDependencyStatus("suDependencyList", "suDependencyStatus");
 }
 function finishSetup() {
   SETTINGS.setSetting("setupDone", true);
@@ -7503,13 +7575,21 @@ function openSetup() {
   $("#suPrefLocal").checked = S().preferLocal;
   $("#suAutoSave").checked = S().autoSaveImports;
   $("#suNotify").checked = S().notifyOnChange;
+  $("#suAutoFollow").checked = S().autoFollowImports;
+  $("#suFollowDl").checked = S().autoDownloadFollows;
+  $("#suFollowIv").value = S().followInterval;
+  $("#suNewTracks").value = S().newTrackBehavior;
+  $("#suResumeDl").checked = S().resumeDownloads;
+  $("#suAutoDeps").checked = S().autoInstallDependencies;
+  $("#suDepCheck").checked = S().dependencyCheckOnLaunch;
   setupStep(0);
   $("#setupModal").hidden = false;
 }
 function wireSetup() {
-  $("#suDefaults").addEventListener("click", () => { finishSetup(); ytConfigPush().catch(() => {}); });
+  $("#suDefaults").addEventListener("click", () => { finishSetup(); ytConfigPush().catch(() => {}); maintainDependencies(); });
   $("#suConfigure").addEventListener("click", () => { setupStep(1); setupDetect(); });
   $("#suYtRetry").addEventListener("click", () => { SETTINGS.setSetting("ytdlpPath", ""); setupDetect(); });
+  $("#suDepInstallAll").addEventListener("click", () => installDependency("all", "suDependencyList").catch(() => {}));
   $("#suYtPick").addEventListener("click", async () => {
     try {
       const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Pick the yt-dlp binary" } });
@@ -7540,8 +7620,16 @@ function wireSetup() {
     SETTINGS.setSetting("preferLocal", $("#suPrefLocal").checked);
     SETTINGS.setSetting("autoSaveImports", $("#suAutoSave").checked);
     SETTINGS.setSetting("notifyOnChange", $("#suNotify").checked);
+    SETTINGS.setSetting("autoFollowImports", $("#suAutoFollow").checked);
+    SETTINGS.setSetting("autoDownloadFollows", $("#suFollowDl").checked);
+    SETTINGS.setSetting("followInterval", $("#suFollowIv").value);
+    SETTINGS.setSetting("newTrackBehavior", $("#suNewTracks").value);
+    SETTINGS.setSetting("resumeDownloads", $("#suResumeDl").checked);
+    SETTINGS.setSetting("autoInstallDependencies", $("#suAutoDeps").checked);
+    SETTINGS.setSetting("dependencyCheckOnLaunch", $("#suDepCheck").checked);
     finishSetup();
     ytConfigPush().catch(() => {});
+    maintainDependencies();
   });
 }
 
@@ -8014,6 +8102,7 @@ async function init() {
   wireSetup();
   if (IS_NATIVE && !S().setupDone) openSetup();
   else ytConfigPush().catch(() => {}); // warm up detection with saved prefs
+  maintainDependencies();
   checkUpdate();
 
   if (S().uiNpOpen) toggleNpPanel(true); // restore the up-next panel

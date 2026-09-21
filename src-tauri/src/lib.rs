@@ -929,7 +929,7 @@ pub fn run() {
             youtube::yt_channel, youtube::yt_channel_videos,
             youtube::yt_channel_playlists, youtube::yt_channel_all,
             youtube::yt_download, youtube::yt_download_root, youtube::yt_cleanup_download_root, youtube::yt_cancel,
-            youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
+            youtube::yt_config, youtube::yt_install, youtube::dependency_status, youtube::dependency_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::net_image, library::delete_file, library::open_path,
             library::canon_path, library::canon_paths, library::folder_size, library::register_roots, library::move_audio_file,

@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.150 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.151 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1345,7 +1345,13 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .dir-pick .btn-line.sm { flex-shrink: 0; }
 
 /* ─── First-run setup wizard ─── */
-.modal.setup { width: min(460px, 92vw); }
+.modal.setup { width: min(620px, 94vw); }
+.setup-progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 0 0 10px; }
+.setup-progress i { height: 4px; border-radius: 2px; background: var(--bg-4); transition: background .2s, box-shadow .2s; }
+.setup-progress i.on { background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent); }
+.setup-hero { display: grid; gap: 7px; padding: 24px 20px; margin: 6px 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--bd)); border-radius: 10px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, transparent), color-mix(in srgb, var(--accent-2) 12%, var(--bg-2))); }
+.setup-hero b { font-size: 20px; }
+.setup-hero span { color: var(--tx-2); line-height: 1.5; }
 .setup-p { font-size: 14px; line-height: 1.55; padding: 12px 0 4px; }
 .setup-hint { font-size: 12px; color: var(--tx-3); line-height: 1.5; padding-bottom: 4px; }
 .setup-status { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--bd); font-size: 12px; word-break: break-all; }
@@ -1355,6 +1361,18 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .setup-row .grow { flex: 1; min-width: 0; }
 .setup-chk { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--tx-1); padding: 7px 0; cursor: pointer; user-select: none; }
 .setup-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 0 6px; }
+.dependency-grid { display: grid; gap: 8px; margin: 12px 0; }
+.dependency-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid var(--bd); border-radius: 8px; background: linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.015)); backdrop-filter: blur(12px); }
+.dependency-card.ready { border-color: color-mix(in srgb, #34d399 38%, var(--bd)); }
+.dependency-card.missing { border-color: color-mix(in srgb, #f59e0b 45%, var(--bd)); }
+.dependency-state { display: grid; place-items: center; color: #f59e0b; }
+.dependency-card.ready .dependency-state { color: #34d399; }
+.dependency-copy { display: grid; min-width: 0; gap: 2px; }
+.dependency-copy small, .dependency-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-3); font-size: 10px; }
+.dependency-copy code { color: var(--tx-2); }
+.dependency-toolbar { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.dependency-loading { color: var(--tx-3); font-size: 12px; padding: 12px; }
+@media (max-width: 560px) { .dependency-card { grid-template-columns: 24px minmax(0, 1fr); } .dependency-card button { grid-column: 2; justify-self: stretch; } }
 select.sel.sm-sel.wide { width: 158px; }
 
 /* ─── Downloads: edge badge + opt-in side drawer ─── */
