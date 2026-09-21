@@ -1,5 +1,5 @@
 {
-  "version": "0.22.153",
+  "version": "0.22.154",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -20,7 +20,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Keeps every completed download durable across restarts by committing its library metadata and playlist file pointer before clearing the resume queue.",
+  "notes": "Removes native white focus outlines from text fields and keeps dependency action buttons perfectly aligned at one fixed height.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }

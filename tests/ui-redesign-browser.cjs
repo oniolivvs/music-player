@@ -24,6 +24,17 @@ const assert = require('node:assert/strict');
         row.className = 'track';
         row.innerHTML = '<span></span><span></span><span class="meta"><span class="t">Song</span><span class="s">Artist</span></span><span class="album">Album</span><span class="dur">1:00</span><span></span>';
         document.querySelector('#trackList').replaceChildren(row);
+        const focusProbe = document.createElement('input');
+        focusProbe.type = 'password';
+        focusProbe.className = 'text-in';
+        focusProbe.style.cssText = 'position:fixed;left:0;top:0;width:120px';
+        document.body.append(focusProbe);
+        focusProbe.focus();
+        const dependencyToolbar = document.createElement('div');
+        dependencyToolbar.className = 'dependency-toolbar';
+        dependencyToolbar.style.cssText = 'position:fixed;left:0;top:50px';
+        dependencyToolbar.innerHTML = '<button class="btn-line sm">Refresh</button><button class="btn sm">Install / repair all</button>';
+        document.body.append(dependencyToolbar);
       });
       const result = await page.evaluate(() => {
         const nav = document.querySelector('.nav-bar').getBoundingClientRect();
@@ -36,6 +47,9 @@ const assert = require('node:assert/strict');
         const listSubStyle = getComputedStyle(document.querySelector('#trackList .meta .s'));
         const paired = [...document.querySelectorAll('.data-transfer-actions > button')]
           .map(button => button.getBoundingClientRect());
+        const dependencyButtons = [...document.querySelectorAll('.dependency-toolbar > button')]
+          .map(button => button.getBoundingClientRect());
+        const focusStyle = getComputedStyle(document.querySelector('input[type="password"]'));
         const shuffle = document.querySelector('#shuffleBtn');
         shuffle.classList.add('active');
         const activeShuffle = getComputedStyle(shuffle);
@@ -57,6 +71,10 @@ const assert = require('node:assert/strict');
           listSubColor: listSubStyle.color,
           pairedWidthDelta: Math.max(...paired.map(box => box.width)) - Math.min(...paired.map(box => box.width)),
           pairedHeightDelta: Math.max(...paired.map(box => box.height)) - Math.min(...paired.map(box => box.height)),
+          dependencyHeightDelta: Math.max(...dependencyButtons.map(box => box.height)) - Math.min(...dependencyButtons.map(box => box.height)),
+          dependencyTopDelta: Math.max(...dependencyButtons.map(box => box.top)) - Math.min(...dependencyButtons.map(box => box.top)),
+          dependencyHeight: dependencyButtons[0].height,
+          focusedTextOutline: focusStyle.outlineStyle,
           activeShuffleBackground: activeShuffle.backgroundImage,
           activeShuffleShadow: activeShuffle.boxShadow,
           nowPlayingTop: npBox.top, nowPlayingRight: npBox.right, nowPlayingBottom: npBox.bottom,
@@ -78,6 +96,10 @@ const assert = require('node:assert/strict');
       assert.notEqual(result.listSubColor, 'rgb(255, 255, 255)', JSON.stringify({ viewport, result }));
       assert.ok(result.pairedWidthDelta <= 1, JSON.stringify({ viewport, result }));
       assert.ok(result.pairedHeightDelta <= 1, JSON.stringify({ viewport, result }));
+      assert.ok(result.dependencyHeightDelta <= 0.1, JSON.stringify({ viewport, result }));
+      assert.ok(result.dependencyTopDelta <= 0.1, JSON.stringify({ viewport, result }));
+      assert.equal(result.dependencyHeight, 40, JSON.stringify({ viewport, result }));
+      assert.equal(result.focusedTextOutline, 'none', JSON.stringify({ viewport, result }));
       assert.match(result.activeShuffleBackground, /linear-gradient/);
       assert.notEqual(result.activeShuffleShadow, 'none');
       assert.equal(result.nowPlayingFitsViewport, true, JSON.stringify({ viewport, result }));
