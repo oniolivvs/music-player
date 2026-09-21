@@ -85,6 +85,14 @@ fn get_text(url: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+fn manifest_url() -> String {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("{RAW_BASE}/ota.json?check={nonce}")
+}
+
 /// Manifest file names end up in filesystem joins under `ota/` — accept only
 /// plain names (letters/digits/`._-`, no separators, no `..`) so a hostile or
 /// corrupted manifest can never read or write outside that folder.
@@ -250,7 +258,7 @@ pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
         let cur = running_version(&app);
         return Ok(OtaStatus { available: false, version: cur.clone(), current: cur, notes: "".into() });
     }
-    let raw = get_text(&format!("{RAW_BASE}/ota.json"))?;
+    let raw = get_text(&manifest_url())?;
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     let current = running_version(&app);
     Ok(OtaStatus {
@@ -269,7 +277,7 @@ pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
     if ota_disabled(&app) {
         return Err("OTA channel disabled on this install".into());
     }
-    let raw = get_text(&format!("{RAW_BASE}/ota.json"))?;
+    let raw = get_text(&manifest_url())?;
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     if !targets_this_platform(&m) {
         return Err("This update does not target this platform".into());

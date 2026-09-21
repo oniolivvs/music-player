@@ -1,5 +1,5 @@
 {
-  "version": "0.22.151",
+  "version": "0.22.152",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,14 +9,18 @@
     "diagnostics.mjs",
     "artwork-theme.mjs",
     "cleanup.mjs",
+    "data-transfer.mjs",
+    "follow-reconciliation.mjs",
+    "import-policy.mjs",
     "player-controls.mjs",
+    "shuffle.mjs",
     "library-actions.mjs",
     "ui-controls.mjs",
     "music-list.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Keeps Now Playing artwork at its natural aspect ratio while preserving metadata, aligns Save locally controls, and restores legacy YouTube covers.",
+  "notes": "Repairs instant updates by shipping the complete frontend module graph and making failed-update rollback reliable.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }

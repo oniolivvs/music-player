@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const VERSION = "0.22.151";
+const VERSION = "0.22.152";
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 
 test("native and OTA release markers stay synchronized", async () => {
@@ -27,4 +27,21 @@ test("native and OTA release markers stay synchronized", async () => {
   assert.equal(JSON.parse(pkg).version, VERSION);
   assert.equal(JSON.parse(pkgLock).version, VERSION);
   assert.equal(JSON.parse(pkgLock).packages[""].version, VERSION);
+});
+
+test("OTA manifest contains the complete local module graph", async () => {
+  const ota = JSON.parse(await read("../ota.json"));
+  const pending = [...ota.modules];
+  const visited = new Set();
+  while (pending.length) {
+    const name = pending.shift();
+    if (visited.has(name)) continue;
+    visited.add(name);
+    const source = await read(`../src/${name}`);
+    for (const match of source.matchAll(/(?:from\s*|import\s*\()(["'])\.\/([^"']+)\1/g)) {
+      assert.ok(ota.modules.includes(match[2]), `${name} imports ${match[2]}, but ota.json omits it`);
+      pending.push(match[2]);
+    }
+  }
+  assert.ok(visited.has(ota.entry));
 });

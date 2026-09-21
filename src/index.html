@@ -479,13 +479,24 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           window.__MP_OTA__ = b.version || "?";
           // Watchdog: main.js sets __MP_BOOTED__ once it loads. If a bad OTA
           // build never boots, wipe it and reload into the embedded build.
+          var rollbackStarted = false;
+          function rollbackAndReload() {
+            if (rollbackStarted) return;
+            rollbackStarted = true;
+            // Await the IPC deletion before reloading. Reloading immediately
+            // canceled the command on WebView2, leaving the broken bundle in
+            // place and creating an endless failed-update loop.
+            Promise.resolve(T.core.invoke("ota_rollback"))
+              .catch(function (e) { console.error("[ota] rollback failed", e); })
+              .finally(function () { location.reload(); });
+          }
           setTimeout(function () {
             if (!window.__MP_BOOTED__) {
-              try { T.core.invoke("ota_rollback"); } catch (e) {}
-              location.reload();
+              rollbackAndReload();
             }
           }, 7000);
           var s = document.createElement("script"); s.type = "module"; s.src = urls[b.entry];
+          s.onerror = rollbackAndReload;
           document.body.appendChild(s);
         } catch (e) { embedded(true); }
       }).catch(function () { embedded(); });
