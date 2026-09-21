@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.152";
+const SRC_VERSION = "0.22.153";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -3628,11 +3628,10 @@ const dlQueue = []; // {path, id, title, status: queued|active|done|error|cancel
 let dlRunning = false, dlStopAll = false, dlNotice = "";
 
 // Persist + redraw at most once every DL_FLUSH_MS while a batch is running,
-// instead of once per completed track. `flushDlNow` is the drain: called when
-// the pump finishes and before the window closes, so nothing is ever left
-// unsaved. See the call site in the download runner for why this matters.
+// instead of once per completed track. `flushDlNow` is the durable drain; until
+// it succeeds, completed entries remain in dlqueue and recover on next launch.
 const DL_FLUSH_MS = 1500;
-let _dlFlushT = null, _dlFlushPending = false;
+let _dlFlushT = null, _dlFlushPending = false, _dlFlushInFlight = null;
 function scheduleDlFlush() {
   _dlFlushPending = true;
   if (_dlFlushT) return;
@@ -3640,12 +3639,46 @@ function scheduleDlFlush() {
 }
 async function flushDlNow() {
   if (_dlFlushT) { clearTimeout(_dlFlushT); _dlFlushT = null; }
-  if (!_dlFlushPending) return;
+  if (_dlFlushInFlight) {
+    const inFlight = _dlFlushInFlight;
+    const saved = await inFlight;
+    if (_dlFlushInFlight === inFlight) _dlFlushInFlight = null;
+    if (!saved) return false;
+    return _dlFlushPending ? flushDlNow() : true;
+  }
+  if (!_dlFlushPending) return true;
   _dlFlushPending = false;
-  await saveLibrary();
-  await saveOnline();
+  const committing = dlQueue.filter(d => d.status === "done" && !d.committed);
+  _dlFlushInFlight = (async () => {
+    try {
+      // A finished download is one durable transaction: local-library row,
+      // playlist yt: -> file pointer, and metadata. The resume-queue entry is
+      // cleared only AFTER all three stores have landed on disk.
+      await Promise.all([
+        saveLibrary({ strict: true }),
+        PL.persist({ strict: true }),
+        saveOnline({ strict: true }),
+      ]);
+      for (const d of committing) d.committed = true;
+      try { await saveDlQueueStrict(); }
+      catch (error) {
+        for (const d of committing) d.committed = false;
+        throw error;
+      }
+      return true;
+    } catch (error) {
+      _dlFlushPending = true;
+      if (!_dlFlushT) _dlFlushT = setTimeout(() => { _dlFlushT = null; flushDlNow(); }, DL_FLUSH_MS);
+      console.error("[download] durable commit:", error);
+      flash("Download saved, but its library update will retry automatically");
+      return false;
+    }
+  })();
+  const saved = await _dlFlushInFlight;
+  _dlFlushInFlight = null;
   renderPlaylists();
   refreshView();
+  return saved;
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // Only these errors are worth retrying: YouTube throttling/bot-check, the
@@ -3981,14 +4014,23 @@ async function autoBlockUnplayableTrack(path, reason = "") {
 // Persist the still-pending set so a relaunch can re-queue them; yt-dlp resumes
 // any leftover .part file on its own. Only writes when the pending set changes.
 let _dlqSig = "";
+function pendingDlQueue() {
+  return dlQueue.filter(d => d.status === "queued" || d.status === "active" || (d.status === "done" && !d.committed))
+    .map(d => ({ path: d.path, id: d.id, title: d.title, dir: d.dir || "" }));
+}
+async function saveDlQueueStrict() {
+  const pending = S().resumeDownloads ? pendingDlQueue() : [];
+  const sig = pending.map(p => `${p.path}\u0000${p.dir}`).join("|");
+  await storeSave("dlqueue", pending.length ? JSON.stringify(pending) : "");
+  _dlqSig = sig;
+}
 function saveDlQueue() {
   if (!S().resumeDownloads) { if (_dlqSig) { _dlqSig = ""; void storeSaveQuietly("dlqueue", ""); } return; }
-  const pending = dlQueue.filter(d => d.status === "queued" || d.status === "active")
-    .map(d => ({ path: d.path, id: d.id, title: d.title, dir: d.dir || "" }));
+  const pending = pendingDlQueue();
   const sig = pending.map(p => `${p.path}\u0000${p.dir}`).join("|");
   if (sig === _dlqSig) return;
-  _dlqSig = sig;
-  void storeSaveQuietly("dlqueue", pending.length ? JSON.stringify(pending) : "");
+  void storeSaveQuietly("dlqueue", pending.length ? JSON.stringify(pending) : "")
+    .then(() => { _dlqSig = sig; });
 }
 async function resumeDownloads() {
   if (!S().resumeDownloads) return;
@@ -4578,7 +4620,12 @@ async function dlPump() {
     const local = libraryLocalFor(d.id);
     if (local && local !== d.path) { PL.replacePath(d.path, local); relinked++; }
   }
-  if (relinked) await saveLibrary();
+  if (relinked) {
+    await Promise.all([
+      saveLibrary({ strict: true }),
+      PL.persist({ strict: true }),
+    ]);
+  }
 
   renderPlaylists(); refreshView();
   dlRunning = false;

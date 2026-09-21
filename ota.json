@@ -1,5 +1,5 @@
 {
-  "version": "0.22.152",
+  "version": "0.22.153",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -20,7 +20,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Repairs instant updates by shipping the complete frontend module graph and making failed-update rollback reliable.",
+  "notes": "Keeps every completed download durable across restarts by committing its library metadata and playlist file pointer before clearing the resume queue.",
   "platforms": ["windows"],
   "min_native": "0.22.35"
 }
