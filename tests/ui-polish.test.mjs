@@ -64,14 +64,26 @@ test("settings expose one unified backup import and export", async () => {
 test("settings navigation includes APIs and Providers before storage", async () => {
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const nav = main.match(/<nav class="set-nav">([\s\S]*?)<\/nav>/)?.[1] || "";
-  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "providers", "dependencies", "disk", "data", "system"]);
-  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*APIs &amp; Providers[\s\S]*Dependencies[\s\S]*Disk[\s\S]*Backup[\s\S]*System/);
+  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["interface", "appearance", "providers", "lyrics", "dependencies", "disk", "data", "system"]);
+  assert.match(nav, /Customisation[\s\S]*Interface[\s\S]*Appearance[\s\S]*APIs &amp; Providers[\s\S]*Lyrics &amp; Sources[\s\S]*Dependencies[\s\S]*Disk[\s\S]*Backup[\s\S]*System/);
   assert.doesNotMatch(nav, /Playback|YouTube|Downloads|Library/);
   assert.doesNotMatch(main, /id="setSignIn"|Sign in with Google/);
   assert.match(main, /data-pane="disk"[\s\S]*id="setDlDir"[\s\S]*id="setSharedDir"[\s\S]*id="setAutoSave"/);
   assert.doesNotMatch(main.match(/data-pane="disk"([\s\S]*?)<\/section>/)?.[1] || "", /setDlQuality|setDlConcurrency|setResumeDl|setCookies|setYtPath/);
   const system = main.match(/data-pane="system"([\s\S]*?)<\/section>/)?.[1] || "";
   for (const id of ["setCurVer", "setUpdCheck", "diagList", "diagExport"]) assert.match(system, new RegExp(`id="${id}"`));
+});
+
+test("lyrics and public source recovery are opt-in across Settings and Start Setup", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const settings = await readFile(new URL("../src/settings.js", import.meta.url), "utf8");
+  assert.match(settings, /autoLyrics:\s*false[\s\S]*lyricsSaveLocal:\s*false[\s\S]*autoAlternativeSources:\s*false/);
+  for (const id of ["setAutoLyrics", "setLyricsSave", "setLyricsMode", "setLyricsLanguage", "setAutoAlternatives"]) assert.match(main, new RegExp(`id="${id}"`));
+  for (const id of ["suAutoLyrics", "suLyricsSave", "suLyricsMode", "suLyricsLanguage", "suAutoAlt"]) assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(main, /invoke\("lyrics_lookup"/);
+  assert.match(main, /pickAlternativeSource/);
+  assert.match(html, /id="npLyricsBtn"[\s\S]*id="npAltBtn"/);
 });
 
 test("dependency center reports and repairs yt-dlp, FFmpeg and FFprobe", async () => {

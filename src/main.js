@@ -14,6 +14,8 @@ import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from ".
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
 import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
 import { mergeMusicListPaths, parseMusicList, youtubeThumbnailFor } from "./music-list.mjs";
+import { activeLyricIndex, parseTimedLyrics, plainLyricsLines } from "./lyrics.mjs";
+import { pickAlternativeSource } from "./alternative-source.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -46,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.155";
+const SRC_VERSION = "0.22.156";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -974,6 +976,126 @@ function ytId(p) { return String(p).slice(3); }
 function onlineFromResult(r) {
   const path = "yt:" + r.id;
   return { path, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail || youtubeThumbnailFor(path), views: r.views || 0 };
+}
+
+const lyricsCache = new Map();
+let lyricsState = { path: "", result: null, timed: [], active: -1, open: false, loading: false };
+let lyricsLookupSeq = 0;
+let lyricsPrimeQueue = Promise.resolve();
+const alternativeRecovering = new Set();
+
+function lyricsLanguage() {
+  return S().lyricsLanguageMode === "custom" ? (S().lyricsLanguage || "en") : "original";
+}
+function resetLyrics(path = "") {
+  lyricsLookupSeq++;
+  lyricsState = { path, result: null, timed: [], active: -1, open: lyricsState.open, loading: false };
+  renderLyrics();
+}
+function renderLyrics() {
+  const panel = $("#npLyrics");
+  if (!panel) return;
+  panel.hidden = !lyricsState.open;
+  const status = $("#npLyricsStatus"), host = $("#npLyricsLines");
+  if (!lyricsState.open) return;
+  status.hidden = false;
+  host.innerHTML = "";
+  if (lyricsState.loading) { status.textContent = "Searching captions and lyrics…"; return; }
+  const result = lyricsState.result;
+  if (!result) { status.textContent = "No lyrics loaded. Select Lyrics to search."; return; }
+  status.textContent = `${result.source} · ${result.language || "original"}${result.saved_path ? " · saved locally" : ""}`;
+  if (lyricsState.timed.length) {
+    host.innerHTML = lyricsState.timed.map((line, index) => `<div class="lyric-line${index === lyricsState.active ? " active" : ""}" data-lyric="${index}">${esc(line.text)}</div>`).join("");
+  } else {
+    host.innerHTML = `<div class="np-lyrics-plain">${plainLyricsLines(result.content).map(esc).join("<br>")}</div>`;
+  }
+}
+function renderLyricsAt(seconds) {
+  if (!lyricsState.open || !lyricsState.timed.length) return;
+  const next = activeLyricIndex(lyricsState.timed, seconds);
+  if (next === lyricsState.active) return;
+  $("#npLyricsLines [data-lyric].active")?.classList.remove("active");
+  lyricsState.active = next;
+  const line = next >= 0 ? $(`#npLyricsLines [data-lyric="${next}"]`) : null;
+  if (line) { line.classList.add("active"); line.scrollIntoView({ block: "center", behavior: S().smoothScroll ? "smooth" : "auto" }); }
+}
+async function lookupLyrics(t, path, { manual = false, show = false } = {}) {
+  if (!IS_NATIVE || !t || !path) return false;
+  if (show) lyricsState.open = true;
+  const bindUi = show || lyricsState.path === path;
+  const language = lyricsLanguage();
+  const key = `${path}|${language}|${S().lyricsSaveLocal ? 1 : 0}`;
+  const cached = lyricsCache.get(key);
+  if (cached) {
+    if (bindUi) { lyricsState = { path, result: cached, timed: parseTimedLyrics(cached.content, cached.format), active: -1, open: lyricsState.open, loading: false }; renderLyrics(); }
+    return true;
+  }
+  const seq = bindUi ? ++lyricsLookupSeq : lyricsLookupSeq;
+  if (bindUi) { lyricsState = { path, result: null, timed: [], active: -1, open: lyricsState.open, loading: true }; renderLyrics(); }
+  try {
+    const result = await invoke("lyrics_lookup", {
+      title: t.title || "", artist: t.artist || "Unknown Artist", album: t.album || "",
+      duration: Math.max(0, Math.round(Number(t.duration_secs) || 0)), language,
+      youtubeId: videoIdOf(path) || null, youtubeCaptions: S().lyricsYoutubeCaptions !== false,
+      lrclib: S().lyricsLrclib !== false, saveLocal: !!S().lyricsSaveLocal,
+      mediaPath: !isOnline(path) && !String(path).startsWith("remote:") ? path : null,
+    });
+    lyricsCache.set(key, result);
+    if (!bindUi) return true;
+    if (seq !== lyricsLookupSeq || lyricsState.path !== path) return true;
+    lyricsState = { path, result, timed: parseTimedLyrics(result.content, result.format), active: -1, open: lyricsState.open, loading: false };
+    renderLyrics(); return true;
+  } catch (error) {
+    if (seq === lyricsLookupSeq && lyricsState.path === path) { lyricsState.loading = false; renderLyrics(); }
+    if (manual) flash(String(error).slice(0, 150));
+    return false;
+  }
+}
+function primeLyrics(t, path) {
+  resetLyrics(path);
+  if (S().autoLyrics) void lookupLyrics(t, path);
+}
+function queueLyricsLookup(t, path) {
+  lyricsPrimeQueue = lyricsPrimeQueue.catch(() => {}).then(async () => {
+    await lookupLyrics(t, path);
+    await sleep(300); // LRCLIB asks sequential clients to pace requests.
+  });
+}
+
+async function findAlternativeSource(path, { manual = false, play = false, download = false } = {}) {
+  if (!IS_NATIVE || !path || alternativeRecovering.has(path)) return false;
+  const original = trackByPath(path) || onlineIndex.get(path);
+  if (!original) { if (manual) flash("Track metadata is unavailable"); return false; }
+  alternativeRecovering.add(path);
+  try {
+    let duration = Math.round(Number(original.duration_secs) || 0);
+    const sourceId = videoIdOf(path);
+    if (!duration && sourceId) duration = Math.round(Number(await invoke("yt_duration", { id: sourceId }).catch(() => 0)) || 0);
+    if (!duration) { if (manual) flash("A known duration is required for strict matching"); return false; }
+    const query = `${original.artist || ""} ${original.title || ""} official audio`.trim();
+    const candidates = (await invoke("yt_search", { query, limit: 20, offset: 0 })).map(onlineFromResult);
+    const match = pickAlternativeSource({ ...original, duration_secs: duration }, candidates);
+    if (!match) { if (manual) flash("No strict public match found"); return false; }
+    const candidate = { ...match.candidate, title: original.title, artist: original.artist, album: original.album || match.candidate.album, gain: original.gain || 1 };
+    if (manual && !await askConfirm("Use this public alternative?", `${match.candidate.title} — ${match.candidate.artist} · ${fmtDur(match.candidate.duration_secs)} · match ${match.score}%`, "Use source", "Cancel")) return false;
+    onlineIndex.set(candidate.path, candidate);
+    PL.replacePath(path, candidate.path);
+    library = library.map(track => track.path === path ? candidate : track);
+    queue = queue.map(item => item === path ? candidate.path : item);
+    if (selected.delete(path)) selected.add(candidate.path);
+    await Promise.all([saveOnline(), saveLibrary(), savePlayback()]);
+    renderPlaylists(); refreshView();
+    if (download) downloadTracks([candidate.path], true);
+    if (play) {
+      const index = queue.indexOf(candidate.path);
+      if (index >= 0) await hardPlay(index);
+    }
+    if (manual) flash("Public alternative selected");
+    return true;
+  } catch (error) {
+    if (manual) flash(`Alternative search failed: ${String(error).slice(0, 110)}`);
+    return false;
+  } finally { alternativeRecovering.delete(path); }
 }
 function ensureOnlineTrack(p) {
   let t = trackByPath(p) || onlineIndex.get(p);
@@ -2153,6 +2275,7 @@ function openContextMenu(x, y) {
   menu.innerHTML =
     `<div class="ctx-item" data-play="1">${ic(IC.play)}Play</div>` +
     (nOnline ? `<div class="ctx-item" data-dl="1">${ic(IC.save)}Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
+    (paths.length === 1 ? `<div class="ctx-item" data-lyrics="1">${ic(IC.list)}Find lyrics / subtitles</div><div class="ctx-item" data-alt="1">${ic(IC.refresh)}Find public alternative source</div>` : "") +
     (paths.length === 1 && localFileFor(paths[0]) && !IS_ANDROID ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
     (nLocal && !IS_ANDROID ? `<div class="ctx-item" data-move="1">${ic(IC.folder)}Move local file${nLocal > 1 ? "s" : ""}…</div>` : "") +
     // ── removal / deletion ──
@@ -2182,6 +2305,8 @@ function openContextMenu(x, y) {
   placeCtx(menu, x, y);
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline), true); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playInScope(i); closeCtx(); });
+  menu.querySelector("[data-lyrics]")?.addEventListener("click", () => { const path = paths[0], track = trackByPath(path) || ensureOnlineTrack(path); closeCtx(); lyricsState.path = path; void lookupLyrics(track, path, { manual: true, show: true }); });
+  menu.querySelector("[data-alt]")?.addEventListener("click", () => { const path = paths[0]; closeCtx(); void findAlternativeSource(path, { manual: true }); });
   menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
   menu.querySelector("[data-move]")?.addEventListener("click", () => { closeCtx(); void moveLocalFiles(paths, inPlaylist ? active.id : ""); });
   menu.querySelector("[data-block]")?.addEventListener("click", (e) => {
@@ -2789,6 +2914,7 @@ async function addByUrl(plId) {
     const added = [];
     for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) added.push(t); }
     const n = added.length;
+    if (S().autoLyrics) for (const t of added) queueLyricsLookup(t, t.path);
     saveOnline();
     renderPlaylists();
     if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
@@ -3709,6 +3835,7 @@ async function impGo() {
   else if (downloadDir) PL.setDownloadDir(dest, downloadDir);
   PL.setSourceUrl(dest, $("#impDest").dataset.url); // enables follow-after-import
   for (const t of chosen) { onlineIndex.set(t.path, t); PL.addToPlaylist(dest, t.path); }
+  if (S().autoLyrics) for (const t of chosen) queueLyricsLookup(t, t.path);
   await saveOnline();
   if (following) {
     // Everything fetched now counts as "known" — only FUTURE additions to the
@@ -4678,6 +4805,7 @@ async function dlPump() {
           // mark it, remember it forever, move on — no retry, no cooldown.
           d.status = "error"; d.permanent = true; d.err = msg;
           dlBlock[d.id] = msg; saveDlBlock();
+          if (S().autoAlternativeSources && !d.altTried) { d.altTried = true; void findAlternativeSource(d.path, { download: true }); }
           console.error("[download final]", d.id, msg);
           // Surface the reason once (permission / storage errors are otherwise
           // buried in the downloads panel — the #1 "downloads don't work" cause).
@@ -5136,6 +5264,7 @@ async function addUrlToLibrary() {
     // must NOT be re-added as a separate yt: row or the UI shows the song twice.
     const fresh = tracks.filter(t => !have.has(t.path) && !keys.has(trackKey(t)));
     library = library.concat(fresh);
+    if (S().autoLyrics) for (const t of fresh) queueLyricsLookup(t, t.path);
     saveOnline();
     await saveLibrary();
     if (active.type === "library") showLibrary();
@@ -5366,7 +5495,7 @@ function updateNowPlaying(t, path) {
   sk.style.setProperty("--buf", "0%"); _bufPct = 0;
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00"; _lastSeekVal = 0;
   _seekCap = { path: path || t?.path || null, cap: dur > 0 ? dur : Infinity };
-  notifyTrack(t); mediaUpdate(t); renderNpPanel();
+  notifyTrack(t); mediaUpdate(t); renderNpPanel(); primeLyrics(t, path || t?.path || "");
   // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
   // before the wall clock is re-anchored, so the RPC push happens at the real
   // playback start (hardPlay / gapless advance) with an explicit position of 0.
@@ -5486,6 +5615,7 @@ async function hardPlay(i) {
     try { const se = await invoke("stop"); curEpoch = Number(se) || curEpoch; } catch {}
     playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
     rpcStop(t); // playback stopped → drop the progress bar
+    if (S().autoAlternativeSources && isOnline(queue[i]) && await findAlternativeSource(queue[i], { play: true })) return;
     autoBlockUnplayableTrack(queue[i], String(err));
     const j = nextIndex(i, true);
     // Bound the cascade like the poll does: without it, ONE play click on a
@@ -5650,6 +5780,7 @@ function renderSeek(p) {
   el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
   const txt = fmtDur(p);
   if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
+  renderLyricsAt(p);
   _lastSeekVal = p;
 }
 async function commitSeekSeconds(value) {
@@ -6654,6 +6785,7 @@ function openSettings() {
       <button class="set-tab set-tab-sub on" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
       <button class="set-tab set-tab-sub" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
       <button class="set-tab" data-tab="providers">${ic(IC.link)}<span>APIs &amp; Providers</span></button>
+      <button class="set-tab" data-tab="lyrics">${ic(IC.list)}<span>Lyrics &amp; Sources</span></button>
       <button class="set-tab" data-tab="dependencies">${ic(IC.dl)}<span>Dependencies</span></button>
       <button class="set-tab" data-tab="disk">${ic(IC.folder)}<span>Disk</span></button>
       <button class="set-tab" data-tab="data">${ic(IC.save)}<span>Backup</span></button>
@@ -6835,6 +6967,22 @@ function openSettings() {
       <div class="set-row"><label for="setDlConcurrency">Concurrent downloads</label><select id="setDlConcurrency" class="sel sm-sel wide">${[1, 2, 3, 4].map(n => `<option value="${n}" ${Number(s.dlConcurrency) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row provider-args-row"><label for="setYtArgs">Custom download arguments <span class="set-sub">(safe options only)</span></label><input type="text" id="setYtArgs" class="text-in provider-args" placeholder="--sleep-interval 1 --limit-rate 5M" value="${esc(s.ytdlpArgs || "")}"></div>
       <div class="set-hint">Arguments that can execute commands, redirect files, expose cookies or replace the app's output/progress protocol are rejected.</div>`}
+    </div>
+    </section>
+    <section class="set-pane" data-pane="lyrics">
+    <div class="set-group"><div class="set-title">Subtitles &amp; lyrics</div>
+      <div class="set-hint">Automatic lookup is off by default. Manual lookup remains available from the Now Playing panel and each track menu.</div>
+      <div class="set-row"><label>Search automatically when tracks start or are added</label><input type="checkbox" id="setAutoLyrics" ${s.autoLyrics ? "checked" : ""}></div>
+      <div class="set-row"><label>Save found lyrics locally <span class="set-sub">(.lrc, .vtt or .txt)</span></label><input type="checkbox" id="setLyricsSave" ${s.lyricsSaveLocal ? "checked" : ""}></div>
+      <div class="set-row"><label>Language mode</label><select id="setLyricsMode" class="sel sm-sel wide"><option value="original" ${s.lyricsLanguageMode !== "custom" ? "selected" : ""}>Original language</option><option value="custom" ${s.lyricsLanguageMode === "custom" ? "selected" : ""}>Preferred language</option></select></div>
+      <div class="set-row"><label>Preferred language</label><select id="setLyricsLanguage" class="sel sm-sel wide">${[["fr","Français"],["en","English"],["es","Español"],["de","Deutsch"],["it","Italiano"],["pt","Português"],["ja","日本語"],["ko","한국어"],["zh","中文"]].map(([value,label]) => `<option value="${value}" ${s.lyricsLanguage === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
+      <div class="set-row"><label>YouTube captions</label><input type="checkbox" id="setLyricsYoutube" ${s.lyricsYoutubeCaptions !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>LRCLIB fallback</label><input type="checkbox" id="setLyricsLrclib" ${s.lyricsLrclib !== false ? "checked" : ""}></div>
+      <div class="set-hint">YouTube captions are preferred when present. LRCLIB supplies synchronized or plain lyrics without requiring an account. Providers that do not legally expose full lyrics are not scraped.</div>
+    </div>
+    <div class="set-group"><div class="set-title">Unavailable source recovery</div>
+      <div class="set-row"><label>Search strict public alternatives automatically</label><input type="checkbox" id="setAutoAlternatives" ${s.autoAlternativeSources ? "checked" : ""}></div>
+      <div class="set-hint">Matches must have the same title/artist and be within two seconds of the original duration. This only replaces an unavailable item with a public source; it does not bypass Premium, DRM, regional controls or paywalls.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="dependencies">
@@ -7105,6 +7253,11 @@ function openSettings() {
   $("#setPlPrev")?.addEventListener("change", e => SETTINGS.setSetting("playlistPreviewCount", Math.max(1, Math.min(200, Number(e.target.value) || 25))));
   $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
   $("#setDlConcurrency")?.addEventListener("change", e => SETTINGS.setSetting("dlConcurrency", Math.max(1, Math.min(4, Number(e.target.value) || 3))));
+  for (const [id, key] of [["setAutoLyrics", "autoLyrics"], ["setLyricsSave", "lyricsSaveLocal"], ["setLyricsYoutube", "lyricsYoutubeCaptions"], ["setLyricsLrclib", "lyricsLrclib"], ["setAutoAlternatives", "autoAlternativeSources"]]) {
+    $("#" + id)?.addEventListener("change", e => SETTINGS.setSetting(key, e.target.checked));
+  }
+  $("#setLyricsMode")?.addEventListener("change", e => SETTINGS.setSetting("lyricsLanguageMode", e.target.value));
+  $("#setLyricsLanguage")?.addEventListener("change", e => SETTINGS.setSetting("lyricsLanguage", e.target.value));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
   $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
   $("#setDeleteBlocked")?.addEventListener("click", () => runCleanup(deleteBlockedTracks));
@@ -7771,6 +7924,11 @@ function openSetup() {
   $("#suPrefLocal").checked = S().preferLocal;
   $("#suAutoSave").checked = S().autoSaveImports;
   $("#suNotify").checked = S().notifyOnChange;
+  $("#suAutoLyrics").checked = !!S().autoLyrics;
+  $("#suLyricsSave").checked = !!S().lyricsSaveLocal;
+  $("#suLyricsMode").value = S().lyricsLanguageMode || "original";
+  $("#suLyricsLanguage").value = S().lyricsLanguage || "fr";
+  $("#suAutoAlt").checked = !!S().autoAlternativeSources;
   $("#suAutoFollow").checked = S().autoFollowImports;
   $("#suFollowDl").checked = S().autoDownloadFollows;
   $("#suFollowIv").value = S().followInterval;
@@ -7816,6 +7974,11 @@ function wireSetup() {
     SETTINGS.setSetting("preferLocal", $("#suPrefLocal").checked);
     SETTINGS.setSetting("autoSaveImports", $("#suAutoSave").checked);
     SETTINGS.setSetting("notifyOnChange", $("#suNotify").checked);
+    SETTINGS.setSetting("autoLyrics", $("#suAutoLyrics").checked);
+    SETTINGS.setSetting("lyricsSaveLocal", $("#suLyricsSave").checked);
+    SETTINGS.setSetting("lyricsLanguageMode", $("#suLyricsMode").value);
+    SETTINGS.setSetting("lyricsLanguage", $("#suLyricsLanguage").value);
+    SETTINGS.setSetting("autoAlternativeSources", $("#suAutoAlt").checked);
     SETTINGS.setSetting("autoFollowImports", $("#suAutoFollow").checked);
     SETTINGS.setSetting("autoDownloadFollows", $("#suFollowDl").checked);
     SETTINGS.setSetting("followInterval", $("#suFollowIv").value);
@@ -8179,6 +8342,16 @@ async function init() {
   });
 
   $("#importPlaylistBtn")?.addEventListener("click", openImportPick);
+  $("#npLyricsBtn")?.addEventListener("click", () => {
+    lyricsState.open = !lyricsState.open;
+    renderLyrics();
+    if (lyricsState.open && curIndex >= 0 && !lyricsState.result && !lyricsState.loading) {
+      const path = queue[curIndex], track = trackByPath(effectivePath(path)) || trackByPath(path) || ensureOnlineTrack(path);
+      lyricsState.path = path;
+      void lookupLyrics(track, path, { manual: true, show: true });
+    }
+  });
+  $("#npAltBtn")?.addEventListener("click", () => { if (curIndex >= 0) void findAlternativeSource(queue[curIndex], { manual: true, play: true }); else flash("Nothing is playing"); });
   $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });

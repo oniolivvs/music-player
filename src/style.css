@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.155 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.156 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1021,6 +1021,8 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
   box-shadow: -14px 0 44px rgba(0, 0, 0, .5);
 }
 .np-head { display: flex; align-items: center; justify-content: space-between; min-width: 0; flex: 0 0 auto; }
+.np-head-actions { display: flex; gap: 5px; min-width: 0; }
+.np-head-actions .btn-line { min-height: 28px; padding: 4px 7px; font-size: 10px; }
 .ov-art {
   width: 100%; height: auto; min-height: 0; aspect-ratio: 16 / 9;
   position: relative; isolation: isolate; flex: 0 0 auto;
@@ -1053,6 +1055,16 @@ body.has-bg .ctrl.active { color: var(--accent-2); }
 .ov-sub, .ov-meta { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
+.np-lyrics {
+  min-height: 74px; max-height: 30%; overflow: hidden; flex: 0 1 30%; display: flex; flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--bd-1)); border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-2) 82%, transparent); backdrop-filter: blur(12px);
+}
+.np-lyrics-status { padding: 8px 10px; font-size: 11px; color: var(--tx-3); }
+.np-lyrics-lines { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 10px; scroll-behavior: smooth; }
+.lyric-line { padding: 3px 0; color: var(--tx-3); font-size: 12px; line-height: 1.35; transition: color .18s, transform .18s; }
+.lyric-line.active { color: var(--tx-1); font-weight: 750; transform: translateX(3px); }
+.np-lyrics-plain { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--tx-2); font-size: 12px; line-height: 1.45; }
 /* Streaming vs local, coloured like the pill so the two agree at a glance. */
 .ov-st { font-weight: 700; }
 .ov-st.on  { color: var(--net-online); }

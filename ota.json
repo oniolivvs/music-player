@@ -1,5 +1,5 @@
 {
-  "version": "0.22.155",
+  "version": "0.22.156",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -16,11 +16,13 @@
     "shuffle.mjs",
     "library-actions.mjs",
     "ui-controls.mjs",
-    "music-list.mjs"
+    "music-list.mjs",
+    "lyrics.mjs",
+    "alternative-source.mjs"
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixes gapless playbar duration resets, aligns Now Playing and dependency actions, and adds playlist banners, cover sync, custom indicators, opacity, folders, custom follow timing, and true whole-app scaling.",
+  "notes": "Adds opt-in synchronized lyrics and captions, local sidecar saving, language controls, and strict public-source recovery in Settings and Start Setup.",
   "platforms": ["windows"],
-  "min_native": "0.22.155"
+  "min_native": "0.22.156"
 }

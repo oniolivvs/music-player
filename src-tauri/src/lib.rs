@@ -6,6 +6,7 @@ compile_error!("Music Player is supported on Windows only.");
 mod audio;
 mod diagnostics;
 mod importer;
+mod lyrics;
 pub mod library;
 mod mpris;
 mod rpc;
@@ -924,6 +925,7 @@ pub fn run() {
             play_stream, preload_stream, prefetch_stream, play_direct, preload_direct, invalidate_stream, yt_duration, local_duration,
             reset_stream_progress,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
+            lyrics::lyrics_lookup,
             youtube::yt_recommendations, youtube::yt_trending,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,
             youtube::yt_channel, youtube::yt_channel_videos,

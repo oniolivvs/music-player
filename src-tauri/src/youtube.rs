@@ -860,6 +860,14 @@ fn url_encode(s: &str) -> String {
         .collect()
 }
 
+/// Metadata used by the lyrics module to discover public caption tracks.
+pub(crate) fn caption_metadata(cfg: &YtCfg, id: &str) -> Result<Value, String> {
+    check_yt_id(id)?;
+    let page = format!("https://www.youtube.com/watch?v={id}");
+    let raw = run_ytdlp(cfg, &["--dump-single-json", "--skip-download", "--no-warnings", "--", &page])?;
+    serde_json::from_str(&raw).map_err(|error| format!("caption metadata: {error}"))
+}
+
 /// Search YouTube for PLAYLISTS by name/author (the results page with the
 /// playlist filter applied, flat-extracted).
 #[tauri::command]

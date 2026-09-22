@@ -85,6 +85,10 @@
     <div id="npResize" class="rs-handle" title="Drag to resize — double-click to reset"></div>
     <div class="np-head">
       <span class="dl-title">Now playing</span>
+      <span class="np-head-actions">
+        <button id="npLyricsBtn" class="btn-line sm" type="button" title="Lyrics and subtitles">Lyrics</button>
+        <button id="npAltBtn" class="btn-line sm" type="button" title="Find a matching public source">Alternative</button>
+      </span>
     </div>
     <div class="ov-art" id="ovArt" data-ic="music"></div>
     <div class="ov-copy">
@@ -92,6 +96,10 @@
       <div class="ov-sub" id="ovSub"></div>
       <div class="ov-meta" id="ovMeta"></div>
     </div>
+    <section id="npLyrics" class="np-lyrics" hidden aria-live="polite">
+      <div id="npLyricsStatus" class="np-lyrics-status">Select Lyrics to search.</div>
+      <div id="npLyricsLines" class="np-lyrics-lines"></div>
+    </section>
     <div class="np-next-head">Up next</div>
     <div id="upNextList" class="np-next"></div>
   </aside>
@@ -299,7 +307,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
     <div class="modal setup">
       <div class="modal-head"><h2 id="setupTitle">Welcome</h2></div>
       <div class="modal-body">
-        <div class="setup-progress" aria-hidden="true"><i data-setup-progress="1"></i><i data-setup-progress="2"></i><i data-setup-progress="3"></i><i data-setup-progress="4"></i></div>
+        <div class="setup-progress" aria-hidden="true"><i data-setup-progress="1"></i><i data-setup-progress="2"></i><i data-setup-progress="3"></i><i data-setup-progress="4"></i><i data-setup-progress="5"></i></div>
         <div class="setup-step" data-step="0">
           <div class="setup-hero"><b>Your music, ready your way.</b><span>Check the media engine, choose storage, then configure playlist automation.</span></div>
           <p class="setup-hint">The recommended defaults work immediately. Every choice stays editable in <b>Settings</b>.</p>
@@ -309,7 +317,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           </div>
         </div>
         <div class="setup-step" data-step="1" hidden>
-          <p class="setup-p"><b>1/4 — Media dependencies</b></p>
+          <p class="setup-p"><b>1/5 — Media dependencies</b></p>
           <p class="setup-hint">yt-dlp handles online sources; FFmpeg and FFprobe convert MP3 files and read media metadata.</p>
           <div id="suDependencyList" class="dependency-grid"></div>
           <div id="suDependencyStatus" class="setup-status">Checking…</div>
@@ -321,7 +329,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="2" hidden>
-          <p class="setup-p"><b>2/4 — Online access</b></p>
+          <p class="setup-p"><b>2/5 — Online access</b></p>
           <p class="setup-hint">Browser cookies are optional and only needed for age/member-restricted tracks.</p>
           <p class="setup-hint">A logged-in YouTube session often makes YouTube <b>block</b> extraction ("format not available"). Keep <b>None</b> unless you specifically need restricted content — the app falls back to no-cookies automatically if a call fails.</p>
           <div class="setup-row">
@@ -340,7 +348,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="3" hidden>
-          <p class="setup-p"><b>3/4 — Storage</b></p>
+          <p class="setup-p"><b>3/5 — Storage</b></p>
           <div class="setup-row">
             <label class="imp-lbl">Folder</label>
             <input type="text" id="suDlDir" class="text-in grow" placeholder="~/Music/MusicPlayer">
@@ -352,7 +360,17 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
         </div>
         <div class="setup-step" data-step="4" hidden>
-          <p class="setup-p"><b>4/4 — Automation</b></p>
+          <p class="setup-p"><b>4/5 — Lyrics &amp; source recovery</b></p>
+          <p class="setup-hint">Off by default to save bandwidth. Source recovery only searches public, playable alternatives and never unlocks paid or protected media.</p>
+          <label class="setup-chk"><input type="checkbox" id="suAutoLyrics"> Search lyrics/subtitles automatically</label>
+          <label class="setup-chk"><input type="checkbox" id="suLyricsSave"> Save found lyrics locally</label>
+          <div class="setup-row"><label class="imp-lbl" for="suLyricsMode">Language</label><select id="suLyricsMode" class="sel grow"><option value="original">Original language</option><option value="custom">Choose a language</option></select></div>
+          <div class="setup-row"><label class="imp-lbl" for="suLyricsLanguage">Preferred language</label><select id="suLyricsLanguage" class="sel grow"><option value="fr">Français</option><option value="en">English</option><option value="es">Español</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="pt">Português</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">中文</option></select></div>
+          <label class="setup-chk"><input type="checkbox" id="suAutoAlt"> Recover unavailable tracks from strict public matches</label>
+          <div class="setup-actions"><button class="btn su-next">Next <span data-ic="arrowR"></span></button></div>
+        </div>
+        <div class="setup-step" data-step="5" hidden>
+          <p class="setup-p"><b>5/5 — Automation</b></p>
           <label class="setup-chk"><input type="checkbox" id="suAutoFollow"> Follow newly imported playlists automatically</label>
           <label class="setup-chk"><input type="checkbox" id="suFollowDl"> Download future tracks from new follows</label>
           <div class="setup-row"><label class="imp-lbl" for="suFollowIv">Follow checks</label><select id="suFollowIv" class="sel grow"><option value="launch">On launch only</option><option value="1h">Every hour</option><option value="6h">Every 6 hours</option><option value="24h">Every day</option></select></div>

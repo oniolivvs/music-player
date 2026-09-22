@@ -56,6 +56,13 @@ const DEFAULTS = {
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog
   autoFollowImports: false, // preselect Follow when importing an online playlist
   autoDownloadFollows: false, // new follows download future tracks automatically
+  autoLyrics: false,       // look up captions/lyrics when a track starts or is added
+  lyricsSaveLocal: false,  // persist .lrc/.vtt/.txt beside app data instead of memory only
+  lyricsLanguageMode: "original", // original | custom
+  lyricsLanguage: "fr",
+  lyricsYoutubeCaptions: true,
+  lyricsLrclib: true,
+  autoAlternativeSources: false, // replace unavailable YouTube items with strict public matches
   newTrackBehavior: "ask", // new tracks in followed playlists: ask (propose once) | auto (download, no prompt) | off (manual only)
   searchLimit: 20,       // YouTube search result count
   spotifyClientId: "",  // optional Spotify Web API app credentials
