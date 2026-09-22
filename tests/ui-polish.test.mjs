@@ -138,6 +138,27 @@ test("playlist storage supports folder selection, physical moves, and shared-fil
   assert.match(rust, /pub async fn move_audio_file/);
 });
 
+test("playlist appearance persists banners, cover sync, opacity and custom indicators", async () => {
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const playlists = await readFile(new URL("../src/playlists.js", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(html, /id="plVisualModal"/);
+  assert.match(html, /id="plCoverMode"[\s\S]*value="first"[\s\S]*value="last"[\s\S]*value="custom"/);
+  assert.match(playlists, /export function setVisuals/);
+  for (const key of ["bannerImage", "followImage", "localImage", "coverMode", "imageOpacity"]) assert.match(playlists, new RegExp(key));
+  assert.match(main, /function applyPlaylistBanner/);
+  assert.match(main, /mode === "last" \? \[\.\.\.pl\.paths\]\.reverse\(\)/);
+  assert.match(css, /\.view-head\.has-playlist-banner::before/);
+});
+
+test("UI scaling resizes the full canvas without clipping it", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /document\.body\.style\.zoom/);
+  assert.match(main, /document\.body\.style\.width = IS_ANDROID \? "" : `\$\{10000 \/ uiScale\}%`/);
+  assert.match(main, /document\.body\.style\.height = IS_ANDROID \? "" : `\$\{10000 \/ uiScale\}vh`/);
+});
+
 test("volume percentage is rendered inside one bordered field", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");

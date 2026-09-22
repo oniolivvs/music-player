@@ -116,6 +116,15 @@ test("unknown YouTube durations are hydrated and replace the one-second fallback
   assert.match(native, /approxDurationMs/);
 });
 
+test("gapless handoff starts a fresh generation and hydrates the next duration", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  const handoff = main.match(/if \(queueSettled && queued < expectedQueued[\s\S]*?await schedulePreload\(\);/)?.[0] || "";
+  assert.match(handoff, /const seq = \+\+playSeq/);
+  assert.match(handoff, /const path = effectivePath\(queue\[curIndex\]\)/);
+  assert.match(handoff, /updateNowPlaying\(t, path\)/);
+  assert.match(handoff, /hydrateMissingDuration\(path, t, seq\)/);
+});
+
 test("artwork player text and controls stay readable, vivid, and frosted", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /body\.has-bg button:not\(\.swatch\)\s*\{[\s\S]*border-radius:\s*5px !important[\s\S]*background:\s*linear-gradient/);

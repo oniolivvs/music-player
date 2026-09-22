@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.154 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.155 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1217,7 +1217,19 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
    playlist name into an ellipsis. Its SIZE needs no override — the em rule
    already shrinks it with the row's smaller font. */
 .pl-row .net-pill { margin-left: .3em; }
-.pl-follow { font-size: 10px; opacity: .8; }
+.pl-follow {
+  display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center;
+  margin-left: 3px; font-size: 10px; line-height: 1; opacity: .88;
+  vertical-align: middle; transform: translateY(2px);
+  background: center / contain no-repeat;
+}
+.pl-follow.has-custom-asset { color: transparent; }
+.pl-local-asset {
+  display: inline-flex; width: 15px; height: 15px; flex: 0 0 15px; align-items: center; justify-content: center;
+  color: var(--net-local); background: center / contain no-repeat; border-radius: 3px;
+}
+.pl-local-asset.has-custom-asset { color: transparent; }
+.playlist-art-opacity.has-cover { opacity: var(--playlist-image-opacity, 1); }
 
 /* ─── Followed playlists (Settings) ─── */
 .fl-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
@@ -1231,6 +1243,23 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 
 /* ─── View header ─── */
 .view-head { display: flex; align-items: center; gap: 14px; row-gap: 8px; padding: 2px 24px 12px; flex-wrap: wrap; }
+.view-head.has-playlist-banner {
+  position: relative; isolation: isolate; min-height: 124px; margin: 0 12px 12px; padding: 18px 16px;
+  overflow: hidden; border: 1px solid var(--bd-2); border-radius: var(--r);
+  background: color-mix(in srgb, var(--bg-2) 84%, transparent);
+}
+.view-head.has-playlist-banner::before {
+  content: ""; position: absolute; z-index: -2; inset: 0;
+  background-image: var(--playlist-banner-image); background-size: cover; background-position: center;
+  opacity: var(--playlist-image-opacity, 1);
+}
+.view-head.has-playlist-banner::after {
+  content: ""; position: absolute; z-index: -1; inset: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bg-0) 88%, transparent), color-mix(in srgb, var(--bg-0) 30%, transparent));
+  backdrop-filter: blur(1px);
+}
+.view-head.has-playlist-banner .vh-title,
+.view-head.has-playlist-banner .vh-sub { text-shadow: 0 2px 8px rgba(0, 0, 0, .92); }
 /* `flex-shrink: 0` here was the reason the action row overflowed instead of
    wrapping. With shrink disabled and a default `flex-basis: auto`, the box sizes
    to max-content — the sum of every button on one line — so even after
@@ -1370,12 +1399,50 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .dependency-copy { display: grid; min-width: 0; gap: 2px; }
 .dependency-copy small, .dependency-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-3); font-size: 10px; }
 .dependency-copy code { color: var(--tx-2); }
-.dependency-toolbar { display: flex; align-items: stretch; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.dependency-toolbar > button { height: 40px; min-height: 40px; padding-block: 0; align-self: stretch; }
+.dependency-toolbar {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch;
+  gap: 8px; width: min(100%, 360px); margin: 12px 0 4px auto;
+}
+.dependency-toolbar > button { width: 100%; height: 40px; min-height: 40px; padding-block: 0; align-self: stretch; justify-content: center; }
 .dependency-toolbar > button:not(:disabled):hover { transform: none; }
 .dependency-loading { color: var(--tx-3); font-size: 12px; padding: 12px; }
-@media (max-width: 560px) { .dependency-card { grid-template-columns: 24px minmax(0, 1fr); } .dependency-card button { grid-column: 2; justify-self: stretch; } }
+@media (max-width: 560px) { .dependency-card { grid-template-columns: 24px minmax(0, 1fr); } .dependency-card button { grid-column: 2; justify-self: stretch; } .dependency-toolbar { width: 100%; } }
 select.sel.sm-sel.wide { width: 158px; }
+
+.ui-scale-control { display: grid; grid-template-columns: minmax(140px, 1fr) 52px; align-items: center; gap: 10px; width: min(310px, 100%); }
+.ui-scale-control output { color: var(--accent-2); font-size: 12px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.playlist-visual-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-top: 12px; }
+.playlist-visual-setting {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) 18px; align-items: center; gap: 9px;
+  min-width: 0; padding: 8px 10px; color: var(--tx-1); text-align: left;
+}
+.playlist-visual-setting .pl-cover { width: 38px; height: 38px; }
+.playlist-visual-setting > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.playlist-visual-setting b, .playlist-visual-setting small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-visual-setting small { color: var(--tx-3); font-size: 10px; text-transform: capitalize; }
+
+.modal.pl-visual-modal { width: min(680px, 94vw); }
+.pl-visual-preview {
+  --preview-banner: none; --preview-opacity: 1;
+  position: relative; isolation: isolate; display: flex; align-items: flex-end; gap: 12px;
+  min-height: 150px; padding: 18px; overflow: hidden; border: 1px solid var(--bd-2); border-radius: var(--r);
+  background: linear-gradient(135deg, var(--bg-3), var(--bg-1));
+}
+.pl-visual-preview::before { content: ""; position: absolute; z-index: -2; inset: 0; background: var(--preview-banner) center / cover no-repeat; opacity: var(--preview-opacity); }
+.pl-visual-preview::after { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(0deg, rgba(0,0,0,.86), rgba(0,0,0,.08)); }
+.pl-visual-preview-cover { width: 72px; height: 72px; flex: 0 0 72px; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; background: var(--bg-3) center / cover no-repeat; box-shadow: 0 10px 24px rgba(0,0,0,.38); opacity: var(--preview-opacity); }
+.pl-visual-preview-copy { display: grid; min-width: 0; gap: 3px; color: #fff; text-shadow: 0 2px 8px #000; }
+.pl-visual-preview-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+.pl-visual-preview-copy span { color: rgba(255,255,255,.78); font-size: 11px; }
+.pl-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.pl-visual-grid label { display: grid; gap: 7px; color: var(--tx-2); font-size: 12px; }
+.pl-visual-grid output { float: right; color: var(--accent-2); font-weight: 800; }
+.pl-asset-list { display: grid; gap: 7px; }
+.pl-asset-row, .pl-location-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--bd); border-radius: 8px; background: color-mix(in srgb, var(--bg-3) 72%, transparent); }
+.pl-asset-row > span, .pl-location-row > span { display: grid; min-width: 0; gap: 2px; }
+.pl-asset-row small, .pl-location-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-3); font-size: 10px; }
+.pl-location-row { grid-template-columns: minmax(0, 1fr) auto; margin-top: 7px; }
+@media (max-width: 560px) { .pl-visual-grid { grid-template-columns: 1fr; } .pl-asset-row { grid-template-columns: minmax(0, 1fr) auto auto; } }
 
 /* ─── Downloads: edge badge + opt-in side drawer ─── */
 .dl-toggle {

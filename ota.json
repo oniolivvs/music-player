@@ -1,5 +1,5 @@
 {
-  "version": "0.22.154",
+  "version": "0.22.155",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -20,7 +20,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Removes native white focus outlines from text fields and keeps dependency action buttons perfectly aligned at one fixed height.",
+  "notes": "Fixes gapless playbar duration resets, aligns Now Playing and dependency actions, and adds playlist banners, cover sync, custom indicators, opacity, folders, custom follow timing, and true whole-app scaling.",
   "platforms": ["windows"],
-  "min_native": "0.22.35"
+  "min_native": "0.22.155"
 }

@@ -69,6 +69,7 @@ const DEFAULTS = {
   setupDone: false,      // first-run wizard completed
   updateMode: "ask",     // ask (propose) | auto (build silently) | off
   followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h
+  followIntervalMinutes: 360, // used when followInterval is "custom"
   sortMode: "default",   // default | title | title-desc | artist | album | dur | dur-desc
   theme: "dark",         // key of THEMES, or "custom"
   customBg: "#0b0b0f",   // custom theme: window background

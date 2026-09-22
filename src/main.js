@@ -46,7 +46,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.154";
+const SRC_VERSION = "0.22.155";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1488,7 +1488,11 @@ function setViewHead({ icon = "", title = "", subtitle = "", actions = "" }) {
   // playlist or a search result. Only showLibrary re-adds it (right after this
   // runs), so clearing it at every view switch is the one reliable place.
   $("#recoRail")?.remove();
-  $("#viewHead").innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>${actions ? `<div class="vh-actions">${actions}</div>` : ""}`;
+  const head = $("#viewHead");
+  head.classList.remove("has-playlist-banner");
+  head.style.removeProperty("--playlist-banner-image");
+  head.style.removeProperty("--playlist-image-opacity");
+  head.innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>${actions ? `<div class="vh-actions">${actions}</div>` : ""}`;
 }
 
 // ─── Sorting ───
@@ -2265,6 +2269,87 @@ function openContextMenu(x, y) {
 }
 function closeCtx() { const m = $("#ctxMenu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; } }
 
+const _playlistAssetCache = new Map();
+async function playlistAssetUrl(path) {
+  if (!path) return "";
+  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  if (_playlistAssetCache.has(path)) return _playlistAssetCache.get(path);
+  try {
+    const url = await invoke("read_image", { path });
+    _playlistAssetCache.set(path, url || "");
+    return url || "";
+  } catch (error) {
+    console.warn("[playlist asset]", path, error);
+    return "";
+  }
+}
+
+async function pickPlaylistImage(title) {
+  if (!IS_NATIVE || IS_ANDROID) { flash("Image selection needs the Windows app"); return ""; }
+  try {
+    return await T.core.invoke("plugin:dialog|open", { options: {
+      directory: false, multiple: false, title,
+      filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] }],
+    } }) || "";
+  } catch (error) {
+    console.error("[playlist image picker]", error);
+    flash(`Could not select image: ${error}`);
+    return "";
+  }
+}
+
+let _plVisualDraft = null;
+function playlistCoverMode(pl) { return pl.coverMode || (pl.image ? "custom" : "first"); }
+function shortAssetPath(path, fallback) { return path ? baseName(path) : fallback; }
+async function refreshPlaylistVisualPreview() {
+  const draft = _plVisualDraft;
+  if (!draft) return;
+  $("#plVisualPreviewName").textContent = draft.name;
+  $("#plImageOpacityValue").textContent = `${draft.imageOpacity}%`;
+  $("#plCoverPath").textContent = shortAssetPath(draft.image, "Automatic");
+  $("#plBannerPath").textContent = shortAssetPath(draft.bannerImage, "None");
+  $("#plFollowPath").textContent = shortAssetPath(draft.followImage, "Default icon");
+  $("#plLocalPath").textContent = shortAssetPath(draft.localImage, "Default icon");
+  $("#plVisualFolder").textContent = draft.downloadDir || "Default Music Player folder";
+  const preview = $("#plVisualPreview");
+  const cover = $("#plVisualPreviewCover");
+  const [bannerUrl, coverUrl] = await Promise.all([
+    playlistAssetUrl(draft.bannerImage), playlistAssetUrl(draft.image),
+  ]);
+  if (_plVisualDraft !== draft) return;
+  preview.style.setProperty("--preview-banner", bannerUrl ? `url("${String(bannerUrl).replace(/"/g, "%22")}")` : "none");
+  preview.style.setProperty("--preview-opacity", String(draft.imageOpacity / 100));
+  cover.style.backgroundImage = coverUrl ? `url("${String(coverUrl).replace(/"/g, "%22")}")` : "";
+  cover.classList.toggle("has-cover", !!coverUrl);
+}
+
+function openPlaylistVisuals(id) {
+  const pl = PL.getPlaylists().find(item => item.id === id);
+  if (!pl) return;
+  _plVisualDraft = {
+    id, name: pl.name, image: pl.image || "", bannerImage: pl.bannerImage || "",
+    followImage: pl.followImage || "", localImage: pl.localImage || "",
+    coverMode: playlistCoverMode(pl), imageOpacity: Math.max(10, Math.min(100, Number(pl.imageOpacity) || 100)),
+    downloadDir: pl.downloadDir || "",
+  };
+  $("#plVisualTitle").textContent = `${pl.name} · appearance`;
+  $("#plCoverMode").value = _plVisualDraft.coverMode;
+  $("#plImageOpacity").value = _plVisualDraft.imageOpacity;
+  $("#plVisualModal").hidden = false;
+  void refreshPlaylistVisualPreview();
+}
+function closePlaylistVisuals() { $("#plVisualModal").hidden = true; _plVisualDraft = null; }
+
+async function applyPlaylistBanner(pl) {
+  const head = $("#viewHead");
+  if (!pl?.bannerImage) return;
+  const url = await playlistAssetUrl(pl.bannerImage);
+  if (!url || active.type !== "playlist" || active.id !== pl.id) return;
+  head.style.setProperty("--playlist-banner-image", `url("${String(url).replace(/"/g, "%22")}")`);
+  head.style.setProperty("--playlist-image-opacity", String((Number(pl.imageOpacity) || 100) / 100));
+  head.classList.add("has-playlist-banner");
+}
+
 function placeCtx(menu, x, y) {
   menu.hidden = false;
   menu.style.left = Math.min(x, window.innerWidth - 224) + "px";
@@ -2280,6 +2365,7 @@ function openPlaylistCtx(x, y, id) {
   menu.innerHTML =
     `<div class="ctx-item" data-a="open">${ic(IC.note)}Open</div>` +
     `<div class="ctx-item" data-a="rename">${ic(IC.pencil)}Rename…</div>` +
+    `<div class="ctx-item" data-a="customize">${ic(IC.image)}Customize appearance…</div>` +
     `<div class="ctx-item" data-a="cover">${ic(IC.image)}Set cover…</div>` +
     (pl.image ? `<div class="ctx-item" data-a="uncover">${ic(IC.x)}Remove cover</div>` : "") +
     `<div class="ctx-item" data-a="follow">${ic(IC.repeat)}${fw ? "Unfollow" : "Follow…"}</div>` +
@@ -2297,13 +2383,12 @@ function openPlaylistCtx(x, y, id) {
       const name = await askText("Rename playlist", { value: pl.name, ok: "Rename" });
       if (name) { PL.renamePlaylist(id, name); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); }
     }
+    else if (a === "customize") openPlaylistVisuals(id);
     else if (a === "cover") {
-      try {
-        const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a cover image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"] }] } });
-        if (p) { PL.setImage(id, p); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover set"); }
-      } catch (e) { console.error("[pl cover]", e); }
+      const p = await pickPlaylistImage("Choose a cover image");
+      if (p) { PL.setVisuals(id, { image: p, coverMode: "custom" }); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover set"); }
     }
-    else if (a === "uncover") { PL.setImage(id, ""); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover removed"); }
+    else if (a === "uncover") { PL.setVisuals(id, { image: "", coverMode: "first" }); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover removed"); }
     else if (a === "follow") { if (fw) unfollowPlaylist(id); else followPlaylistFlow(id); }
     else if (a === "save") downloadPlaylist(id);
     else if (a === "folder") { if (await choosePlaylistDirectory(id)) { renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Playlist folder saved"); } }
@@ -2537,17 +2622,35 @@ async function removeSource(folder) {
 async function plCoverInto(el, pl) {
   if (!el || !pl) return;
   let url = "";
+  const mode = playlistCoverMode(pl);
   // Silent on purpose here (this runs for every playlist card on every render —
   // flashing per card would be noise), but the reason must still be inspectable.
-  if (pl.image) { try { url = await invoke("read_image", { path: pl.image }); } catch (e) { console.warn("[cover]", pl.image, e); } }
-  if (!url && S().showArt) {
-    for (const p of pl.paths.slice(0, 15)) {
+  if (mode === "custom" && pl.image) url = await playlistAssetUrl(pl.image);
+  if (!url && mode !== "custom" && S().showArt) {
+    const candidates = mode === "last" ? [...pl.paths].reverse() : pl.paths;
+    for (const p of candidates.slice(0, 15)) {
       const t = trackByPath(p) || onlineIndex.get(p);
       if (t?.thumbnail) { url = t.thumbnail; break; }
       if (t && !isOnline(p)) { try { const c = await invoke("cover", { path: p }); if (c) { url = c; break; } } catch {} }
     }
   }
-  if (url) { el.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`; el.classList.add("has-cover"); el.textContent = ""; }
+  if (url) {
+    el.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
+    el.style.setProperty("--playlist-image-opacity", String((Number(pl.imageOpacity) || 100) / 100));
+    el.classList.add("has-cover", "playlist-art-opacity"); el.textContent = "";
+  }
+}
+
+async function hydratePlaylistRowAssets(host, playlists) {
+  for (const el of host.querySelectorAll("[data-playlist-asset]")) {
+    const pl = playlists.find(item => item.id === el.dataset.playlistAsset);
+    const kind = el.dataset.assetKind;
+    const path = kind === "follow" ? pl?.followImage : pl?.localImage;
+    const url = await playlistAssetUrl(path);
+    if (!url || !el.isConnected) continue;
+    el.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
+    el.classList.add("has-custom-asset");
+  }
 }
 function playlistTitles(pl, max = 25) {
   return pl.paths.slice(0, max).map(p => {
@@ -2583,7 +2686,8 @@ function renderPlaylists() {
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       const fw = followFor(p.id);
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">${IC.repeat}</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>${netSummary(p.paths)}
+      const localAsset = p.localImage && p.paths.some(path => !!localFileFor(path));
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" data-playlist-asset="${p.id}" data-asset-kind="follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">${IC.repeat}</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>${localAsset ? `<span class="pl-local-asset" data-playlist-asset="${p.id}" data-asset-kind="local" title="Stored locally">${IC.save}</span>` : netSummary(p.paths)}
         <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">${IC.eye}</button>
         <button class="pl-del" data-del="${p.id}" title="Delete">${IC.x}</button></div>`;
     }).join("");
@@ -2594,6 +2698,7 @@ function renderPlaylists() {
   });
   host.querySelectorAll("[data-eye]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); showPlaylistPreview(btn.dataset.eye, btn); }));
   host.querySelectorAll("[data-cover]").forEach(el => { const pl = pls.find(p => p.id === el.dataset.cover); plCoverInto(el, pl); });
+  void hydratePlaylistRowAssets(host, pls);
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
   $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
@@ -2622,6 +2727,7 @@ function openPlaylist(id) {
   setViewHead({
     icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} unavailable (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
+      `<button id="plStyleBtn" class="btn-line sm" title="Banner, cover and playlist icons">${ic(IC.image)} Appearance</button>` +
       `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
       `<button id="plUrlBtn" class="btn-line sm" title="Add one YouTube video">${ic(IC.link)} Add video</button>` +
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
@@ -2636,6 +2742,7 @@ function openPlaylist(id) {
       (nLocalFiles ? `<button id="plMoveBtn" class="btn-line sm" title="Physically move this playlist's local files">${ic(IC.folder)} Move files</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
+  $("#plStyleBtn")?.addEventListener("click", () => openPlaylistVisuals(id));
   $("#plRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
   $("#plUrlBtn")?.addEventListener("click", () => addByUrl(id));
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
@@ -2659,6 +2766,7 @@ function openPlaylist(id) {
   });
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
+  void applyPlaylistBanner(pl);
   renderTracks(shownPaths.map(p => {
     const local = localFileFor(p);
     if (local) return byPath.get(local) || library.find(t => t.path === local) || ensureOnlineTrack(p);
@@ -5634,9 +5742,16 @@ function startPolling() {
       runPlaybackTransition(cleanupPlaybackGeneration, () => {
         history.push(curIndex); curIndex = preIndex;
       });
-      const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
-      wallStart(0); updateNowPlaying(t, queue[curIndex]); updatePlayingRow(); mediaPlayback();
-      rpcTrack(t); recordHistory(t, queue[curIndex]); armPlayCount(t, queue[curIndex]); savePlayback(); // gapless advance
+      // A preloaded/gapless handoff is still a brand-new playback generation.
+      // It used to bypass hardPlay's duration hydration and kept the raw yt:
+      // path, which is why an unknown duration became permanently 0:00 only
+      // after several automatic track changes.
+      const seq = ++playSeq;
+      const path = effectivePath(queue[curIndex]);
+      const t = trackByPath(path) || trackByPath(queue[curIndex]);
+      wallStart(0); updateNowPlaying(t, path); updatePlayingRow(); mediaPlayback();
+      hydrateMissingDuration(path, t, seq);
+      rpcTrack(t); recordHistory(t, path); armPlayCount(t, path); savePlayback(); // gapless advance
       await schedulePreload();
     } else if (queued === 0 && playing) {
       // Sink drained: end of queue — or the stream failed to open (e.g. a 403
@@ -6261,7 +6376,16 @@ async function applyTheme(manualOnly = false) {
   // CSS `zoom` shifts the coordinate space of position:fixed elements and vw
   // units on the Android WebView (content ends up offset / cut off — the
   // "dezoom" bug). Use it on desktop only; mobile keeps a 1:1 viewport.
-  document.body.style.zoom = IS_ANDROID ? "" : String((s.uiScale ?? 100) / 100);
+  const uiScale = Math.max(75, Math.min(150, Number(s.uiScale) || 100));
+  root.setProperty("--ui-scale", String(uiScale / 100));
+  document.body.style.zoom = IS_ANDROID ? "" : String(uiScale / 100);
+  // CSS zoom scales every px-sized icon, glyph and panel, but it does not give
+  // the body a correspondingly larger layout viewport. Compensate the canvas
+  // so scaling up does not crop the player/drawers and scaling down actually
+  // reveals more content instead of leaving an empty strip.
+  document.body.style.width = IS_ANDROID ? "" : `${10000 / uiScale}%`;
+  document.body.style.height = IS_ANDROID ? "" : `${10000 / uiScale}vh`;
+  document.body.style.maxWidth = IS_ANDROID ? "" : "none";
   if (!keepArtwork) applyAccent();
   // Blur is capped: a >12px gaussian over a full-screen layer is the single most
   // expensive paint this app does, and combined with an un-promoted layer it was
@@ -6547,7 +6671,7 @@ function openSettings() {
           <input type="color" id="setCustText" value="${s.customText}" title="Text">
         </span></div>
       <div class="set-row"><label>Corner radius</label><input type="range" id="setRadius" min="0" max="22" value="${s.radius}"></div>
-      <div class="set-row" ${IS_ANDROID ? "hidden" : ""}><label>UI scale</label><input type="range" id="setScale" min="85" max="125" value="${s.uiScale}"></div>
+      <div class="set-row" ${IS_ANDROID ? "hidden" : ""}><label>UI scale <span class="set-sub">(entire application)</span></label><span class="ui-scale-control"><input type="range" id="setScale" min="75" max="150" value="${s.uiScale}"><output id="setScaleValue">${s.uiScale}%</output></span></div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
       <div class="set-row"><label>Custom accent <span class="set-sub">(normal · hover)</span></label>
@@ -6574,6 +6698,12 @@ function openSettings() {
         </select></div>
       <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
       <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
+    </div>
+    <div class="set-group"><div class="set-title">Playlist visuals</div>
+      <div class="set-hint">Give each playlist a Discord-style banner, custom cover and indicators, choose first/last-track cover sync, and control image opacity.</div>
+      <div class="playlist-visual-settings">${PL.getPlaylists().length ? PL.getPlaylists().map(playlist =>
+        `<button class="playlist-visual-setting" data-pl-visual-settings="${esc(playlist.id)}"><span class="pl-cover" data-settings-cover="${esc(playlist.id)}">${IC.note}</span><span><b>${esc(playlist.name)}</b><small>${esc(playlistCoverMode(playlist))} cover · ${Number(playlist.imageOpacity) || 100}% opacity</small></span>${ic(IC.pencil)}</button>`
+      ).join("") : `<div class="set-hint">Create a playlist to customise its visuals.</div>`}</div>
     </div>
     <div class="set-group"><div class="set-title">Top bar &amp; sliders</div>
       <div class="set-row"><label>Compact top bar</label><input type="checkbox" id="setCompactTop" ${s.compactTopbar ? "checked" : ""}></div>
@@ -6756,7 +6886,9 @@ function openSettings() {
           <option value="1h" ${s.followInterval === "1h" ? "selected" : ""}>Every hour</option>
           <option value="6h" ${s.followInterval === "6h" ? "selected" : ""}>Every 6 hours</option>
           <option value="24h" ${s.followInterval === "24h" ? "selected" : ""}>Every day</option>
+          <option value="custom" ${s.followInterval === "custom" ? "selected" : ""}>Custom interval…</option>
         </select></div>
+      <div id="setFollowCustomRow" class="set-row" ${s.followInterval === "custom" ? "" : "hidden"}><label>Custom interval <span class="set-sub">(minutes)</span></label><input id="setFollowMinutes" class="num-in" type="number" min="5" max="10080" step="5" value="${Math.max(5, Math.min(10080, Number(s.followIntervalMinutes) || 360))}"></div>
       <div class="set-row"><label>When new tracks are found</label><select id="setNewTracks" class="sel sm-sel wide">
         <option value="ask" ${s.newTrackBehavior === "ask" ? "selected" : ""}>Ask before downloading</option>
         <option value="auto" ${s.newTrackBehavior === "auto" ? "selected" : ""}>Download automatically</option>
@@ -6866,6 +6998,11 @@ function openSettings() {
       }
     });
   }
+  body.querySelectorAll("[data-pl-visual-settings]").forEach(button => button.addEventListener("click", () => openPlaylistVisuals(button.dataset.plVisualSettings)));
+  body.querySelectorAll("[data-settings-cover]").forEach(el => {
+    const playlist = PL.getPlaylists().find(item => item.id === el.dataset.settingsCover);
+    void plCoverInto(el, playlist);
+  });
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
   $("#setBackupExport")?.addEventListener("click", exportBackup);
   $("#setBackupImport")?.addEventListener("click", importBackup);
@@ -6885,7 +7022,7 @@ function openSettings() {
     });
   }
   $("#setRadius").addEventListener("input", e => { SETTINGS.setSetting("radius", Number(e.target.value)); applyTheme(); });
-  $("#setScale").addEventListener("input", e => { SETTINGS.setSetting("uiScale", Number(e.target.value)); applyTheme(); });
+  $("#setScale").addEventListener("input", e => { SETTINGS.setSetting("uiScale", Number(e.target.value)); $("#setScaleValue").textContent = `${e.target.value}%`; applyTheme(); });
   $("#setBgImg").addEventListener("change", e => { SETTINGS.setSetting("bgImage", e.target.value.trim()); applyTheme(); });
   $("#setBgPick").addEventListener("click", async () => {
     try {
@@ -7067,7 +7204,15 @@ function openSettings() {
   $("#setSharedMove").addEventListener("click", () => { void moveLocalFiles(sharedLocalFiles(), "", S().sharedTracksDir || ""); });
   $("#setRpc")?.addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
   $("#setRpcId")?.addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
-  $("#setFollowIv").addEventListener("change", e => SETTINGS.setSetting("followInterval", e.target.value));
+  $("#setFollowIv").addEventListener("change", e => {
+    SETTINGS.setSetting("followInterval", e.target.value);
+    $("#setFollowCustomRow").hidden = e.target.value !== "custom";
+  });
+  $("#setFollowMinutes").addEventListener("change", e => {
+    const minutes = Math.max(5, Math.min(10080, Number(e.target.value) || 360));
+    e.target.value = String(minutes);
+    SETTINGS.setSetting("followIntervalMinutes", minutes);
+  });
   $("#setFollowCheck").addEventListener("click", () => checkForNewTracks(true));
   renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
@@ -7114,6 +7259,10 @@ function openSettings() {
 let follows = []; // {id, url, title, playlistId, autoDownload, enabled, knownIds[], lastChecked}
 let _followsBusy = false;
 const FOLLOW_IVALS = { launch: 0, "1h": 3600e3, "6h": 6 * 3600e3, "24h": 24 * 3600e3 };
+function followIntervalMs() {
+  if (S().followInterval === "custom") return Math.max(5, Math.min(10080, Number(S().followIntervalMinutes) || 360)) * 60e3;
+  return FOLLOW_IVALS[S().followInterval] ?? FOLLOW_IVALS["6h"];
+}
 
 async function loadFollows() {
   const raw = await storeLoad("follows");
@@ -7216,7 +7365,7 @@ async function checkFollows(manual = false, respectDue = false) {
   // frozen and gets relaunched on top of itself.
   const tid = taskStart("Checking follows", { detail: "starting…", pct: 0 });
   try {
-    const ivMs = FOLLOW_IVALS[S().followInterval] ?? FOLLOW_IVALS["6h"];
+    const ivMs = followIntervalMs();
     const due = [...follows].filter(f => f.enabled !== false
       && !(respectDue && (ivMs === 0 || Date.now() - (f.lastChecked || 0) < ivMs)));
     let total = 0, ran = 0;
@@ -8043,6 +8192,46 @@ async function init() {
   $("#plDetailClose").addEventListener("click", closePlaylistDetail);
   $("#plDetailModal").addEventListener("click", e => { if (e.target.id === "plDetailModal") closePlaylistDetail(); });
   $("#plDetailImport").addEventListener("click", () => importPlaylistDetail(true));
+  $("#plVisualClose").addEventListener("click", closePlaylistVisuals);
+  $("#plVisualCancel").addEventListener("click", closePlaylistVisuals);
+  $("#plVisualModal").addEventListener("click", e => { if (e.target.id === "plVisualModal") closePlaylistVisuals(); });
+  $("#plCoverMode").addEventListener("change", e => { if (_plVisualDraft) { _plVisualDraft.coverMode = e.target.value; void refreshPlaylistVisualPreview(); } });
+  $("#plImageOpacity").addEventListener("input", e => { if (_plVisualDraft) { _plVisualDraft.imageOpacity = Number(e.target.value); void refreshPlaylistVisualPreview(); } });
+  for (const [pickId, key, title] of [
+    ["plCoverPick", "image", "Choose a playlist cover"], ["plBannerPick", "bannerImage", "Choose a playlist banner"],
+    ["plFollowPick", "followImage", "Choose a follow indicator"], ["plLocalPick", "localImage", "Choose a local-storage indicator"],
+  ]) $("#" + pickId).addEventListener("click", async () => {
+    const path = await pickPlaylistImage(title);
+    if (!_plVisualDraft || !path) return;
+    _plVisualDraft[key] = path;
+    if (key === "image") { _plVisualDraft.coverMode = "custom"; $("#plCoverMode").value = "custom"; }
+    void refreshPlaylistVisualPreview();
+  });
+  for (const [clearId, key] of [["plCoverClear", "image"], ["plBannerClear", "bannerImage"], ["plFollowClear", "followImage"], ["plLocalClear", "localImage"]]) {
+    $("#" + clearId).addEventListener("click", () => {
+      if (!_plVisualDraft) return;
+      _plVisualDraft[key] = "";
+      if (key === "image" && _plVisualDraft.coverMode === "custom") { _plVisualDraft.coverMode = "first"; $("#plCoverMode").value = "first"; }
+      void refreshPlaylistVisualPreview();
+    });
+  }
+  $("#plVisualFolderPick").addEventListener("click", async () => {
+    if (!_plVisualDraft) return;
+    const path = await pickMusicDirectory(`Choose where “${_plVisualDraft.name}” stores mp3 files`, _plVisualDraft.downloadDir || S().downloadDir || "");
+    if (path && _plVisualDraft) { _plVisualDraft.downloadDir = path; void refreshPlaylistVisualPreview(); }
+  });
+  $("#plVisualSave").addEventListener("click", async () => {
+    const draft = _plVisualDraft;
+    if (!draft) return;
+    const settingsOpen = !$("#settingsModal").hidden;
+    PL.setVisuals(draft.id, draft);
+    PL.setDownloadDir(draft.id, draft.downloadDir);
+    await PL.persist({ strict: true });
+    closePlaylistVisuals(); renderPlaylists();
+    if (active.type === "playlist" && active.id === draft.id) openPlaylist(draft.id);
+    if (settingsOpen) openSettings();
+    flash("Playlist appearance saved");
+  });
   // Sources dropdown (topbar): toggle on click, close on outside click / Esc.
   $("#navSources")?.addEventListener("click", e => {
     e.stopPropagation();

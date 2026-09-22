@@ -172,6 +172,44 @@
     </div>
   </div>
 
+  <div id="plVisualModal" class="modal-backdrop" hidden>
+    <div class="modal pl-visual-modal">
+      <div class="modal-head">
+        <h2 id="plVisualTitle">Playlist appearance</h2>
+        <button id="plVisualClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div id="plVisualPreview" class="pl-visual-preview">
+          <div id="plVisualPreviewCover" class="pl-visual-preview-cover"></div>
+          <div class="pl-visual-preview-copy"><b id="plVisualPreviewName">Playlist</b><span>Custom banner preview</span></div>
+        </div>
+        <div class="pl-visual-grid">
+          <label>Cover behaviour
+            <select id="plCoverMode" class="sel wide">
+              <option value="first">First track added</option>
+              <option value="last">Last track added</option>
+              <option value="custom">Fixed custom image</option>
+            </select>
+          </label>
+          <label>Image opacity <output id="plImageOpacityValue">100%</output>
+            <input id="plImageOpacity" type="range" min="10" max="100" step="1" value="100">
+          </label>
+        </div>
+        <div class="pl-asset-list">
+          <div class="pl-asset-row"><span><b>Cover / title image</b><small id="plCoverPath">Automatic</small></span><button id="plCoverPick" class="btn-line sm">Choose</button><button id="plCoverClear" class="icon-btn" title="Clear" data-ic="x"></button></div>
+          <div class="pl-asset-row"><span><b>Playlist banner</b><small id="plBannerPath">None</small></span><button id="plBannerPick" class="btn-line sm">Choose</button><button id="plBannerClear" class="icon-btn" title="Clear" data-ic="x"></button></div>
+          <div class="pl-asset-row"><span><b>Follow indicator</b><small id="plFollowPath">Default icon</small></span><button id="plFollowPick" class="btn-line sm">Choose</button><button id="plFollowClear" class="icon-btn" title="Clear" data-ic="x"></button></div>
+          <div class="pl-asset-row"><span><b>Local storage indicator</b><small id="plLocalPath">Default icon</small></span><button id="plLocalPick" class="btn-line sm">Choose</button><button id="plLocalClear" class="icon-btn" title="Clear" data-ic="x"></button></div>
+        </div>
+        <div class="pl-location-row"><span><b>MP3 folder</b><small id="plVisualFolder">Default Music Player folder</small></span><button id="plVisualFolderPick" class="btn-line sm"><span data-ic="folder"></span> Choose folder</button></div>
+        <div class="setup-actions paired-actions">
+          <button id="plVisualCancel" class="btn-line">Cancel</button>
+          <button id="plVisualSave" class="btn"><span data-ic="check"></span> Save appearance</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="ctxMenu" class="ctx-menu" hidden></div>
 
   <div id="settingsModal" class="modal-backdrop" hidden>

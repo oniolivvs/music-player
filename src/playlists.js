@@ -70,6 +70,28 @@ export function setImage(id, path) {
   if (pl) { if (path) pl.image = path; else delete pl.image; _persist(); }
 }
 
+// Per-playlist presentation. Paths remain local-only assets and are persisted
+// with the playlist, so Backup automatically carries the complete look.
+export function setVisuals(id, values = {}) {
+  const pl = _cache.find(p => p.id === id);
+  if (!pl) return;
+  const pathKeys = ["image", "bannerImage", "followImage", "localImage"];
+  for (const key of pathKeys) {
+    if (!(key in values)) continue;
+    const value = String(values[key] || "").trim();
+    if (value) pl[key] = value; else delete pl[key];
+  }
+  if ("coverMode" in values) {
+    const mode = ["first", "last", "custom"].includes(values.coverMode) ? values.coverMode : "first";
+    pl.coverMode = mode;
+  }
+  if ("imageOpacity" in values) {
+    const opacity = Math.max(10, Math.min(100, Number(values.imageOpacity) || 100));
+    if (opacity === 100) delete pl.imageOpacity; else pl.imageOpacity = opacity;
+  }
+  _persist();
+}
+
 // allowDup: push even if the path is already present (creates a duplicate entry).
 export function addToPlaylist(id, path, allowDup = false) {
   const pl = _cache.find(p => p.id === id);
