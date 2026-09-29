@@ -27,6 +27,8 @@ CLAUDE.md
 .cursor/
 .aider*
 .codex/
+.agent/
+.agents/
 .github/copilot*
 AGENTS.md
 MEMORY.md
