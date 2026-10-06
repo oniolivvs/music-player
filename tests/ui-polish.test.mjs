@@ -191,7 +191,14 @@ test("every layout keeps the hot bar full width and aligns Now Playing below it"
   assert.match(css, /body\.artwork-theme\.has-bg \.nav-bar[\s\S]*margin:/);
   assert.match(css, /body\.artwork-theme\.has-bg :where\(\.sidebar, \.main, \.np-drawer\)[\s\S]*gap|border:/);
   assert.match(css, /body\.artwork-theme\.has-bg\.np-push \.app\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff,[^}]*\+\s*8px/s);
-  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*var\(--shell-gap,\s*12px\)\)/s);
+  // Artwork mode pads .app by 8px: the drawer must start at that same 8px, or it
+  // sits 4px below the library and sidebar (measured in the installed app).
+  assert.match(css, /body\.artwork-theme\.has-bg \.app\s*\{[^}]*padding:\s*8px/s);
+  assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*8px\)/s);
+  // The Now Playing handle lives 9px outside the drawer: a plain overflow
+  // hidden clipped it away, so only the sidebar could be resized.
+  assert.match(css, /\.np-drawer\s*\{[^}]*overflow:\s*clip;\s*overflow-clip-margin:\s*9px/s);
+  assert.match(css, /#npResize\s*\{[^}]*left:\s*-9px/s);
   assert.match(css, /\.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*var\(--shell-gap,\s*12px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*right:\s*calc\(8px\s*\+\s*var\(--safe-right,\s*0px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*bottom:\s*calc\(var\(--player-top,\s*118px\)\s*\+\s*8px\)/s);

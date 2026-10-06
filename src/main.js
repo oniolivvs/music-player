@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.157";
+const SRC_VERSION = "0.22.158";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5689,6 +5689,7 @@ async function commitSeekSeconds(value) {
   const seconds = Math.max(0, Math.min(max, Number(value) || 0));
   try { await invoke("seek", { secs: seconds }); } catch {}
   wallSeek(seconds); seeking = false; renderSeek(seconds); mediaPlayback();
+  if (playing) startProgressLoop(); // the drag stopped the loop
   if (playing || _rpcPauseTimer) updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing);
 }
 // Download progress of the current online stream: paints a second band under
@@ -5731,6 +5732,16 @@ function renderBuffer(st) {
     };
     _progRaf = requestAnimationFrame(loop);
   }
+  // The loop above also stops while the window is hidden or the bar is being
+  // dragged, but only play/resume restarted it: after minimizing the window or
+  // a seek, the music went on while the bar stayed frozen (0:00 after a gapless
+  // track change). Restart it as soon as the window is visible again; the
+  // status poll restarts it too (see startPolling) as a safety net.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || !playing || curIndex < 0) return;
+    renderSeek(wallPos());
+    startProgressLoop();
+  });
 
 let _posTick = 0;
 let _lastAudioErr = "";
@@ -5754,6 +5765,7 @@ function startPolling() {
       }
       // Paused or idle: nothing can change on its own — poll nothing (CPU).
       if (curIndex < 0 || !playing) return;
+      if (!_progRaf && !seeking && !document.hidden) startProgressLoop(); // a stopped bar never stays frozen
       if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
       if (_posTick % 14 === 0) savePlayback();   // ~4s: persist resume point while playing
       const st = await invoke("status"); if (!st) return;
@@ -6113,17 +6125,49 @@ async function notifyTrack(t) {
 // resets to the beginning — relying on wallPos() there is wrong because the wall
 // clock isn't re-anchored (wallStart(0)) until playback is actually confirmed,
 // so it would still report the PREVIOUS track's elapsed time.
+// Discord only accepts http(s) artwork. Local files saved from YouTube carry
+// their video id in the name, so they get the public thumbnail instead of none.
+function rpcArtwork(t) {
+  const thumb = String(t?.thumbnail || "");
+  return /^https?:\/\//i.test(thumb) ? thumb : youtubeThumbnailFor(t?.path || "");
+}
+function rpcPayload(t, isPlaying, posOverride) {
+  return {
+    clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying,
+    art: rpcArtwork(t), durationSecs: t?.duration_secs || 0,
+    positionSecs: posOverride != null ? posOverride : wallPos(),
+  };
+}
 async function updateRPC(t, isPlaying, posOverride) {
   if (!IS_NATIVE || !S().rpcEnabled || !S().rpcClientId) return;
-  try {
-    await invoke("rpc_update", {
-      clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying,
-      art: t?.thumbnail || "", durationSecs: t?.duration_secs || 0,
-      positionSecs: posOverride != null ? posOverride : wallPos(),
-    });
-  } catch (e) { console.error("[rpc]", e); }
+  try { await invoke("rpc_update", rpcPayload(t, isPlaying, posOverride)); }
+  catch (e) { console.error("[rpc]", e); }
 }
 async function clearRPC() { if (IS_NATIVE) { try { await invoke("rpc_clear"); } catch {} } }
+const RPC_APP_ID = /^\d{17,20}$/;
+function setRpcStatus(text, error = false) {
+  const el = $("#setRpcStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("set-error", error);
+}
+// Settings → Test: one real round-trip to the local Discord client, with the
+// reason shown in place instead of a console line nobody reads.
+async function testRPC() {
+  const id = String($("#setRpcId")?.value || "").trim();
+  if (!RPC_APP_ID.test(id)) { setRpcStatus("Enter the 17–20 digit Application ID first.", true); return; }
+  if (id !== S().rpcClientId) SETTINGS.setSetting("rpcClientId", id);
+  if (!IS_NATIVE) { setRpcStatus("Discord can only be reached from the installed app.", true); return; }
+  setRpcStatus("Contacting Discord…");
+  const t = curIndex >= 0 ? (trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex])) : null;
+  try {
+    await invoke("rpc_update", rpcPayload(t || { title: "Music Player", artist: "Ready" }, !!(t && playing)));
+    if (!S().rpcEnabled) { await clearRPC(); setRpcStatus("Discord answered. Tick “Show on Discord” to display your tracks."); }
+    else setRpcStatus("Connected — your Discord profile now shows what you play.");
+  } catch (e) {
+    setRpcStatus(`Discord did not answer (${String(e).slice(0, 120)}). Is the Discord app open on this PC?`, true);
+  }
+}
 
 // Discord RPC policy layer (Settings → Discord Rich Presence):
 //  • rpcDelay: wait N s before showing a NEW track — skipping quickly through
@@ -6815,6 +6859,7 @@ function openSettings() {
       <div class="set-hint">On launch, reopen the last track paused at the spot you stopped — press play to continue.</div>
       <div class="set-row"><label>Keep a listening history <span class="set-sub">(0 = off · up to 1000)</span></label><input type="number" id="setHist" class="num-in" min="0" max="1000" step="10" value="${s.historyLimit ?? 50}"></div>
       <div class="set-hint">Recently played tracks appear in the <b>Recently played</b> tab in the sidebar.</div>
+      <div class="set-row"><label for="setNotify">Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
     </div>
     </section>
     <section class="set-pane" data-pane="youtube">
@@ -6830,6 +6875,9 @@ function openSettings() {
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
       <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
       <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
+      <div class="set-row"><label>Tracks never proposed again</label><button id="setDeclined" class="btn-line sm">Forget ${dlDeclined.size}</button></div>
+      <div class="set-row"><label>Downloads deleted &amp; suppressed</label><button id="setSuppr" class="btn-line sm">Forget ${suppressedSet.size}</button></div>
+      <div class="set-hint">Declined downloads and deleted files are not offered again. “Forget” lets the app propose them again.</div>
       <div class="set-row"><label>Home feed tab <span class="set-sub">(“YouTube” in the top navigation)</span></label><input type="checkbox" id="setYtFeedEnabled" ${s.ytFeedEnabled !== false ? "checked" : ""}></div>
       <div class="set-row"><label>Feed sections <span class="set-sub">(comma-separated, in display order)</span></label><input type="text" id="setYtFeedSections" class="text-in" placeholder="forYou,trending,current,history" value="${esc(s.ytFeedSections || "forYou,trending,current,history")}"></div>
       <div class="set-hint">Available: <b>forYou</b>, <b>trending</b>, <b>current</b> (related to what's playing), <b>history</b>. Remove one to hide that section.</div>
@@ -6850,6 +6898,21 @@ function openSettings() {
         <li>Select <b>Create app</b>, enter any app name and description, then accept the terms.</li>
         <li>Open the app's <b>Settings</b> and copy its Client ID.</li>
         <li>Select <b>View client secret</b>, copy it here, then save by leaving the field.</li>
+      </ol></details>
+    </div>
+    <div class="set-group"><div class="set-title">Discord Rich Presence</div>
+      <div class="set-hint">Shows the current track as “Listening to …” on your Discord profile, with its artwork and a progress bar. Works with the Discord app, Vesktop and arRPC.</div>
+      <div class="set-row"><label for="setRpc">Show on Discord</label><input type="checkbox" id="setRpc" ${s.rpcEnabled ? "checked" : ""}></div>
+      <div class="set-row provider-secret-row"><label for="setRpcId">Application ID</label>
+        <span class="secret-field"><input type="text" id="setRpcId" class="text-in" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="17–20 digits" value="${esc(s.rpcClientId || "")}"><button type="button" class="btn-line sm" id="setRpcTest">Test</button></span></div>
+      <div class="set-row"><label for="setRpcDelay">Wait before showing a new track <span class="set-sub">(seconds · 0–60)</span></label><input type="number" id="setRpcDelay" class="num-in" min="0" max="60" step="1" value="${Math.max(0, Number(s.rpcDelay) || 0)}"></div>
+      <div class="set-row"><label for="setRpcPause">Remove after pausing <span class="set-sub">(seconds · 0 = at once)</span></label><input type="number" id="setRpcPause" class="num-in" min="0" max="3600" step="5" value="${Math.max(0, Number(s.rpcPauseClear) || 0)}"></div>
+      <div class="set-hint" id="setRpcStatus">${s.rpcClientId ? "Press Test to check the connection with Discord." : "Enter your Application ID, then press Test."}</div>
+      <details class="provider-guide"><summary>How to get an Application ID</summary><ol>
+        <li>Open the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> and sign in.</li>
+        <li>Select <b>New Application</b> and give it the name Discord should show (for example “Music Player”).</li>
+        <li>On <b>General Information</b>, copy the <b>Application ID</b> and paste it here.</li>
+        <li>Tick <b>Show on Discord</b>, keep Discord open, then press <b>Test</b>.</li>
       </ol></details>
     </div>
     <div class="set-group"><div class="set-title">yt-dlp</div>
@@ -7251,7 +7314,15 @@ function openSettings() {
   });
   $("#setSharedMove").addEventListener("click", () => { void moveLocalFiles(sharedLocalFiles(), "", S().sharedTracksDir || ""); });
   $("#setRpc")?.addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
-  $("#setRpcId")?.addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
+  $("#setRpcId")?.addEventListener("change", e => {
+    const id = e.target.value.trim();
+    if (id && !RPC_APP_ID.test(id)) { setRpcStatus("The Application ID is the 17–20 digit number from the Developer Portal.", true); return; }
+    SETTINGS.setSetting("rpcClientId", id);
+    if (!id) { clearRPC(); setRpcStatus("Enter your Application ID, then press Test."); return; }
+    if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing);
+    setRpcStatus("Saved — press Test to check the connection with Discord.");
+  });
+  $("#setRpcTest")?.addEventListener("click", testRPC);
   $("#setFollowIv").addEventListener("change", e => {
     SETTINGS.setSetting("followInterval", e.target.value);
     $("#setFollowCustomRow").hidden = e.target.value !== "custom";
@@ -7965,7 +8036,7 @@ function closeAllModals() {
 // ─── Resizable panels (sidebar / Now-playing) ───────────────────────────────
 // Pointer-drag the handles; the width lives in a CSS var and persists as a
 // setting. Double-click a handle to reset that panel to its default width.
-function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
+function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom, panel }) {
   const el = $(handle);
   if (!el) return;
   const root = document.documentElement.style;
@@ -7975,8 +8046,15 @@ function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
     el.setPointerCapture(e.pointerId);
     el.classList.add("dragging");
     document.body.classList.add("rs-dragging");
+    // Keep the grab offset: the handle is 8px wide, and computing the width
+    // from the raw pointer made the panel jump by up to 8px on press.
+    // Measured on screen, not read from the setting: a capped drawer is
+    // narrower than its saved width, and the drag must start from what is seen.
+    const current = $(panel)?.getBoundingClientRect().width || def;
+    const grab = widthFrom(e) - current;
+    lastW = 0;
     const move = (ev) => {
-      const w = Math.round(Math.min(max, Math.max(min, widthFrom(ev))));
+      const w = Math.round(Math.min(max, Math.max(min, widthFrom(ev) - grab)));
       if (w === lastW) return;
       lastW = w;
       cancelAnimationFrame(raf);
@@ -8004,11 +8082,11 @@ function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
 }
 function initResizers() {
   wireResizer("#sideResize", {
-    min: 190, max: 480, def: 268, setting: "sideW", cssVar: "--side-w",
+    min: 190, max: 480, def: 268, setting: "sideW", cssVar: "--side-w", panel: ".sidebar",
     widthFrom: (ev) => ev.clientX - 8, // .app left padding
   });
   wireResizer("#npResize", {
-    min: 250, max: 560, def: 330, setting: "npW", cssVar: "--np-w",
+    min: 250, max: 560, def: 330, setting: "npW", cssVar: "--np-w", panel: "#npPanel",
     widthFrom: (ev) => window.innerWidth - 8 - ev.clientX, // drawer is right-anchored (right: calc(8px + var(--safe-right, 0px)))
   });
 }

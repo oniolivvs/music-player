@@ -1,5 +1,5 @@
 {
-  "version": "0.22.157",
+  "version": "0.22.158",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Updates now install by themselves (verified download, relaunch, waits until nothing plays), fixes lyrics overwriting each other on non-Latin titles, public source recovery for Japanese/Korean titles, deleting tracks whose file is already gone, and removes dead cloud-sync code.",
+  "notes": "Fixes the progress bar freezing after minimizing the window or seeking, the Now Playing resize handle that could not be grabbed, the Now Playing panel sitting 4px lower than its neighbours, and brings back Discord Rich Presence settings (Application ID, test button, delays).",
   "platforms": ["windows"],
   "min_native": "0.22.156"
 }
