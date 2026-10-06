@@ -74,7 +74,7 @@ const DEFAULTS = {
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
   startOnBoot: false,    // launch the app automatically at login (OS autostart; source of truth is the autostart plugin)
   setupDone: false,      // first-run wizard completed
-  updateMode: "ask",     // ask (propose) | auto (build silently) | off
+  updateMode: "auto",    // auto (install by itself once idle) | ask (propose) | off
   followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h
   followIntervalMinutes: 360, // used when followInterval is "custom"
   sortMode: "default",   // default | title | title-desc | artist | album | dur | dur-desc

@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.156";
+const SRC_VERSION = "0.22.157";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2240,12 +2240,23 @@ function videoIdOf(p) {
 // Delete the on-disk files for these paths. Remaining playlist references are
 // reverted to the online stream (via [videoId]) so nothing dangles and the
 // track stays playable where it was.
+// A file already gone from disk (moved or deleted outside the app) is deleted:
+// treating it as a failure kept its dead row in the library forever. Only a
+// definite "not there" counts — an unreadable drive (-1) still fails.
+async function deleteLocalFile(path) {
+  try { await invoke("delete_file", { path }); }
+  catch (error) {
+    let state = -1;
+    try { state = await invoke("fs_exists", { path }); } catch {}
+    if (state !== 0 && state !== false) throw error;
+  }
+}
 async function deleteLocalFiles(paths) {
   let removed = 0;
   for (const p of paths) {
     const file = localFileFor(p);
     if (!file) continue;
-    try { await invoke("delete_file", { path: file }); }
+    try { await deleteLocalFile(file); }
     catch (e) { console.error("[delete]", file, e); flash(`Couldn't delete a file: ${e}`); continue; }
     removed++;
     const vid = videoIdOf(p);
@@ -3475,116 +3486,6 @@ async function searchOnline(q, page = 0, bg = false) {
   }
 }
 
-// ─── Account & cloud sync (Google Drive appDataFolder) ──────────────────
-// Sign in with a Google account; playlists / settings / blocked / follows /
-// online index sync through the private appDataFolder of THAT account's Drive,
-// so the same account on any device shares the same library structure. Audio
-// files are NOT synced (too big) — the local scan + LAN share bring those.
-const SYNC_DEVICE_KEYS = new Set([ // never overwritten from the cloud (per-device)
-  "downloadDir", "sideW", "npW", "ytdlpPath", "cookiesBrowser", "gdriveTokens",
-  "spotifyClientId", "spotifyClientSecret", "gdriveClientId", "gdriveClientSecret",
-  "startOnBoot", "uiScale", "syncAt",
-]);
-function gdriveCreds() { return { clientId: S().gdriveClientId || "", clientSecret: S().gdriveClientSecret || "" }; }
-async function gdriveRestore() {
-  const t = S().gdriveTokens;
-  if (IS_NATIVE && t && t.refresh_token) { try { await invoke("gdrive_set_tokens", { tokens: t }); } catch {} }
-}
-async function accountSignIn() {
-  if (!IS_NATIVE) { flash("Sign-in needs the native app"); return; }
-  const { clientId, clientSecret } = gdriveCreds();
-  if (!clientId) { flash("Enter your Google OAuth Client ID first (see the hint)"); return; }
-  flash("Opening Google sign-in in your browser…");
-  try {
-    const res = await invoke("gdrive_sign_in", { clientId, clientSecret });
-    SETTINGS.setSetting("gdriveTokens", res.tokens);
-    flash(`Signed in as ${res.email || "Google account"}`);
-    openSettings();
-    await syncPull(true); // first thing: pull anything already in the cloud
-  } catch (e) { flash(`Sign-in failed: ${e}`); }
-}
-async function accountSignOut() {
-  try { await invoke("gdrive_sign_out"); } catch {}
-  SETTINGS.setSetting("gdriveTokens", null);
-  flash("Signed out"); openSettings();
-}
-// Build the sync bundle from the local stores.
-function buildSyncBundle() {
-  const s = S();
-  const syncSettings = {};
-  for (const [k, v] of Object.entries(s)) if (!SYNC_DEVICE_KEYS.has(k)) syncSettings[k] = v;
-  return {
-    v: 1, at: Date.now(),
-    playlists: PL.getPlaylists(),
-    settings: syncSettings,
-    blocked: [...blockedKeys],
-    follows,
-    online: Object.fromEntries([...onlineIndex.entries()].slice(-4000)),
-  };
-}
-// Merge a pulled bundle into local state (additive + newest-wins for settings).
-function mergeSyncBundle(b) {
-  if (!b || typeof b !== "object") return false;
-  let changed = false;
-  // Playlists: union by id; union track paths (dedup, keep order).
-  if (Array.isArray(b.playlists)) {
-    const mine = PL.getPlaylists();
-    const byId = new Map(mine.map(p => [p.id, p]));
-    for (const rp of b.playlists) {
-      const cur = byId.get(rp.id);
-      if (!cur) { PL.getPlaylists().push(rp); changed = true; }
-      else {
-        const seen = new Set(cur.paths);
-        for (const p of (rp.paths || [])) if (!seen.has(p)) { cur.paths.push(p); seen.add(p); changed = true; }
-        if (rp.name && rp.name !== cur.name) { cur.name = rp.name; changed = true; }
-        if (rp.image && !cur.image) { cur.image = rp.image; changed = true; }
-      }
-    }
-    if (changed) PL.persist();
-  }
-  // Online index: fill gaps (metadata for shared/streamed tracks).
-  if (b.online) { for (const [k, v] of Object.entries(b.online)) if (!onlineIndex.has(k)) { onlineIndex.set(k, v); changed = true; } saveOnline(); }
-  // Blocked: union.
-  if (Array.isArray(b.blocked)) { const before = blockedKeys.size; for (const k of b.blocked) blockedKeys.add(k); if (blockedKeys.size !== before) { saveBlocked(); changed = true; } }
-  // Follows: union by url.
-  // Follows: union by url. autoDownload is deliberately NOT carried over — a
-  // follow created on the phone with "save locally" ticked would otherwise start
-  // filling this machine's disk 20s after launch, with no prompt on this device.
-  if (Array.isArray(b.follows)) { const urls = new Set(follows.map(f => f.url)); for (const f of b.follows) if (!urls.has(f.url)) { follows.push({ ...f, autoDownload: false }); changed = true; } if (changed) saveFollows(); }
-  // Settings: apply cloud values (skipping device-specific keys) only if the
-  // cloud bundle is newer than our last local change of settings.
-  if (b.settings && typeof b.settings === "object") {
-    for (const [k, v] of Object.entries(b.settings)) if (!SYNC_DEVICE_KEYS.has(k) && S()[k] !== v) { SETTINGS.setSetting(k, v); changed = true; }
-  }
-  return changed;
-}
-let _syncing = false;
-async function syncPush(silent) {
-  if (!IS_NATIVE || _syncing || !S().gdriveTokens?.refresh_token) return;
-  _syncing = true;
-  try {
-    await invoke("gdrive_push", { ...gdriveCreds(), bundle: JSON.stringify(buildSyncBundle()) });
-    SETTINGS.setSetting("syncAt", Date.now());
-    if (!silent) flash("Synced to your Google Drive");
-  } catch (e) { if (!silent) flash(`Sync (upload) failed: ${e}`); }
-  finally { _syncing = false; }
-}
-async function syncPull(silent) {
-  if (!IS_NATIVE || _syncing || !S().gdriveTokens?.refresh_token) return;
-  _syncing = true;
-  try {
-    const raw = await invoke("gdrive_pull", { ...gdriveCreds() });
-    if (raw) {
-      const changed = mergeSyncBundle(JSON.parse(raw));
-      if (changed) { renderPlaylists(); applySettings(); refreshView(); }
-      if (!silent) flash(changed ? "Pulled updates from your Drive" : "Already up to date");
-    } else if (!silent) flash("Nothing in the cloud yet — press Sync to upload");
-    SETTINGS.setSetting("syncAt", Date.now());
-  } catch (e) { if (!silent) flash(`Sync (download) failed: ${e}`); }
-  finally { _syncing = false; }
-}
-async function syncNow() { await syncPull(true); await syncPush(false); }
-
 // ─── Share over WiFi (LAN host ↔ client) ────────────────────────────────
 // One device hosts its library over HTTP on the LAN; another connects with the
 // host IP + a pairing code and streams / downloads. No account, no cloud.
@@ -4067,7 +3968,7 @@ async function deleteBlockedTracks() {
   for (const path of paths) {
     if (!isCleanupLocal(path)) { removed.add(path); continue; }
     try {
-      await invoke("delete_file", { path });
+      await deleteLocalFile(path);
       removed.add(path);
     } catch (error) {
       failed.add(path);
@@ -7264,12 +7165,6 @@ function openSettings() {
   $("#setDeleteDuplicates")?.addEventListener("click", () => runCleanup(deleteDuplicateFiles));
   $("#setRemovePlaylistDuplicates")?.addEventListener("click", () => runCleanup(removePlaylistDuplicates));
   // Account & cloud sync
-  $("#setGdId")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientId", e.target.value.trim()));
-  $("#setGdSecret")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientSecret", e.target.value.trim()));
-  $("#setSignIn")?.addEventListener("click", accountSignIn);
-  $("#setSignOut")?.addEventListener("click", accountSignOut);
-  $("#setSyncNow")?.addEventListener("click", syncNow);
-  $("#setSyncAuto")?.addEventListener("change", e => SETTINGS.setSetting("syncAuto", e.target.checked));
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
@@ -7652,12 +7547,12 @@ async function checkUpdate(manual = false) {
   // the desktop installer only appears once it's ready.
   const atBoot = !_updChecked; _updChecked = true;
   const autoMode = S().updateMode === "auto" && !manual;
-  // Native (non-OTA) updates are hands-off in every mode except "off". There is
-  // nothing to decide: the installer downloads in the background and only
-  // surfaces once it is ready, and checkUpdate runs at startup or when the
-  // settings panel opens — never on a timer — so it cannot interrupt playback
-  // mid-session. "Notify me" therefore only governs the OTA path below, which
-  // reloads the running app and does have to ask.
+  // Native (non-OTA) updates are hands-off in every mode except "off": the
+  // installer downloads in the background, then waits until nothing plays
+  // (runUpdate → waitUntilIdle) before it restarts the app. checkUpdate also
+  // runs when Settings opens and every few hours, so installing straight away
+  // used to close the app in the middle of a song. "Notify me" only governs the
+  // OTA path below, which reloads the running app and does have to ask.
   const autoNative = S().updateMode !== "off" && !manual;
   // Prefer an over-the-air frontend update: it applies instantly, no reinstall,
   // on every platform. Only fall back to the APK/installer path (native code
@@ -7667,7 +7562,7 @@ async function checkUpdate(manual = false) {
     if (ota && ota.available) {
       _otaMode = true; availableVersion = ota.version; _releaseInfo = null;
       renderUpdateBtn();
-      if (autoMode && atBoot) { runUpdate(); return; }
+      if (autoMode) { runUpdate({ auto: true, waitIdle: !atBoot }); return; }
       if (manual) flash(`Instant update available: v${ota.current} → v${ota.version}`);
       return;
     }
@@ -7677,27 +7572,27 @@ async function checkUpdate(manual = false) {
   // Desktop with a source tree keeps the in-app rebuild flow; everyone else
   // (installers, Android) checks GitHub for the newest release that ships an
   // asset for THIS platform — versions are independent per platform.
-  const src = await invoke("source_version").catch(() => "");
-  const hasSourceTree = !!src;
-  if (hasSourceTree) {
-    if (src && cur && src !== cur) {
+  const rel = await invoke("latest_release").catch(() => null);
+  const src = IS_ANDROID ? "" : await sourceTreeVersion(rel?.version);
+  if (src) {
+    if (cur && src !== cur) {
       availableVersion = src; _releaseInfo = null;
-      if (autoMode) { runUpdate(); return; }
+      if (autoMode) { runUpdate({ auto: true, waitIdle: !atBoot }); return; }
       if (manual) flash(`Update available: v${cur} → v${src}`);
     } else {
       availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
     }
   } else {
     try {
-      const rel = await invoke("latest_release");
+      if (!rel) throw new Error("GitHub releases are unreachable");
       _releaseInfo = rel;
       if (rel.version && cur && verCmp(rel.version, cur) > 0) {
         availableVersion = rel.version;
         // Hands-off in every mode but "off": desktop downloads the setup and
-        // launches it, Android downloads the APK and hands it to the system
-        // installer. Android still shows its own install prompt — that one is
-        // enforced by the OS and cannot be skipped from here.
-        if (autoNative) { renderUpdateBtn(); runUpdate(); return; }
+        // launches it once nothing plays, Android downloads the APK and hands
+        // it to the system installer. Android still shows its own install
+        // prompt — that one is enforced by the OS and cannot be skipped.
+        if (autoNative) { renderUpdateBtn(); runUpdate({ auto: true, waitIdle: !atBoot }); return; }
         if (manual) flash(`Update available for ${rel.platform}: v${cur} → v${rel.version}`);
       } else {
         availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
@@ -7708,13 +7603,43 @@ async function checkUpdate(manual = false) {
   }
   renderUpdateBtn();
 }
-async function runUpdate() {
+// Dev builds run from a source checkout; installed ones do not. Native 0.22.156
+// and older answered source_version with the GitHub release tag even without a
+// checkout, so installed builds took the dev "rebuild" path, which can only
+// open the releases page. A value equal to the published release therefore
+// proves nothing: only a different version means a real tree.
+async function sourceTreeVersion(releaseVersion = "") {
+  // Release unknown (offline, rate limit): an old native's tag would pass for a
+  // tree and reopen the browser path — and a real tree cannot fetch either.
+  if (!releaseVersion) return "";
+  const src = await invoke("source_version").catch(() => "");
+  return src && src !== releaseVersion ? src : "";
+}
+// Background updates reload or restart the app: wait until nothing plays, then
+// count down visibly — starting playback again postpones the install.
+const UPDATE_IDLE_COUNTDOWN = 15;
+async function waitUntilIdle(label) {
+  for (;;) {
+    while (playing) await sleep(5000);
+    const tid = taskStart(label, { detail: `installing in ${UPDATE_IDLE_COUNTDOWN} s — play something to postpone` });
+    flash(`${label} installs in ${UPDATE_IDLE_COUNTDOWN} s — play something to postpone`);
+    let left = UPDATE_IDLE_COUNTDOWN;
+    while (left > 0 && !playing) {
+      await sleep(1000); left--;
+      taskUpdate(tid, { detail: `installing in ${left} s — play something to postpone` });
+    }
+    if (!playing) { taskEnd(tid, { detail: "installing…", ttl: 4000 }); return; }
+    taskEnd(tid, { detail: "postponed until playback stops", ttl: 4000 });
+  }
+}
+async function runUpdate({ auto = false, waitIdle = false } = {}) {
   if (updateBusy || !IS_NATIVE) return;
   // Instant OTA path: download the new frontend and reload into it — no
   // reinstall, works everywhere. The index.html bootstrap picks it up on reload.
   if (_otaMode) {
     updateBusy = true; renderUpdateBtn();
     try {
+      if (auto && waitIdle) await waitUntilIdle(`Update v${availableVersion}`);
       const v = await invoke("ota_apply");
       flash(`Updated to v${v} — reloading…`);
       setTimeout(() => location.reload(), 700);
@@ -7727,7 +7652,8 @@ async function runUpdate() {
   // Android / installer builds have no source tree to rebuild — always go
   // through the GitHub release download. Fetch the release info on the fly if
   // the earlier check didn't populate it (e.g. it errored the first time).
-  const noSourceTree = IS_ANDROID || !(await invoke("source_version").catch(() => ""));
+  if (!_releaseInfo && !availableVersion) { try { _releaseInfo = await invoke("latest_release"); } catch {} }
+  const noSourceTree = IS_ANDROID || !(await sourceTreeVersion(_releaseInfo?.version));
   if (noSourceTree) {
     if (!_releaseInfo) { try { _releaseInfo = await invoke("latest_release"); } catch (e) { flash(`Could not find a release: ${e}`); return; } }
     const url = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
@@ -7761,9 +7687,10 @@ async function runUpdate() {
       _apkTask = tid;
       try {
         const path = await invoke("download_installer", { url: _releaseInfo.asset_url });
-        taskEnd(tid, { detail: "downloaded — installer starting", ttl: 8000 });
+        taskEnd(tid, { detail: waitIdle ? "downloaded — installs once playback stops" : "downloaded — installer starting", ttl: 8000 });
+        if (auto && waitIdle) await waitUntilIdle(`Update v${availableVersion}`);
         await invoke("run_installer", { path });
-        flash("Installer launched — the app restarts updated. Your settings are kept.");
+        flash("Installing the update — the app restarts by itself. Your settings are kept.");
       } catch (e) {
         taskEnd(tid, { status: "error", detail: String(e) });
         try { await invoke("open_url", { url }); flash("Opening the download instead…"); } catch {}
@@ -8513,6 +8440,9 @@ async function init() {
   else ytConfigPush().catch(() => {}); // warm up detection with saved prefs
   maintainDependencies();
   checkUpdate();
+  // An app left open for days must still update: check again every 6 h (the
+  // install itself waits until nothing plays).
+  setInterval(() => { if (!updateBusy) checkUpdate(); }, 6 * 60 * 60 * 1000);
 
   if (S().uiNpOpen) toggleNpPanel(true); // restore the up-next panel
 
@@ -8523,12 +8453,6 @@ async function init() {
   // New-tracks consent check (gated on Settings → Downloads → new tracks).
   setTimeout(() => checkForNewTracks(), 30000);
 
-  // Cloud sync: restore tokens, then auto-pull on launch (and periodically).
-  await gdriveRestore();
-  if (S().gdriveTokens?.refresh_token && S().syncAuto !== false) {
-    setTimeout(() => syncPull(true), 6000);
-    setInterval(() => syncNow(), 10 * 60 * 1000);
-  }
 }
 
 init().catch(e => console.error("[init] failed:", e));

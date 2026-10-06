@@ -1,0 +1,7 @@
+# LF everywhere: several tests match source text with "\n" and failed on
+# Windows checkouts converted to CRLF.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary

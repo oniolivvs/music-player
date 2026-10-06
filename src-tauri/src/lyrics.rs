@@ -31,7 +31,10 @@ fn safe_name(value: &str) -> String {
     let cleaned: String = value
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
+            // Unicode letters and digits stay: folding every Japanese or Korean
+            // character to '_' gave different songs the same file name, so one
+            // song's saved lyrics overwrote another's. Separators still go.
+            if ch.is_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
                 ch
             } else {
                 '_'
@@ -77,27 +80,42 @@ fn json3_to_lrc(content: &str) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn caption_choice<'a>(root: &'a Value, requested: &str) -> Option<(&'a str, &'a Value)> {
+/// Track in `root` for the requested language only (exact code, then a
+/// regional variant such as "en-US").
+fn caption_match<'a>(root: &'a Value, requested: &str) -> Option<(&'a str, &'a Value)> {
     let object = root.as_object()?;
     let preferred = requested.trim().to_ascii_lowercase();
-    if preferred != "original" {
-        if let Some((key, value)) = object
-            .iter()
-            .find(|(key, _)| key.to_ascii_lowercase() == preferred)
-        {
-            return Some((key, value));
-        }
-        if let Some((key, value)) = object.iter().find(|(key, _)| {
-            key.to_ascii_lowercase()
-                .starts_with(&format!("{preferred}-"))
-        }) {
-            return Some((key, value));
-        }
+    if preferred.is_empty() || preferred == "original" {
+        return None;
     }
     object
         .iter()
-        .find(|(key, _)| key.as_str() != "live_chat")
+        .find(|(key, _)| key.to_ascii_lowercase() == preferred)
+        .or_else(|| {
+            object
+                .iter()
+                .find(|(key, _)| key.to_ascii_lowercase().starts_with(&format!("{preferred}-")))
+        })
         .map(|(key, value)| (key.as_str(), value))
+}
+
+/// Requested language first in uploaded subtitles, then in automatic captions,
+/// and only then any uploaded subtitle. Previously any uploaded track won over
+/// an automatic one in the wanted language, and with no uploaded track the
+/// first automatic key — alphabetically a machine translation such as "ab" —
+/// was shown as the "original" lyrics.
+fn caption_choice<'a>(meta: &'a Value, requested: &str) -> Option<(&'a str, &'a Value)> {
+    let uploaded = meta.get("subtitles").unwrap_or(&Value::Null);
+    let automatic = meta.get("automatic_captions").unwrap_or(&Value::Null);
+    caption_match(uploaded, requested)
+        .or_else(|| caption_match(automatic, requested))
+        .or_else(|| {
+            uploaded
+                .as_object()?
+                .iter()
+                .find(|(key, _)| key.as_str() != "live_chat")
+                .map(|(key, value)| (key.as_str(), value))
+        })
 }
 
 fn youtube_caption(cfg: &YtCfg, id: &str, language: &str) -> Result<LyricsResult, String> {
@@ -110,14 +128,8 @@ fn youtube_caption(cfg: &YtCfg, id: &str, language: &str) -> Result<LyricsResult
     } else {
         language
     };
-    let (lang, choices) = caption_choice(meta.get("subtitles").unwrap_or(&Value::Null), requested)
-        .or_else(|| {
-            caption_choice(
-                meta.get("automatic_captions").unwrap_or(&Value::Null),
-                requested,
-            )
-        })
-        .ok_or_else(|| "no YouTube captions".to_string())?;
+    let (lang, choices) =
+        caption_choice(&meta, requested).ok_or_else(|| "no YouTube captions".to_string())?;
     let entries = choices
         .as_array()
         .ok_or_else(|| "invalid caption list".to_string())?;
@@ -316,7 +328,28 @@ pub async fn lyrics_lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::{json3_to_lrc, safe_name};
+    use super::{caption_choice, json3_to_lrc, safe_name};
+    use serde_json::json;
+
+    #[test]
+    fn non_latin_titles_keep_distinct_file_names() {
+        assert_eq!(safe_name("初音ミク - いますぐ輪廻 - ja"), "初音ミク - いますぐ輪廻 - ja");
+        assert_ne!(safe_name("重音テト - テトリス"), safe_name("初音ミク - ロキ"));
+        assert_eq!(safe_name("a/b\\c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn captions_prefer_the_requested_language_over_any_uploaded_track() {
+        let meta = json!({
+            "subtitles": { "en": [{ "ext": "vtt" }] },
+            "automatic_captions": { "ab": [{ "ext": "vtt" }], "fr": [{ "ext": "vtt" }] }
+        });
+        assert_eq!(caption_choice(&meta, "fr").map(|(lang, _)| lang), Some("fr"));
+        assert_eq!(caption_choice(&meta, "original").map(|(lang, _)| lang), Some("en"));
+        let auto_only = json!({ "automatic_captions": { "ab": [], "ja": [] } });
+        assert_eq!(caption_choice(&auto_only, "original").map(|(lang, _)| lang), None);
+        assert_eq!(caption_choice(&auto_only, "ja").map(|(lang, _)| lang), Some("ja"));
+    }
 
     #[test]
     fn json3_captions_become_synchronized_lrc() {

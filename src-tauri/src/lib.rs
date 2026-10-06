@@ -422,20 +422,11 @@ async fn source_version() -> Result<String, String> {
         let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
         return v["version"].as_str().map(str::to_string).ok_or_else(|| "no version field".into());
     }
-
-    let resp = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .get("https://api.github.com/repos/oniolivvs/music-player/releases/latest")
-        .set("User-Agent", "MusicPlayer")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let text = resp.into_string().map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    v["tag_name"]
-        .as_str()
-        .map(|s| s.trim_start_matches('v').to_string())
-        .ok_or_else(|| "no tag_name in release".into())
+    // Installed builds have no tree. Answering with the GitHub release tag here
+    // made the frontend believe it ran from source: it then called
+    // `self_update`, which can only open the releases page in the browser — so
+    // native updates never installed by themselves.
+    Err("installed build: no source tree".into())
 }
 
 /// Relaunch the app process — used right after a build replaced the binary.
@@ -483,10 +474,52 @@ fn platform_asset_match(name: &str) -> bool {
 /// host the payload: an attacker who could make one `invoke` call from the
 /// webview had silent code execution. Restrict it to the one prefix that can
 /// only be written to by this repository's own releases.
+const RELEASE_DOWNLOADS: &str = "https://github.com/oniolivvs/music-player/releases/download/";
+
 fn github_release_url(url: &str) -> bool {
-    const RELEASES: &str = "https://github.com/oniolivvs/music-player/releases/download/";
     // No traversal games in the tag/filename segments either.
-    url.starts_with(RELEASES) && !url.contains("..") && !url.contains('\\')
+    url.starts_with(RELEASE_DOWNLOADS) && !url.contains("..") && !url.contains('\\')
+}
+
+/// NSIS switches for an in-app update (see run_installer).
+#[cfg(target_os = "windows")]
+const NSIS_UPDATE_ARGS: [&str; 3] = ["/P", "/R", "/UPDATE"];
+
+/// `(tag, file name)` of one of this repository's release assets.
+fn release_asset_parts(url: &str) -> Option<(&str, &str)> {
+    let (tag, name) = url.strip_prefix(RELEASE_DOWNLOADS)?.split_once('/')?;
+    let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+    (plain(tag) && plain(name) && !tag.starts_with('.') && !name.starts_with('.')).then_some((tag, name))
+}
+
+/// GitHub's published digest ("sha256:<hex>") as lowercase hex.
+fn parse_sha256_digest(digest: &str) -> Option<String> {
+    let hex = digest.strip_prefix("sha256:")?.trim().to_ascii_lowercase();
+    (hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit())).then_some(hex)
+}
+
+/// SHA-256 GitHub records for this release asset. No published digest means no
+/// install: the installer runs unattended, so it must be the exact build CI
+/// uploaded, not a truncated or substituted file.
+fn release_asset_sha256(url: &str) -> Result<String, String> {
+    let (tag, name) = release_asset_parts(url).ok_or("unexpected release asset URL")?;
+    let release: serde_json::Value = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .get(&format!("https://api.github.com/repos/oniolivvs/music-player/releases/tags/{tag}"))
+        .set("User-Agent", "MusicPlayer")
+        .call()
+        .map_err(|e| format!("release lookup: {e}"))?
+        .into_json()
+        .map_err(|e| format!("release lookup: {e}"))?;
+    release["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|asset| asset["name"].as_str() == Some(name))
+        .and_then(|asset| asset["digest"].as_str())
+        .and_then(parse_sha256_digest)
+        .ok_or_else(|| "GitHub publishes no checksum for this installer".into())
 }
 
 /// `run_installer` only ever launches what `download_installer` saved — refuse
@@ -630,8 +663,13 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
             return Err("update downloads are restricted to github.com".into());
         }
         tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+            use sha2::{Digest, Sha256};
             use std::io::{Read, Write};
             use tauri::Emitter;
+            // Resolved natively, never taken from the webview: the installer then
+            // runs unattended, so only bytes matching GitHub's published digest
+            // may reach run_installer.
+            let expected = release_asset_sha256(&url)?;
             let raw = url.rsplit('/').next().unwrap_or("installer.bin");
             let name: String = raw
                 .chars()
@@ -644,6 +682,9 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
             let part = dir.join(format!("{name}.part"));
             let resp = ureq::AgentBuilder::new()
                 .timeout_connect(std::time::Duration::from_secs(20))
+                // Without a read timeout a stalled connection hung the update
+                // forever, and the busy flag kept every later attempt away.
+                .timeout_read(std::time::Duration::from_secs(60))
                 .build()
                 .get(&url)
                 .set("User-Agent", "MusicPlayer")
@@ -654,10 +695,12 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
             let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
             let mut buf = vec![0u8; 256 * 1024];
             let (mut done, mut last) = (0u64, -1i32);
+            let mut hasher = Sha256::new();
             loop {
                 let n = reader.read(&mut buf).map_err(|e| format!("download read: {e}"))?;
                 if n == 0 { break; }
                 out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                hasher.update(&buf[..n]);
                 done += n as u64;
                 if let Some(pct) = done.saturating_mul(100).checked_div(total) {
                     let pct = pct as i32;
@@ -672,6 +715,10 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
             if total > 0 && done < total {
                 let _ = std::fs::remove_file(&part);
                 return Err("download ended early".into());
+            }
+            if format!("{:x}", hasher.finalize()) != expected {
+                let _ = std::fs::remove_file(&part);
+                return Err("installer checksum mismatch: download discarded".into());
             }
             std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
             Ok(path.to_string_lossy().into_owned())
@@ -705,8 +752,12 @@ fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
             c.arg("/i").arg(&path).arg("/qn").arg("/norestart");
             c
         } else {
+            // Same switches as Tauri's own updater: /P = progress bar without a
+            // question, /R = relaunch the app once installed, /UPDATE = keep
+            // shortcuts and data. /S alone installed silently but left the app
+            // closed, so every update looked like a crash.
             let mut c = std::process::Command::new(&path);
-            c.arg("/S");
+            c.args(NSIS_UPDATE_ARGS);
             c
         };
         cmd.spawn().map_err(|e| format!("cannot start installer: {e}"))?;
@@ -945,4 +996,39 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::{github_release_url, parse_sha256_digest, release_asset_parts};
+
+    #[test]
+    fn release_asset_urls_resolve_to_tag_and_file() {
+        let url = "https://github.com/oniolivvs/music-player/releases/download/v0.22.157/MusicPlayer_0.22.157_x64-setup.exe";
+        assert!(github_release_url(url));
+        assert_eq!(release_asset_parts(url), Some(("v0.22.157", "MusicPlayer_0.22.157_x64-setup.exe")));
+        assert_eq!(release_asset_parts("https://github.com/someone/else/releases/download/v1/x.exe"), None);
+        assert_eq!(release_asset_parts("https://github.com/oniolivvs/music-player/releases/download/v1/a/b.exe"), None);
+        assert_eq!(release_asset_parts("https://github.com/oniolivvs/music-player/releases/download/v1/x.exe?y=1"), None);
+    }
+
+    #[test]
+    fn only_well_formed_sha256_digests_are_accepted() {
+        let hex = "ccdc714c59ac0".to_string() + &"0".repeat(51);
+        assert_eq!(parse_sha256_digest(&format!("sha256:{}", hex.to_uppercase())), Some(hex));
+        assert_eq!(parse_sha256_digest("sha1:abc"), None);
+        assert_eq!(parse_sha256_digest("sha256:xyz"), None);
+    }
+
+    #[test]
+    #[ignore = "network: downloads a published installer of this repository"]
+    fn published_installer_matches_its_release_digest() {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let url = "https://github.com/oniolivvs/music-player/releases/download/v0.22.156/MusicPlayer_0.22.156_x64-setup.exe";
+        let expected = super::release_asset_sha256(url).expect("digest");
+        let mut body = Vec::new();
+        ureq::get(url).call().expect("download").into_reader().read_to_end(&mut body).expect("read");
+        assert_eq!(format!("{:x}", Sha256::digest(&body)), expected);
+    }
 }

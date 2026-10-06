@@ -1,6 +1,7 @@
 const MAX_DETAIL = 4_000;
 const MAX_ENTRIES = 200;
 const MAX_PENDING = 100;
+const BENIGN_WINDOW_ERROR = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/;
 
 const clampText = (value, limit = MAX_DETAIL) => String(value ?? "").slice(0, limit);
 
@@ -79,6 +80,10 @@ export function createDiagnostics({ nativeInvoke, consoleRef = console, eventTar
   }
 
   const onError = event => {
+    // Browsers raise this when an observer callback resizes what it watches:
+    // delivery is only deferred to the next frame, nothing failed. Logged as an
+    // error it buried real faults in the diagnostics export.
+    if (BENIGN_WINDOW_ERROR.test(String(event?.message || ""))) return;
     const error = event?.error || event?.message || "Unhandled frontend error";
     record("error", "frontend", "window_error", detailPart(error));
   };

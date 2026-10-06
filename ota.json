@@ -1,5 +1,5 @@
 {
-  "version": "0.22.156",
+  "version": "0.22.157",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Adds opt-in synchronized lyrics and captions, local sidecar saving, language controls, and strict public-source recovery in Settings and Start Setup.",
+  "notes": "Updates now install by themselves (verified download, relaunch, waits until nothing plays), fixes lyrics overwriting each other on non-Latin titles, public source recovery for Japanese/Korean titles, deleting tracks whose file is already gone, and removes dead cloud-sync code.",
   "platforms": ["windows"],
   "min_native": "0.22.156"
 }

@@ -110,3 +110,24 @@ test("clear runs after pending writes and does not recreate the log", async () =
 
   assert.deepEqual(commands, ["diag_write", "diag_clear"]);
 });
+
+test("benign ResizeObserver notices are not logged as errors", async () => {
+  const native = [];
+  const target = new EventTarget();
+  const diagnostics = createDiagnostics({
+    nativeInvoke: async (cmd, args) => native.push({ cmd, args }),
+    consoleRef: { error() {}, warn() {} },
+    eventTarget: target,
+  });
+  diagnostics.start();
+  const benign = new Event("error");
+  benign.message = "ResizeObserver loop completed with undelivered notifications.";
+  target.dispatchEvent(benign);
+  const real = new Event("error");
+  real.message = "TypeError: x is undefined";
+  target.dispatchEvent(real);
+  await diagnostics.flush();
+  assert.equal(native.length, 1);
+  assert.match(native[0].args.detail, /x is undefined/);
+  diagnostics.stop();
+});
