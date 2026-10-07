@@ -74,7 +74,11 @@ jobs:
 
       - name: Submit to winget-pkgs
         if: env.WINGET_TOKEN != ''
-        uses: vedantmgoyal2009/winget-releaser@v2
+        # The author renamed the account (vedantmgoyal2009 → vedantmgoyal9) on
+        # 2026-10-07: the old path no longer resolves and failed "Set up job"
+        # even with the step skipped. Pinned to the v2 commit so a moved tag
+        # can never swap the code that receives WINGET_TOKEN.
+        uses: vedantmgoyal9/winget-releaser@c4f385af3b963eb724738ac0578b14eec7bebcc1 # v2
         with:
           identifier: oniolivvs.MusicPlayer
           installers-regex: '-setup\.exe$'
