@@ -19,10 +19,13 @@ test("every optional settings listener has its element in the markup", async () 
 
 test("Discord Rich Presence settings expose the Application ID and a test", async () => {
   const main = await read("../src/main.js");
-  for (const id of ["setRpc", "setRpcId", "setRpcTest", "setRpcDelay", "setRpcPause", "setRpcStatus"]) {
+  for (const id of ["setRpc", "setRpcId", "setRpcTarget", "setRpcTest", "setRpcDelay", "setRpcPause", "setRpcStatus"]) {
     assert.match(main, new RegExp(`id="${id}"`), `${id} is missing from the settings markup`);
   }
   assert.match(main, /const RPC_APP_ID = \/\^\\d\{17,20\}\$\//);
+  // With Discord and PTB open on two accounts, presence must go where chosen.
+  assert.match(main, /target: S\(\)\.rpcTarget \|\| "auto"/);
+  assert.match(main, /invoke\("rpc_clients", \{ clientId: id \}\)/);
 });
 
 // The progress loop stops while the window is hidden or the bar is dragged;

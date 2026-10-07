@@ -37,6 +37,7 @@ const DEFAULTS = {
   notifyOnChange: true,
   rpcEnabled: false,
   rpcClientId: "",
+  rpcTarget: "auto",     // Discord app that shows the presence: auto (regular first) | discord | ptb | canary | all
   preloadNext: true,     // gapless: pre-queue the next track
   resumePlayback: true,  // on launch, restore the last track (paused) at its saved position
   resumeDownloads: true, // on launch, re-queue downloads that hadn't finished (yt-dlp continues .part files)

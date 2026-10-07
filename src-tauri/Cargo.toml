@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.22.158"
+version = "0.22.159"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -19,7 +19,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 # Open URLs/files via the Windows default handler.
 tauri-plugin-opener = "2"
-discord-rich-presence = "0.2"
+# Discord Rich Presence speaks Discord's local IPC directly (src/rpc.rs): the
+# discord-rich-presence crate always used the first pipe, i.e. the wrong
+# client whenever Discord and PTB ran side by side.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Native audio: decode (mp3/flac/wav/vorbis/…) + output to the system device.
@@ -62,7 +64,7 @@ reqwest = { version = "0.12", default-features = false }
 # the system "Now playing" surface.
 [target.'cfg(target_os = "windows")'.dependencies]
 souvlaki = { version = "0.8", default-features = false }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_ToolHelp"] }
 # Launch at login through the Windows run key.
 tauri-plugin-autostart = "2"
 

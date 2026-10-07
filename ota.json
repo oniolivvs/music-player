@@ -1,5 +1,5 @@
 {
-  "version": "0.22.158",
+  "version": "0.22.159",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixes the progress bar freezing after minimizing the window or seeking, the Now Playing resize handle that could not be grabbed, the Now Playing panel sitting 4px lower than its neighbours, and brings back Discord Rich Presence settings (Application ID, test button, delays).",
+  "notes": "Import becomes Song or Playlist (choose the target playlist for a song); playlist settings move to its right-click menu; Discord Rich Presence picks the right Discord app (regular, PTB, Canary or all) and no longer fails on long titles; the player lines up with every panel and both resize handles span the full height; launching the app again brings its window back.",
   "platforms": ["windows"],
-  "min_native": "0.22.156"
+  "min_native": "0.22.159"
 }

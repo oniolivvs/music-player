@@ -914,9 +914,17 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
 pub fn run() {
     // Keep one desktop process per user session. A named OS mutex rejects a
     // second launch before Tauri creates another window or audio controller.
+    // A second launch brings the running window forward, or replaces an
+    // instance stuck without a window (see single_instance::hand_off).
     let _instance_guard = match single_instance::acquire() {
         Some(guard) => guard,
-        None => return,
+        None => match single_instance::hand_off() {
+            single_instance::HandOff::TakeOver => match single_instance::acquire_after_takeover() {
+                Some(guard) => guard,
+                None => return,
+            },
+            single_instance::HandOff::Focused | single_instance::HandOff::Starting => return,
+        },
     };
     std::panic::set_hook(Box::new(|info| {
         let msg = match info.payload().downcast_ref::<&'static str>() {
@@ -989,7 +997,7 @@ pub fn run() {
             library::find_duplicate_files, library::confirm_delete_duplicates,
             store::store_load, store::store_save,
             transfer::backup_export, transfer::backup_import,
-            rpc::rpc_update, rpc::rpc_clear,
+            rpc::rpc_update, rpc::rpc_clear, rpc::rpc_clients,
             importer::import_spotify,
             diagnostics::diag_write, diagnostics::diag_tail,
             diagnostics::diag_export, diagnostics::diag_clear

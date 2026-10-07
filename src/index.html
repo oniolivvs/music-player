@@ -14,7 +14,7 @@
     <button id="navHistory" class="nav-item" title="Recently played"><span class="ni-ico" data-ic="clock"></span><span class="ni-lbl">Recent</span></button>
     <button id="navStats" class="nav-item" title="Listening stats"><span class="ni-ico" data-ic="disc"></span><span class="ni-lbl">Stats</span></button>
     <button id="navYtFeed" class="nav-item" title="YouTube home feed"><span class="ni-ico" data-ic="globe"></span><span class="ni-lbl">YouTube</span></button>
-    <button id="importPlaylistBtn" class="nav-item nav-import" title="Import a playlist"><span class="ni-ico" data-ic="upload"></span><span class="ni-lbl">Import playlist</span></button>
+    <button id="importPlaylistBtn" class="nav-item nav-import" title="Import a song or a playlist"><span class="ni-ico" data-ic="upload"></span><span class="ni-lbl">Import</span></button>
     <div class="top-drop-wrap">
       <button id="navSources" class="nav-item" title="Music sources (folders)"><span class="ni-ico" data-ic="folder"></span><span class="ni-lbl">Sources</span></button>
       <div id="srcDrop" class="top-drop" hidden>
@@ -426,12 +426,25 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
   <div id="pickModal" class="modal-backdrop" hidden>
     <div class="modal dlg">
       <div class="modal-head">
-        <h2>Import a playlist</h2>
+        <h2>Import</h2>
         <button id="pickClose" class="icon-btn" title="Close" data-ic="x"></button>
       </div>
       <div class="modal-body">
-        <button class="pick-opt" id="pickYt"><span class="bic" data-ic="globe"></span><span class="pick-txt"><b>From YouTube</b><span class="pick-sub">Search, or paste a YouTube / YT Music playlist link</span></span></button>
-        <button class="pick-opt" id="pickSp"><span class="bic" data-ic="link"></span><span class="pick-txt"><b>From Spotify or another app</b><span class="pick-sub">Paste a Spotify link, or a list of songs</span></span></button>
+        <div class="pick-kind" role="tablist" aria-label="What to import">
+          <button class="pick-kind-btn on" data-kind="song" role="tab" aria-selected="true"><span data-ic="note"></span> Song</button>
+          <button class="pick-kind-btn" data-kind="playlist" role="tab" aria-selected="false"><span data-ic="list"></span> Playlist</button>
+        </div>
+        <div id="pickSong" class="pick-pane" role="tabpanel">
+          <div class="imp-row"><label class="imp-lbl" for="songUrl">Link</label><input id="songUrl" class="text-in" type="text" placeholder="YouTube video link" autocomplete="off" spellcheck="false"></div>
+          <div class="imp-row"><label class="imp-lbl" for="songTarget">Add to</label><select id="songTarget" class="sel"></select></div>
+          <label class="pick-check"><input type="checkbox" id="songSave"> Save locally (mp3)</label>
+          <div id="songStatus" class="set-hint" aria-live="polite"></div>
+          <div class="pick-actions"><button id="songGo" class="btn">Add song</button></div>
+        </div>
+        <div id="pickPlaylist" class="pick-pane" role="tabpanel" hidden>
+          <button class="pick-opt" id="pickYt"><span class="bic" data-ic="globe"></span><span class="pick-txt"><b>From YouTube</b><span class="pick-sub">Search, or paste a YouTube / YT Music playlist link</span></span></button>
+          <button class="pick-opt" id="pickSp"><span class="bic" data-ic="link"></span><span class="pick-txt"><b>From Spotify or another app</b><span class="pick-sub">Paste a Spotify link, or a list of songs</span></span></button>
+        </div>
       </div>
     </div>
   </div>

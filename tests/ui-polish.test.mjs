@@ -11,7 +11,12 @@ test("playlist sidebar has no legacy import button", async () => {
 test("hot bar owns playlist import and Share is absent from the UI", async () => {
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
-  assert.match(html, /id="importPlaylistBtn"[^>]*>[\s\S]*?Import playlist/);
+  // One "Import" entry: a song (into the library or a chosen playlist) or a playlist.
+  assert.match(html, /id="importPlaylistBtn"[^>]*>[\s\S]*?<span class="ni-lbl">Import<\/span>/);
+  assert.match(html, /data-kind="song"[\s\S]*data-kind="playlist"/);
+  assert.match(html, /id="songTarget"/);
+  assert.match(main, /<option value="">Library only<\/option>/);
+  assert.match(main, /<option value="__new">New playlist…<\/option>/);
   assert.doesNotMatch(html, /id="navShare"|id="shareModal"|>Share<\/span>/);
   assert.doesNotMatch(main, /uiNavShare|#navShare/);
 });
@@ -140,7 +145,9 @@ test("playlist storage supports folder selection, physical moves, and shared-fil
   assert.match(html, /id="dlgSaveLocal"/);
   assert.match(main, /function pickMusicDirectory/);
   assert.match(main, /data-move="1"/);
-  assert.match(main, /id="plMoveBtn"/);
+  // Moving files is a playlist setting: it lives in the playlist's right-click menu.
+  assert.match(main, /data-a="move">\$\{ic\(IC\.folder\)\}Move local files…/);
+  assert.doesNotMatch(main, /id="plMoveBtn"|id="plStyleBtn"|id="plUrlBtn"/);
   assert.match(main, /invoke\("move_audio_file"/);
   assert.match(main, /PL\.replaceMany\(pathMap\)/);
   assert.match(main, /Smart pointer deduplication/);
@@ -198,7 +205,9 @@ test("every layout keeps the hot bar full width and aligns Now Playing below it"
   // The Now Playing handle lives 9px outside the drawer: a plain overflow
   // hidden clipped it away, so only the sidebar could be resized.
   assert.match(css, /\.np-drawer\s*\{[^}]*overflow:\s*clip;\s*overflow-clip-margin:\s*9px/s);
-  assert.match(css, /#npResize\s*\{[^}]*left:\s*-9px/s);
+  assert.match(css, /#npResize\s*\{[^}]*left:\s*-9px;\s*top:\s*-1px;\s*bottom:\s*-1px/s);
+  // The player shares the 8px frame of the nav bar and panels in artwork mode.
+  assert.match(css, /body\.artwork-theme\.has-bg \.player\s*\{\s*margin:\s*0 calc\(8px \+ var\(--safe-right, 0px\)\) calc\(8px \+ var\(--safe-bottom, 0px\)\) calc\(8px \+ var\(--safe-left, 0px\)\)/s);
   assert.match(css, /\.np-drawer\s*\{[^}]*top:\s*calc\(var\(--nav-bottom,\s*56px\)\s*\+\s*var\(--shell-gap,\s*12px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*right:\s*calc\(8px\s*\+\s*var\(--safe-right,\s*0px\)\)/s);
   assert.match(css, /body\.artwork-theme\.has-bg \.np-drawer\s*\{[^}]*bottom:\s*calc\(var\(--player-top,\s*118px\)\s*\+\s*8px\)/s);

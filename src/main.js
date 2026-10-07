@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.158";
+const SRC_VERSION = "0.22.159";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2498,14 +2498,17 @@ function openPlaylistCtx(x, y, id) {
   if (!pl) return;
   const fw = followFor(id);
   const menu = $("#ctxMenu");
+  // Everything that configures the playlist lives here; its header keeps only
+  // what adds or removes songs (Save locally, Clean duplicates).
   menu.innerHTML =
     `<div class="ctx-item" data-a="open">${ic(IC.note)}Open</div>` +
     `<div class="ctx-item" data-a="rename">${ic(IC.pencil)}Rename…</div>` +
-    `<div class="ctx-item" data-a="customize">${ic(IC.image)}Customize appearance…</div>` +
+    `<div class="ctx-item" data-a="customize">${ic(IC.image)}Appearance (images, banner, icons)…</div>` +
     `<div class="ctx-item" data-a="cover">${ic(IC.image)}Set cover…</div>` +
     (pl.image ? `<div class="ctx-item" data-a="uncover">${ic(IC.x)}Remove cover</div>` : "") +
+    `<div class="ctx-item" data-a="refresh">${ic(IC.refresh)}Refresh titles &amp; covers</div>` +
     `<div class="ctx-item" data-a="follow">${ic(IC.repeat)}${fw ? "Unfollow" : "Follow…"}</div>` +
-    `<div class="ctx-item" data-a="save">${ic(IC.save)}Save locally</div>` +
+    (fw ? `<div class="ctx-item" data-a="check">${ic(IC.search)}Check for new tracks now</div>` : "") +
     `<div class="ctx-item" data-a="folder">${ic(IC.folder)}${pl.downloadDir ? "Change mp3 folder…" : "Choose mp3 folder…"}</div>` +
     (pl.paths.some(localFileFor) ? `<div class="ctx-item" data-a="move">${ic(IC.folder)}Move local files…</div>` : "") +
     `<div class="ctx-sep"></div>` +
@@ -2526,7 +2529,15 @@ function openPlaylistCtx(x, y, id) {
     }
     else if (a === "uncover") { PL.setVisuals(id, { image: "", coverMode: "first" }); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover removed"); }
     else if (a === "follow") { if (fw) unfollowPlaylist(id); else followPlaylistFlow(id); }
-    else if (a === "save") downloadPlaylist(id);
+    else if (a === "refresh") { openPlaylist(id); await refreshActiveViewAction(); }
+    else if (a === "check") {
+      const f = followFor(id);
+      if (!f) return;
+      flash(`Checking “${f.title}”…`);
+      const n = await checkFollow(f, true);
+      saveFollows();
+      if (n) { renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); }
+    }
     else if (a === "folder") { if (await choosePlaylistDirectory(id)) { renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Playlist folder saved"); } }
     else if (a === "move") await moveLocalFiles(pl.paths, id);
     else if (a === "del") {
@@ -2862,44 +2873,14 @@ function openPlaylist(id) {
   const fw = followFor(id);
   setViewHead({
     icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} unavailable (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
+    // Only what puts songs in or takes them out stays here. Appearance,
+    // refresh, follow, folder and file moves live in the playlist's right-click
+    // menu, and adding a song goes through Import → Song.
     actions:
-      `<button id="plStyleBtn" class="btn-line sm" title="Banner, cover and playlist icons">${ic(IC.image)} Appearance</button>` +
-      `<button id="plRefreshBtn" class="btn-line sm" title="Refresh titles, covers, and icons">${ic(IC.refresh)} Refresh</button>` +
-      `<button id="plUrlBtn" class="btn-line sm" title="Add one YouTube video">${ic(IC.link)} Add video</button>` +
-      `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
-      // Only shown while following: check THIS playlist right now, without
-      // waiting for the periodic sweep or going through Settings, which checks
-      // every follow at once.
-      // A spinning magnifier meant nothing. The refresh arrow is the icon whose
-      // rotation reads as "working", and it only spins while the check runs.
-      (fw ? `<button id="plCheckBtn" class="btn-line sm" title="${esc(`Check “${fw.title}” for new tracks now`)}">${ic(IC.search)} Check now</button>` : "") +
       (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
-      `<button id="plFolderBtn" class="btn-line sm" title="${esc(pl.downloadDir || "Choose where this playlist stores mp3 files")}">${ic(IC.folder)} ${pl.downloadDir ? "Folder" : "Choose folder"}</button>` +
-      (nLocalFiles ? `<button id="plMoveBtn" class="btn-line sm" title="Physically move this playlist's local files">${ic(IC.folder)} Move files</button>` : "") +
       `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
   });
-  $("#plStyleBtn")?.addEventListener("click", () => openPlaylistVisuals(id));
-  $("#plRefreshBtn")?.addEventListener("click", refreshActiveViewAction);
-  $("#plUrlBtn")?.addEventListener("click", () => addByUrl(id));
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
-  $("#plFolderBtn")?.addEventListener("click", async () => { if (await choosePlaylistDirectory(id)) openPlaylist(id); });
-  $("#plMoveBtn")?.addEventListener("click", () => { void moveLocalFiles(pl.paths, id); });
-  $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
-  $("#plCheckBtn")?.addEventListener("click", async (e) => {
-    const f = followFor(id);
-    if (!f) return;
-    const btn = e.currentTarget;
-    btn.innerHTML = `${ic(IC.refresh)} Checking…`;
-    btn.classList.add("spinning"); btn.disabled = true;
-    try {
-      const n = await checkFollow(f, true);
-      saveFollows();
-      if (n) { renderPlaylists(); openPlaylist(id); }
-    } finally {
-      btn.classList.remove("spinning"); btn.disabled = false;
-      btn.innerHTML = `${ic(IC.search)} Check now`;
-    }
-  });
   $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
   void applyPlaylistBanner(pl);
@@ -2910,34 +2891,86 @@ function openPlaylist(id) {
   }).filter(Boolean));
 }
 
-// Music import is deliberately single-video. Playlist URLs belong to the
-// dedicated Import playlist flow, where follow/download intent is explicit.
-async function addByUrl(plId) {
-  if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
-  const url = await askText("Add one video", { placeholder: "YouTube video URL", ok: "Add video" });
-  if (!url) return;
-  flash("Fetching…");
+// Import → Song: one YouTube video, into the library alone or into a chosen
+// playlist. Playlist URLs belong to Import → Playlist, where follow/download
+// intent is explicit.
+async function addSongFromUrl(url, target, saveLocally) {
+  const res = await invoke("yt_playlist", { url: normalizeSingleVideoUrl(url) });
+  const t = onlineFromResult(singleTrackFromResult(res));
+  onlineIndex.set(t.path, t);
+  // Same song = same video id: a playlist or library holding the saved
+  // "… [id].mp3" already has it, and comparing raw paths added a streamed
+  // duplicate next to the local file.
+  const vid = ytId(t.path);
+  const same = path => path === t.path || videoIdOf(path) === vid;
+  const local = libraryLocalFor(vid);
+  let added, where;
+  if (target) {
+    const pl = PL.getPlaylists().find(p => p.id === target);
+    if (!pl) throw new Error("that playlist no longer exists");
+    added = !pl.paths.some(same);
+    if (added) PL.addToPlaylist(target, local || t.path);
+    where = `“${pl.name}”`;
+  } else {
+    added = !local && !library.some(item => same(item.path));
+    // Explicitly brought back: lift an earlier "deleted, never re-add" memory
+    // (unsuppress also puts the track back in the library).
+    if (suppressedSet.has(vid)) await unsuppress(vid);
+    if (added && !library.some(item => same(item.path))) library = library.concat(t);
+    where = "your library";
+  }
+  if (adoptPlaylistOnline() || !target) await saveLibrary();
+  await saveOnline();
+  if (added && S().autoLyrics) queueLyricsLookup(t, t.path);
+  renderPlaylists();
+  if (active.type === "playlist" && active.id === target) openPlaylist(target);
+  else if (active.type === "library") refreshView();
+  // Only a track that still needs a file: already local or known unavailable
+  // ones are left alone.
+  if (saveLocally) { const todo = downloadablePaths([t.path]); if (todo.length) downloadTracks(todo); }
+  return { track: t, added, where };
+}
+
+function setImportKind(kind) {
+  document.querySelectorAll(".pick-kind-btn").forEach(btn => {
+    const on = btn.dataset.kind === kind;
+    btn.classList.toggle("on", on); btn.setAttribute("aria-selected", String(on));
+  });
+  $("#pickSong").hidden = kind !== "song";
+  $("#pickPlaylist").hidden = kind !== "playlist";
+  if (kind === "song") setTimeout(() => $("#songUrl")?.focus(), 0);
+}
+// The open playlist is preselected: importing from inside a playlist means "here".
+function fillSongTargets(selectedId = active.type === "playlist" ? active.id : "") {
+  $("#songTarget").innerHTML =
+    `<option value="">Library only</option>` +
+    PL.getPlaylists().map(p => `<option value="${esc(p.id)}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`).join("") +
+    `<option value="__new">New playlist…</option>`;
+}
+function songStatus(text, error = false) {
+  const el = $("#songStatus");
+  el.textContent = text; el.classList.toggle("set-error", error);
+}
+async function submitSong() {
+  if (!IS_NATIVE) { songStatus("Adding a song needs the Windows app", true); return; }
+  const url = $("#songUrl").value.trim();
+  if (!url) { songStatus("Paste a YouTube video link first.", true); return; }
+  let target = $("#songTarget").value;
+  if (target === "__new") {
+    const pl = await createPlaylistFlow();
+    if (!pl) { fillSongTargets(); return; }
+    target = pl.id; fillSongTargets(target);
+  }
+  const go = $("#songGo");
+  go.disabled = true; songStatus("Fetching…");
   try {
-    const videoUrl = normalizeSingleVideoUrl(url);
-    const res = await invoke("yt_playlist", { url: videoUrl });
-    const tracks = [onlineFromResult(singleTrackFromResult(res))];
-    tracks.forEach(t => onlineIndex.set(t.path, t));
-    const added = [];
-    for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) added.push(t); }
-    const n = added.length;
-    if (S().autoLyrics) for (const t of added) queueLyricsLookup(t, t.path);
-    saveOnline();
-    renderPlaylists();
-    if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
-    flash(n ? `Added ${n} track${n === 1 ? "" : "s"}` : "Already in the playlist");
-    // Offered right away: adding by URL then having to reopen the playlist and
-    // click "Save locally" for the same intent is one step too many.
-    // Only genuinely downloadable tracks are offered — not the ones that
-    // already have a local file, nor those already known unavailable.
-    // Only what was actually ADDED — passing every track at the URL made the
-    // prompt say "Save 50 new tracks" when 49 were already in the playlist.
-    if (n) await offerDownloadNew(added.map(t => t.path), "playlist");
-  } catch (e) { flash(`Could not add: ${e}`); }
+    const result = await addSongFromUrl(url, target, $("#songSave").checked);
+    songStatus(result.added ? `Added “${result.track.title}” to ${result.where}.` : `Already in ${result.where}.`);
+    flash(result.added ? `Added to ${result.where}` : `Already in ${result.where}`);
+    $("#songUrl").value = "";
+  } catch (e) {
+    songStatus(`Could not add: ${String(e).slice(0, 140)}`, true);
+  } finally { go.disabled = false; }
 }
 
 // Offers to save what was just added. Never automatic: an import of 200 tracks
@@ -2990,7 +3023,14 @@ async function unfollowPlaylist(id) {
 // song list (title + artist) — from a public Spotify link (backend scrape) or a
 // pasted "Artist - Title" list — match each track on YouTube, and collect them
 // into a new local playlist (optionally downloaded to mp3).
-function openImportPick() { toggleSidebar(false); $("#pickModal").hidden = false; }
+function openImportPick(kind = "song") {
+  toggleSidebar(false);
+  fillSongTargets();
+  $("#songUrl").value = ""; songStatus("");
+  $("#songSave").checked = !!S().autoSaveImports;
+  $("#pickModal").hidden = false;
+  setImportKind(kind);
+}
 let _extBusy = false, _extCancel = false;
 function openExtImport() {
   if (!IS_NATIVE) { flash("Importing needs the native app"); return; }
@@ -6136,8 +6176,11 @@ function rpcPayload(t, isPlaying, posOverride) {
     clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying,
     art: rpcArtwork(t), durationSecs: t?.duration_secs || 0,
     positionSecs: posOverride != null ? posOverride : wallPos(),
+    target: S().rpcTarget || "auto",
   };
 }
+const RPC_APP_LABEL = { discord: "Discord", ptb: "Discord PTB", canary: "Discord Canary" };
+const rpcClientLabel = c => `${RPC_APP_LABEL[c.kind] || "Discord"}${c.user ? ` (${c.user})` : ""}`;
 async function updateRPC(t, isPlaying, posOverride) {
   if (!IS_NATIVE || !S().rpcEnabled || !S().rpcClientId) return;
   try { await invoke("rpc_update", rpcPayload(t, isPlaying, posOverride)); }
@@ -6161,11 +6204,14 @@ async function testRPC() {
   setRpcStatus("Contacting Discord…");
   const t = curIndex >= 0 ? (trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex])) : null;
   try {
-    await invoke("rpc_update", rpcPayload(t || { title: "Music Player", artist: "Ready" }, !!(t && playing)));
-    if (!S().rpcEnabled) { await clearRPC(); setRpcStatus("Discord answered. Tick “Show on Discord” to display your tracks."); }
-    else setRpcStatus("Connected — your Discord profile now shows what you play.");
+    const running = await invoke("rpc_clients", { clientId: id });
+    const shown = await invoke("rpc_update", rpcPayload(t || { title: "Music Player", artist: "Ready" }, !!(t && playing)));
+    const where = (Array.isArray(shown) ? shown : []).map(rpcClientLabel).join(" + ") || "Discord";
+    const found = running.map(rpcClientLabel).join(", ");
+    if (!S().rpcEnabled) { await clearRPC(); setRpcStatus(`Found: ${found}. Tick “Show on Discord” to display your tracks on ${where}.`); }
+    else setRpcStatus(`Shown on ${where}. Running: ${found}.`);
   } catch (e) {
-    setRpcStatus(`Discord did not answer (${String(e).slice(0, 120)}). Is the Discord app open on this PC?`, true);
+    setRpcStatus(`${String(e).slice(0, 140)}. Is the chosen Discord app open on this PC?`, true);
   }
 }
 
@@ -6818,7 +6864,7 @@ function openSettings() {
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
       <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
       <div class="set-row"><label>Playlists section</label><input type="checkbox" id="setUiPlaylists" ${s.uiPlaylists ? "checked" : ""}></div>
-      <div class="set-row"><label>Import playlist button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Import button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn !== false ? "checked" : ""}></div>
       <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
       <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
       <div class="set-row"><label>Button labels</label>
@@ -6905,6 +6951,8 @@ function openSettings() {
       <div class="set-row"><label for="setRpc">Show on Discord</label><input type="checkbox" id="setRpc" ${s.rpcEnabled ? "checked" : ""}></div>
       <div class="set-row provider-secret-row"><label for="setRpcId">Application ID</label>
         <span class="secret-field"><input type="text" id="setRpcId" class="text-in" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="17–20 digits" value="${esc(s.rpcClientId || "")}"><button type="button" class="btn-line sm" id="setRpcTest">Test</button></span></div>
+      <div class="set-row"><label for="setRpcTarget">Discord app</label><select id="setRpcTarget" class="sel sm-sel wide">${[["auto", "Automatic (regular Discord first)"], ["discord", "Discord"], ["ptb", "Discord PTB"], ["canary", "Discord Canary"], ["all", "Every running Discord"]].map(([value, label]) => `<option value="${value}" ${(s.rpcTarget || "auto") === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
+      <div class="set-hint">Each Discord app (regular, PTB, Canary) can be signed in to a different account: choose the one your presence should appear on. Test lists what is running.</div>
       <div class="set-row"><label for="setRpcDelay">Wait before showing a new track <span class="set-sub">(seconds · 0–60)</span></label><input type="number" id="setRpcDelay" class="num-in" min="0" max="60" step="1" value="${Math.max(0, Number(s.rpcDelay) || 0)}"></div>
       <div class="set-row"><label for="setRpcPause">Remove after pausing <span class="set-sub">(seconds · 0 = at once)</span></label><input type="number" id="setRpcPause" class="num-in" min="0" max="3600" step="5" value="${Math.max(0, Number(s.rpcPauseClear) || 0)}"></div>
       <div class="set-hint" id="setRpcStatus">${s.rpcClientId ? "Press Test to check the connection with Discord." : "Enter your Application ID, then press Test."}</div>
@@ -7323,6 +7371,11 @@ function openSettings() {
     setRpcStatus("Saved — press Test to check the connection with Discord.");
   });
   $("#setRpcTest")?.addEventListener("click", testRPC);
+  $("#setRpcTarget")?.addEventListener("change", e => {
+    SETTINGS.setSetting("rpcTarget", e.target.value);
+    // The previous client keeps a stale presence otherwise.
+    clearRPC().then(() => { if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
+  });
   $("#setFollowIv").addEventListener("change", e => {
     SETTINGS.setSetting("followInterval", e.target.value);
     $("#setFollowCustomRow").hidden = e.target.value !== "custom";
@@ -8346,7 +8399,7 @@ async function init() {
     }
   });
 
-  $("#importPlaylistBtn")?.addEventListener("click", openImportPick);
+  $("#importPlaylistBtn")?.addEventListener("click", () => openImportPick());
   $("#npLyricsBtn")?.addEventListener("click", () => {
     lyricsState.open = !lyricsState.open;
     renderLyrics();
@@ -8360,6 +8413,9 @@ async function init() {
   $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);
   $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
   $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
+  document.querySelectorAll(".pick-kind-btn").forEach(btn => btn.addEventListener("click", () => setImportKind(btn.dataset.kind)));
+  $("#songGo").addEventListener("click", submitSong);
+  $("#songUrl").addEventListener("keydown", e => { if (e.key === "Enter") submitSong(); });
   $("#pickSp").addEventListener("click", () => { $("#pickModal").hidden = true; openExtImport(); });
   $("#extClose").addEventListener("click", () => { if (!_extBusy) $("#extModal").hidden = true; });
   $("#extModal").addEventListener("click", e => { if (e.target.id === "extModal" && !_extBusy) $("#extModal").hidden = true; });
