@@ -108,7 +108,9 @@ test("playlist automation defaults are configurable and applied during import", 
   const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
   const settings = await readFile(new URL("../src/settings.js", import.meta.url), "utf8");
   assert.match(settings, /autoFollowImports:\s*false[\s\S]*autoDownloadFollows:\s*false/);
-  for (const id of ["setAutoFollow", "setFollowAutoDl", "setFollowIv", "setNewTracks", "setResumeDl"]) assert.match(main, new RegExp(`id="${id}"`));
+  // Their Settings rows lived in the tab-less "library" pane and were removed
+  // as unreachable (2026-10-08); the saved defaults still apply on import.
+  for (const id of ["setAutoFollow", "setFollowAutoDl", "setFollowIv", "setNewTracks", "setResumeDl"]) assert.doesNotMatch(main, new RegExp(`id="${id}"`));
   assert.match(main, /alreadyFollowed \|\| S\(\)\.autoFollowImports/);
   assert.match(main, /autoDownload: \$\("#impDl"\)\.checked \|\| S\(\)\.autoDownloadFollows/);
 });

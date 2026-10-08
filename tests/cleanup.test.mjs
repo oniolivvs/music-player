@@ -19,11 +19,12 @@ import {
   buildCleanupSummary,
 } from "../src/cleanup.mjs";
 
-test("cleanup playlist selector has an accessible name", async () => {
+// The cleanup selector sat in the tab-less "library" Settings pane, removed as
+// unreachable (2026-10-08): its only reader must keep tolerating its absence.
+test("cleanup scope falls back to every playlist without its selector", async () => {
   const source = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
-  const selector = source.match(/<select id="setCleanupPlaylist"[^>]*>/)?.[0];
-  assert.ok(selector);
-  assert.match(selector, /\baria-label="Playlist to clean"/);
+  assert.doesNotMatch(source, /<select id="setCleanupPlaylist"/);
+  assert.match(source, /\$\("#setCleanupPlaylist"\)\?\.value \|\| "__all"/);
 });
 
 test("cleanup layout keeps all delete actions together and playlist scope separate", () => {

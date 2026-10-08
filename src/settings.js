@@ -35,6 +35,7 @@ const DEFAULTS = {
   shuffleDefault: false,
   repeatDefault: "off", // off | all | one — the repeat button persists here
   notifyOnChange: true,
+  trackClick: "single",  // play a track row on "single" click (default) or "double" click
   rpcEnabled: false,
   rpcClientId: "",
   rpcTarget: "auto",     // Discord app that shows the presence: auto (regular first) | discord | ptb | canary | all

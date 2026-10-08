@@ -36,3 +36,14 @@ test("the progress loop restarts after hiding the window, a seek, or any poll", 
   assert.match(main, /if \(!_progRaf && !seeking && !document\.hidden\) startProgressLoop\(\);/);
   assert.match(main, /async function commitSeekSeconds[\s\S]{0,400}if \(playing\) startProgressLoop\(\);/);
 });
+
+// One click plays by default; double-click stays available in Settings.
+test("track rows play on one click unless double-click is chosen", async () => {
+  const [main, settings] = await Promise.all([read("../src/main.js"), read("../src/settings.js")]);
+  assert.match(settings, /trackClick: "single"/);
+  assert.match(main, /id="setTrackClick"/);
+  assert.match(main, /const playsOnSingleClick = \(\) => IS_TOUCH \|\| S\(\)\.trackClick !== "double";/);
+  // The 2nd click of a double-click must not restart the song in one-click mode.
+  assert.match(main, /if \(e\.detail > 1\) return;/);
+  assert.match(main, /addEventListener\("dblclick", \(e\) => \{\s*if \(playsOnSingleClick\(\)\) return;/);
+});

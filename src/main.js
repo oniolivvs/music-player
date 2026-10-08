@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.159";
+const SRC_VERSION = "0.22.160";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1985,6 +1985,7 @@ function renderTracks(list, presorted = false) {
   proxyCovers(host);
 }
 
+const playsOnSingleClick = () => IS_TOUCH || S().trackClick !== "double";
 function wireTrackList() {
   const host = $("#trackList");
   // Virtualized lists re-slice their window on scroll (one rAF max in flight).
@@ -2007,12 +2008,21 @@ function wireTrackList() {
     }
     const row = e.target.closest(".track");
     if (row) {
-      // Touch: tap plays immediately; long-press opens the context menu (below).
-      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playInScope(rowIdx(row, row.dataset.idx)); return; }
-      rowClick(e, rowIdx(row, row.dataset.idx), row.dataset.path);
+      const idx = rowIdx(row, row.dataset.idx);
+      // Touch always plays on tap (long-press opens the menu, below). Desktop
+      // follows Settings → Playback: one click by default, or double-click.
+      // Ctrl/Shift+click keep selecting several tracks in both modes.
+      if (playsOnSingleClick() && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        if (e.detail > 1) return; // the 2nd click of a double-click must not restart the track
+        if (!IS_TOUCH) rowClick(e, idx, row.dataset.path); // keeps the Shift+click anchor
+        playInScope(idx);
+        return;
+      }
+      rowClick(e, idx, row.dataset.path);
     }
   });
   host.addEventListener("dblclick", (e) => {
+    if (playsOnSingleClick()) return; // the first click already started it
     if (e.target.closest("[data-more]")) return;
     const row = e.target.closest(".track");
     if (row) playInScope(rowIdx(row, row.dataset.idx));
@@ -6892,44 +6902,9 @@ function openSettings() {
       <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
       <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
-    </section>
-    <section class="set-pane" data-pane="playback">
-    <div class="set-group"><div class="set-title">Playback</div>
-      <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
-      <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
-      <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
-      <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
-      <div class="set-row"><label>Shuffle stays inside search results</label><input type="checkbox" id="setShufSearch" ${s.shuffleSearchOnly ? "checked" : ""}></div>
-      <div class="set-hint">Picking a song from filtered results starts the whole playlist afterwards (default OFF). Tick this to keep the shuffle strictly inside the matches.</div>
-      <div class="set-row"><label>Resume where I left off</label><input type="checkbox" id="setResume" ${s.resumePlayback ? "checked" : ""}></div>
-      <div class="set-hint">On launch, reopen the last track paused at the spot you stopped — press play to continue.</div>
-      <div class="set-row"><label>Keep a listening history <span class="set-sub">(0 = off · up to 1000)</span></label><input type="number" id="setHist" class="num-in" min="0" max="1000" step="10" value="${s.historyLimit ?? 50}"></div>
-      <div class="set-hint">Recently played tracks appear in the <b>Recently played</b> tab in the sidebar.</div>
-      <div class="set-row"><label for="setNotify">Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
-    </div>
-    </section>
-    <section class="set-pane" data-pane="youtube">
-    <div class="set-group"><div class="set-title">YouTube</div>
-      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through the built-in engine. Advanced provider configuration is available in <b>APIs &amp; Providers</b>.</div>
-      <div class="set-row"><label>Search results</label>
-        <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-      <div class="set-row"><label>Show videos in search</label><input type="checkbox" id="setIncVid" ${s.ytIncludeVideos !== false ? "checked" : ""}></div>
-      <div class="set-row"><label>Show playlists in search</label><input type="checkbox" id="setIncPl" ${s.ytIncludePlaylists !== false ? "checked" : ""}></div>
-      <div class="set-hint">The main search bar returns both. You can also toggle Videos / Playlists right on the results page.</div>
-      <div class="set-row"><label>Playlist preview size <span class="set-sub">(tracks shown in the detail window · 1–200)</span></label><input type="number" id="setPlPrev" class="num-in" min="1" max="200" step="5" value="${s.playlistPreviewCount ?? 25}"></div>
-      <div class="set-row"><label>Prefer local file when downloaded</label><input type="checkbox" id="setPrefLocal" ${s.preferLocal ? "checked" : ""}></div>
-      <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
-      <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
-      <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
-      <div class="set-row"><label>Tracks never proposed again</label><button id="setDeclined" class="btn-line sm">Forget ${dlDeclined.size}</button></div>
-      <div class="set-row"><label>Downloads deleted &amp; suppressed</label><button id="setSuppr" class="btn-line sm">Forget ${suppressedSet.size}</button></div>
-      <div class="set-hint">Declined downloads and deleted files are not offered again. “Forget” lets the app propose them again.</div>
-      <div class="set-row"><label>Home feed tab <span class="set-sub">(“YouTube” in the top navigation)</span></label><input type="checkbox" id="setYtFeedEnabled" ${s.ytFeedEnabled !== false ? "checked" : ""}></div>
-      <div class="set-row"><label>Feed sections <span class="set-sub">(comma-separated, in display order)</span></label><input type="text" id="setYtFeedSections" class="text-in" placeholder="forYou,trending,current,history" value="${esc(s.ytFeedSections || "forYou,trending,current,history")}"></div>
-      <div class="set-hint">Available: <b>forYou</b>, <b>trending</b>, <b>current</b> (related to what's playing), <b>history</b>. Remove one to hide that section.</div>
-      <div class="set-row"><label>Feed items per section <span class="set-sub">(online sections · 1–50)</span></label><input type="number" id="setYtFeedLimit" class="num-in" min="1" max="50" step="1" value="${Number(s.ytFeedLimit) || 12}"></div>
-      <div class="set-row"><label>Feed region <span class="set-sub">(trending, empty = global)</span></label><input type="text" id="setYtFeedRegion" class="text-in" placeholder="e.g. US, FR" value="${esc(s.ytFeedRegion || "")}"></div>
-      <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">${ic(IC.refresh)} Run again…</button></div>
+    <div class="set-group"><div class="set-title">Track list</div>
+      <div class="set-row"><label for="setTrackClick">Play a track with</label><select id="setTrackClick" class="sel sm-sel wide"><option value="single" ${s.trackClick !== "double" ? "selected" : ""}>One click</option><option value="double" ${s.trackClick === "double" ? "selected" : ""}>Double-click</option></select></div>
+      <div class="set-hint">Ctrl+click and Shift+click still select several tracks; right-click opens the track menu.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="providers">
@@ -7034,40 +7009,6 @@ function openSettings() {
     </div>
     <div class="set-group"><div class="set-title">Playlist folders</div>
       <div class="disk-playlists">${PL.getPlaylists().length ? PL.getPlaylists().map(playlist => `<div class="disk-playlist-row"><span><b>${esc(playlist.name)}</b><small>${esc(playlist.downloadDir || s.downloadDir || "Default MP3 folder")}</small></span><span class="dir-pick"><button class="btn-line sm" data-disk-folder="${playlist.id}">${ic(IC.folder)} Folder</button><button class="btn-line sm" data-disk-move="${playlist.id}" ${playlist.paths.some(localFileFor) ? "" : "disabled"}>Move files</button></span></div>`).join("") : `<div class="set-hint">No playlist yet.</div>`}</div>
-    </div>
-    </section>
-    <section class="set-pane" data-pane="library">
-    <div class="set-group"><div class="set-title">Followed playlists</div>
-      <div class="set-row"><label>Follow newly imported playlists by default</label><input type="checkbox" id="setAutoFollow" ${s.autoFollowImports ? "checked" : ""}></div>
-      <div class="set-row"><label>Auto-download future tracks in new follows</label><input type="checkbox" id="setFollowAutoDl" ${s.autoDownloadFollows ? "checked" : ""}></div>
-      <div class="set-row"><label>Check for new tracks</label>
-        <select id="setFollowIv" class="sel sm-sel wide">
-          <option value="launch" ${s.followInterval === "launch" ? "selected" : ""}>On launch only</option>
-          <option value="1h" ${s.followInterval === "1h" ? "selected" : ""}>Every hour</option>
-          <option value="6h" ${s.followInterval === "6h" ? "selected" : ""}>Every 6 hours</option>
-          <option value="24h" ${s.followInterval === "24h" ? "selected" : ""}>Every day</option>
-          <option value="custom" ${s.followInterval === "custom" ? "selected" : ""}>Custom interval…</option>
-        </select></div>
-      <div id="setFollowCustomRow" class="set-row" ${s.followInterval === "custom" ? "" : "hidden"}><label>Custom interval <span class="set-sub">(minutes)</span></label><input id="setFollowMinutes" class="num-in" type="number" min="5" max="10080" step="5" value="${Math.max(5, Math.min(10080, Number(s.followIntervalMinutes) || 360))}"></div>
-      <div class="set-row"><label>When new tracks are found</label><select id="setNewTracks" class="sel sm-sel wide">
-        <option value="ask" ${s.newTrackBehavior === "ask" ? "selected" : ""}>Ask before downloading</option>
-        <option value="auto" ${s.newTrackBehavior === "auto" ? "selected" : ""}>Download automatically</option>
-        <option value="off" ${s.newTrackBehavior === "off" ? "selected" : ""}>Add only · don't download</option>
-      </select></div>
-      <div class="set-row"><label>Resume interrupted downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
-      <div id="setFollowList"></div>
-      <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">${ic(IC.repeat)}Check all now</button></div>
-      <div class="set-hint">Follow a playlist from <b>Import from URL…</b> (tick “Follow”). New upstream tracks land in the linked playlist; with the download option they are also downloaded to the library. Checks also run on launch.</div>
-    </div>
-    <div class="set-group"><div class="set-title">Cleanup</div>
-      <div class="set-row"><label>Show blocked tracks <span class="set-sub">(greyed instead of hidden)</span></label><input type="checkbox" id="setShowBlocked" ${s.showBlocked ? "checked" : ""}></div>
-      ${buildCleanupActionLayout({
-        deleteBlocked: `<button id="setDeleteBlocked" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete blocked tracks (${blockedKeys.size})</button>`,
-        deleteFiles: `<button id="setDeleteDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.trash)}Delete duplicate files</button>`,
-        deletePlaylistEntries: `<button id="setRemovePlaylistDuplicates" data-cleanup-action class="btn-line sm" ${cleanupBusy ? "disabled" : ""}>${ic(IC.list)}Remove playlist duplicates</button>`,
-        playlistSelector: `<select id="setCleanupPlaylist" class="sel sm-sel wide" aria-label="Playlist to clean"><option value="__all">All playlists</option>${PL.getPlaylists().map(playlist => `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`).join("")}</select>`,
-      })}
-      <div class="set-hint">Blocked entries are deleted from the app; local files are removed only after the confirmation. Duplicate-file cleanup keeps the playlist-preferred copy.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="data">
@@ -7223,11 +7164,7 @@ function openSettings() {
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
-  $("#setVol").addEventListener("change", e => { const level = clampVolumePercent(e.target.value); SETTINGS.setSetting("defaultVolume", level); $("#volume").value = level; $("#volumePct").value = String(Math.round(level)); $("#volume").style.setProperty("--fill", `${level}%`); invoke("set_volume", { level: volumeGainFromPercent(level) }).catch(() => {}); });
-  $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
-  $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; updateShuffleBtn(); if (curIndex >= 0) schedulePreload(); });
-  $("#setShufSearch").addEventListener("change", e => { SETTINGS.setSetting("shuffleSearchOnly", e.target.checked); });
-  $("#setNotify")?.addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
+  $("#setTrackClick")?.addEventListener("change", e => SETTINGS.setSetting("trackClick", e.target.value === "double" ? "double" : "single"));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
   const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); if (!el) return; el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
   const ytTest = async () => {
@@ -7260,9 +7197,6 @@ function openSettings() {
     if (chosen) { SETTINGS.setSetting("cookiesBrowser", chosen); ytConfigPush().catch(() => {}); flash(`Cookies: ${chosen}`); }
     else { e.target.value = prev.split(":")[0] || ""; }
   });
-  $("#setIncVid")?.addEventListener("change", e => SETTINGS.setSetting("ytIncludeVideos", e.target.checked));
-  $("#setIncPl")?.addEventListener("change", e => SETTINGS.setSetting("ytIncludePlaylists", e.target.checked));
-  $("#setPlPrev")?.addEventListener("change", e => SETTINGS.setSetting("playlistPreviewCount", Math.max(1, Math.min(200, Number(e.target.value) || 25))));
   $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
   $("#setDlConcurrency")?.addEventListener("change", e => SETTINGS.setSetting("dlConcurrency", Math.max(1, Math.min(4, Number(e.target.value) || 3))));
   for (const [id, key] of [["setAutoLyrics", "autoLyrics"], ["setLyricsSave", "lyricsSaveLocal"], ["setLyricsYoutube", "lyricsYoutubeCaptions"], ["setLyricsLrclib", "lyricsLrclib"], ["setAutoAlternatives", "autoAlternativeSources"]]) {
@@ -7271,37 +7205,11 @@ function openSettings() {
   $("#setLyricsMode")?.addEventListener("change", e => SETTINGS.setSetting("lyricsLanguageMode", e.target.value));
   $("#setLyricsLanguage")?.addEventListener("change", e => SETTINGS.setSetting("lyricsLanguage", e.target.value));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
-  $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
-  $("#setDeleteBlocked")?.addEventListener("click", () => runCleanup(deleteBlockedTracks));
-  $("#setDeleteDuplicates")?.addEventListener("click", () => runCleanup(deleteDuplicateFiles));
-  $("#setRemovePlaylistDuplicates")?.addEventListener("click", () => runCleanup(removePlaylistDuplicates));
-  // Account & cloud sync
-  $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
-  $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
-  $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
-  $("#setPrefLocal").addEventListener("change", e => SETTINGS.setSetting("preferLocal", e.target.checked));
-  $("#setYtFeedEnabled")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedEnabled", e.target.checked); applyUiPrefs(); });
-  $("#setYtFeedSections")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedSections", e.target.value.trim() || "forYou,trending,current,history"); if (active.type === "ytfeed") showYtFeed(); });
-  $("#setYtFeedLimit")?.addEventListener("change", e => { const v = Math.max(1, Math.min(50, Math.round(Number(e.target.value) || 12))); e.target.value = v; SETTINGS.setSetting("ytFeedLimit", v); _feedState.forYou = _feedState.trending = _feedState.current = null; if (active.type === "ytfeed") showYtFeed(); });
-  $("#setYtFeedRegion")?.addEventListener("change", e => { SETTINGS.setSetting("ytFeedRegion", e.target.value.trim()); _feedState.trending = null; if (active.type === "ytfeed") showYtFeed(); });
   $("#setAutoSave").addEventListener("change", e => SETTINGS.setSetting("autoSaveImports", e.target.checked));
-  $("#setAutoFollow")?.addEventListener("change", e => SETTINGS.setSetting("autoFollowImports", e.target.checked));
-  $("#setFollowAutoDl")?.addEventListener("change", e => SETTINGS.setSetting("autoDownloadFollows", e.target.checked));
   $("#setDepCheck")?.addEventListener("change", e => SETTINGS.setSetting("dependencyCheckOnLaunch", e.target.checked));
   $("#setDepAuto")?.addEventListener("change", e => SETTINGS.setSetting("autoInstallDependencies", e.target.checked));
   $("#dependencyRefresh")?.addEventListener("click", () => loadDependencyStatus());
   $("#dependencyInstallAll")?.addEventListener("click", () => installDependency("all").catch(() => {}));
-  $("#setNewTracks")?.addEventListener("change", e => SETTINGS.setSetting("newTrackBehavior", e.target.value));
-  $("#setDeclined")?.addEventListener("click", () => { dlDeclined.clear(); saveDeclined(); $("#setDeclined").textContent = "Forget 0"; flash("Declined-track memory cleared"); });
-  $("#setSuppr")?.addEventListener("click", () => { suppressedSet.clear(); saveSuppressed(); $("#setSuppr").textContent = "Forget 0"; flash("Suppressed-download memory cleared"); });
-  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else { void storeSaveQuietly("playback", ""); void storeSaveQuietly("playbackq", ""); _lastQueueSig = ""; } });
-  $("#setResumeDl")?.addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else void storeSaveQuietly("dlqueue", ""); });
-  $("#setHist").addEventListener("change", e => {
-    const v = Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0)));
-    e.target.value = v; SETTINGS.setSetting("historyLimit", v);
-    if (!v) { history2 = []; saveHistory(); } else if (history2.length > v) { history2.length = v; saveHistory(); }
-    applyUiPrefs();
-  });
   $("#setRpcDelay")?.addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
   $("#setRpcPause")?.addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
   $("#setCompactTop").addEventListener("change", e => { SETTINGS.setSetting("compactTopbar", e.target.checked); document.body.classList.toggle("compact-top", e.target.checked); });
@@ -7376,16 +7284,6 @@ function openSettings() {
     // The previous client keeps a stale presence otherwise.
     clearRPC().then(() => { if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
   });
-  $("#setFollowIv").addEventListener("change", e => {
-    SETTINGS.setSetting("followInterval", e.target.value);
-    $("#setFollowCustomRow").hidden = e.target.value !== "custom";
-  });
-  $("#setFollowMinutes").addEventListener("change", e => {
-    const minutes = Math.max(5, Math.min(10080, Number(e.target.value) || 360));
-    e.target.value = String(minutes);
-    SETTINGS.setSetting("followIntervalMinutes", minutes);
-  });
-  $("#setFollowCheck").addEventListener("click", () => checkForNewTracks(true));
   renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
   $("#setUpdCheck").addEventListener("click", () => checkUpdate(true));

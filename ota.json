@@ -1,5 +1,5 @@
 {
-  "version": "0.22.159",
+  "version": "0.22.160",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Import becomes Song or Playlist (choose the target playlist for a song); playlist settings move to its right-click menu; Discord Rich Presence picks the right Discord app (regular, PTB, Canary or all) and no longer fails on long titles; the player lines up with every panel and both resize handles span the full height; launching the app again brings its window back.",
+  "notes": "Settings → Playback: play a track with one click (new default) or double-click; Ctrl/Shift+click still select several tracks.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }

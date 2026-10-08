@@ -36,8 +36,10 @@ const assert = require('node:assert/strict');
         iconTextDelta: (svgRect.top + svgRect.bottom - labelRect.top - labelRect.bottom) / 2,
       };
     });
-    assert.ok(Math.abs(result.topInset - 8) < 0.5, JSON.stringify(result));
-    assert.ok(Math.abs(result.bottomInset - 8) < 0.5, JSON.stringify(result));
+    // The Now Playing handle spans the drawer's full height, like the sidebar
+    // one (it used to stop 8px short at both ends).
+    assert.ok(Math.abs(result.topInset) < 0.5, JSON.stringify(result));
+    assert.ok(Math.abs(result.bottomInset) < 0.5, JSON.stringify(result));
     assert.equal(result.handleWidth, 8, JSON.stringify(result));
     assert.equal(result.traitWidth, '2px', JSON.stringify(result));
     assert.equal(result.traitLeft, '3px', JSON.stringify(result));
