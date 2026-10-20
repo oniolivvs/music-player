@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.160";
+const SRC_VERSION = "0.22.161";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5446,7 +5446,7 @@ function updateNowPlaying(t, path) {
   sk.style.setProperty("--buf", "0%"); _bufPct = 0;
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00"; _lastSeekVal = 0;
   _seekCap = { path: path || t?.path || null, cap: dur > 0 ? dur : Infinity };
-  notifyTrack(t); mediaUpdate(t); renderNpPanel(); primeLyrics(t, path || t?.path || "");
+  scheduleTrackNotification(t, path || t?.path || ""); mediaUpdate(t); renderNpPanel(); primeLyrics(t, path || t?.path || "");
   // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
   // before the wall clock is re-anchored, so the RPC push happens at the real
   // playback start (hardPlay / gapless advance) with an explicit position of 0.
@@ -6164,6 +6164,27 @@ async function ensureNotifPerm() {
     if (!_notifGranted) { const r = await T.core.invoke("plugin:notification|request_permission"); _notifGranted = r === "granted"; }
   } catch (e) { console.error("[notif perm]", e); _notifGranted = false; }
   _notifChecked = true; return _notifGranted;
+}
+// The track-change toast waits until the song has really played 5 s. It used
+// to fire as soon as a track was shown: skipping through a queue sent one toast
+// per track, and the paused track restored at launch got one too. Ticks only
+// count while playing, and the wall clock must have passed 5 s as well — it is
+// re-anchored at the real start, so a stream's loading time does not count.
+const TRACK_NOTIFY_AFTER_SECS = 5;
+let _trackNotifyTimer = null;
+function scheduleTrackNotification(t, path) {
+  clearInterval(_trackNotifyTimer); _trackNotifyTimer = null;
+  if (!IS_NATIVE || !S().notifyOnChange || !t || !path) return;
+  let played = 0;
+  _trackNotifyTimer = setInterval(() => {
+    const cur = curIndex >= 0 ? queue[curIndex] : null;
+    if (!cur || (cur !== path && effectivePath(cur) !== path)) { clearInterval(_trackNotifyTimer); _trackNotifyTimer = null; return; }
+    if (playing) played++;
+    if (played >= TRACK_NOTIFY_AFTER_SECS && wallPos() >= TRACK_NOTIFY_AFTER_SECS) {
+      clearInterval(_trackNotifyTimer); _trackNotifyTimer = null;
+      notifyTrack(t);
+    }
+  }, 1000);
 }
 async function notifyTrack(t) {
   if (!IS_NATIVE || !S().notifyOnChange || !t) return;

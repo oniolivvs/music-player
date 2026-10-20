@@ -1,5 +1,5 @@
 {
-  "version": "0.22.160",
+  "version": "0.22.161",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Settings → Playback: play a track with one click (new default) or double-click; Ctrl/Shift+click still select several tracks.",
+  "notes": "Track-change notifications now wait until a song has played for 5 seconds, so skipping through tracks no longer floods you with toasts. Settings → Interface → Track list: play a track with one click or double-click.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }
