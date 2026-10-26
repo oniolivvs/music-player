@@ -48,7 +48,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.161";
+const SRC_VERSION = "0.22.162";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -5772,12 +5772,30 @@ function renderBuffer(st) {
   // compositeur actif — sur rendu logiciel (WebView2/driver instable), ça
   // contribuait au gel général. On relance à chaque reprise de lecture.
   let _progRaf = 0;
+  // Repaint only when something visible changes: the fill moved by a pixel or
+  // the displayed second ticked. The old 0.05 s step repainted ~20×/s, and each
+  // repaint re-composited the player's blurred glass (backdrop-filter) — on a
+  // 3-minute song across ~1000 px that is ~5 repaints/s instead.
+  let _seekStep = { max: -1, width: 0, step: 0.05 };
+  function seekRepaintStep() {
+    const el = $("#seek");
+    const max = Number(el.max) || 1, width = el.clientWidth || 0;
+    if (max !== _seekStep.max || width !== _seekStep.width) {
+      _seekStep = { max, width, step: width > 0 ? Math.max(0.05, max / width) : 0.05 };
+    }
+    return _seekStep.step;
+  }
+  window.addEventListener("resize", () => { _seekStep.max = -1; });
   function startProgressLoop() {
     if (_progRaf) return;
+    let step = seekRepaintStep();
     const loop = () => {
       if (seeking || curIndex < 0 || !playing || document.hidden) { _progRaf = 0; return; } // idle/pause → stop
       const p = wallPos();
-      if (Math.abs(p - _lastSeekVal) > 0.05) renderSeek(p);
+      if (Math.abs(p - _lastSeekVal) >= step || Math.floor(p) !== Math.floor(_lastSeekVal)) {
+        renderSeek(p);
+        if (_seekStep.max !== (Number($("#seek").max) || 1)) step = seekRepaintStep(); // new track length
+      }
       _progRaf = requestAnimationFrame(loop);
     };
     _progRaf = requestAnimationFrame(loop);

@@ -1,5 +1,5 @@
 {
-  "version": "0.22.161",
+  "version": "0.22.162",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Track-change notifications now wait until a song has played for 5 seconds, so skipping through tracks no longer floods you with toasts. Settings → Interface → Track list: play a track with one click or double-click.",
+  "notes": "Lighter and smoother: the window no longer freezes while a sleeping hard disk wakes up at launch, nothing is drawn while the app is minimized (no GPU use), and the progress bar repaints only when it actually moves.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }

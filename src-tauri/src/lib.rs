@@ -60,9 +60,19 @@ async fn scan_diff(
 /// frontend DELETES library rows on a false — so an unavailable download folder
 /// pruned every downloaded track from the library, one 250 ms batch at a time,
 /// with a full re-render on each batch. Never prune on `-1`.
+///
+/// Async on a blocking worker: a synchronous Tauri command runs on the window's
+/// main thread, and the startup checks of every library file then froze the
+/// whole window while a sleeping hard disk spun up (a slow path blocked it for
+/// 21 s, "Not responding").
 #[tauri::command]
-fn fs_exists(path: String) -> i32 {
-    let p = std::path::Path::new(&path);
+async fn fs_exists(path: String) -> i32 {
+    tauri::async_runtime::spawn_blocking(move || path_state(std::path::Path::new(&path)))
+        .await
+        .unwrap_or(-1)
+}
+
+fn path_state(p: &std::path::Path) -> i32 {
     match std::fs::metadata(p) {
         Ok(m) => {
             if m.is_file() && m.len() > 0 {
@@ -911,6 +921,38 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
     do_build(&app)
 }
 
+/// WebView2 was never told the window was minimized: it kept compositing every
+/// frame (measured: more GPU minimized than in the foreground, 1.87 % vs
+/// 0.76 %), and the page stayed "visible". Hiding the WebView on minimize is
+/// what a browser does for a background tab — no frames, no GPU, and the page
+/// sees `visibilitychange`. Audio is native, so playback is unaffected; the
+/// page's timers keep running (see additionalBrowserArgs in tauri.conf.json).
+fn pause_rendering_while_minimized(app: &tauri::App) {
+    let Some(window) = app.get_webview_window("main") else { return };
+    let target = window.clone();
+    let shown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    window.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::Resized(_)) {
+            return;
+        }
+        let visible = !target.is_minimized().unwrap_or(false);
+        if shown.swap(visible, std::sync::atomic::Ordering::Relaxed) == visible {
+            return; // a plain resize: nothing changed
+        }
+        set_webview_visible(&target, visible);
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn set_webview_visible(window: &tauri::WebviewWindow, visible: bool) {
+    let _ = window.with_webview(move |webview| unsafe {
+        let _ = webview.controller().SetIsVisible(visible);
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_webview_visible(_window: &tauri::WebviewWindow, _visible: bool) {}
+
 pub fn run() {
     // Keep one desktop process per user session. A named OS mutex rejects a
     // second launch before Tauri creates another window or audio controller.
@@ -973,6 +1015,7 @@ pub fn run() {
             if let Err(e) = mpris::init(handle, &app.state::<mpris::MediaState>()) {
                 eprintln!("[mpris] init failed (desktop integration disabled): {e}");
             }
+            pause_rendering_while_minimized(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
