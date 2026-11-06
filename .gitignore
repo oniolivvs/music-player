@@ -38,3 +38,9 @@ MISTAKES_TO_AVOID.md
 WORKFLOW_EXAMPLE.md
 PLUGINS_INSTALLED.md
 _reco_harness_tmp.html
+
+# Assistants et index locaux : jamais sur GitHub
+.claude/
+CLAUDE.local.md
+floorplan/
+.graphify/
