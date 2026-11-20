@@ -40,6 +40,7 @@ const DEFAULTS = {
   rpcClientId: "",
   rpcTarget: "auto",     // Discord app that shows the presence: auto (regular first) | discord | ptb | canary | all
   preloadNext: true,     // gapless: pre-queue the next track
+  continueWithLibrary: false, // when a list ends (repeat off), keep playing library songs one at a time
   resumePlayback: true,  // on launch, restore the last track (paused) at its saved position
   resumeDownloads: true, // on launch, re-queue downloads that hadn't finished (yt-dlp continues .part files)
   historyLimit: 50,      // listening history size (0 = don't keep … up to 1000)
@@ -52,7 +53,7 @@ const DEFAULTS = {
   sliderImage: "",       // custom image for the slider thumb (the "pink dot"); empty = accent color
   thumbSize: 12,         // slider thumb diameter (px)
   pbPad: 17,             // player control icon size (px) — "Player icon size" slider
-  downloadDir: "",       // empty = ~/Music/MusicPlayer (resolved by the backend)
+  downloadDir: "",       // empty = Music\MusicPlayer in the user folder (resolved by the backend)
   sharedTracksDir: "",   // optional central folder for tracks referenced by several playlists
   preferLocal: true,     // play the local file when an online track is downloaded
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog

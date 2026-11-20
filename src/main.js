@@ -8,14 +8,15 @@ import { storeLoad, storeLoadStrict, storeSave, storeSaveQuietly } from "./store
 import { createDiagnostics } from "./diagnostics.mjs";
 import { paletteFromPixels, cssVarsForPalette, artworkBackgroundStyle, artworkBlurPx, artworkDimensionsAreUsable, artworkSourceCandidates, resolveArtworkSource, trimArtworkPaletteCache, artworkZoomForViewport, createArtworkThemeState, createSharedArtworkPreparation, createPlaybackArtworkGate } from "./artwork-theme.mjs";
 import { clampVolumePercent, volumeGainFromPercent } from "./player-controls.mjs";
-import { buildShuffleOrder, shuffleSignature, uniqueQueuePaths } from "./shuffle.mjs";
+import { buildShuffleOrder, pickLibraryContinuation, shuffleSignature, uniqueQueuePaths } from "./shuffle.mjs";
 import { disableOrphanedFollows } from "./follow-reconciliation.mjs";
-import { bindLibraryActions, buildLibraryActions, renderLibraryActions } from "./library-actions.mjs";
+import { bindLibraryActions, buildLibraryActions, createRelinker, renderLibraryActions } from "./library-actions.mjs";
 import { backupSummary, createBackup, parseBackup } from "./data-transfer.mjs";
 import { normalizeSingleVideoUrl, singleTrackFromResult } from "./import-policy.mjs";
 import { mergeMusicListPaths, parseMusicList, youtubeThumbnailFor } from "./music-list.mjs";
 import { activeLyricIndex, parseTimedLyrics, plainLyricsLines } from "./lyrics.mjs";
 import { pickAlternativeSource } from "./alternative-source.mjs";
+import { isBrowserShortcut } from "./ui-controls.mjs";
 import {
   buildCleanupActionLayout,
   buildCleanupSummary,
@@ -48,7 +49,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.162";
+const SRC_VERSION = "0.22.163";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1511,26 +1512,17 @@ function enrichLibrary() {
 // folder (or a drive that held it is unplugged and the files now live elsewhere,
 // e.g. ~/Desktop/music), those stored paths go dead and the tracks silently
 // vanish from the playlist view (openPlaylist drops any path not in the library).
-// Re-point every dead local path to the library file carrying the same
-// "[videoId]" tag; fall back to a same-filename match for non-YouTube files.
-const VID_RE = /\[([A-Za-z0-9_-]{11})\]\.[a-z0-9]+$/i;
+// Re-point every dead local path to where its file lives now (see createRelinker).
 function relinkPlaylists() {
   const known = new Set(library.map(t => t.path));
-  const byVid = new Map(), byBase = new Map();
-  for (const t of library) {
-    const m = String(t.path).match(VID_RE);
-    if (m && !byVid.has(m[1])) byVid.set(m[1], t.path);
-    const b = String(t.path).split("/").pop();
-    if (b && !byBase.has(b)) byBase.set(b, t.path);
-  }
   const dead = new Set();
   for (const pl of PL.getPlaylists())
     for (const p of pl.paths)
       if (!isOnline(p) && !known.has(p)) dead.add(p);
+  const relink = createRelinker(known, dead);
   let fixed = 0;
   for (const p of dead) {
-    const m = String(p).match(VID_RE);
-    const target = (m && byVid.get(m[1])) || byBase.get(String(p).split("/").pop());
+    const target = relink(p);
     if (target && target !== p) { PL.replacePath(p, target); fixed++; }
   }
   return fixed;
@@ -1614,7 +1606,14 @@ function setViewHead({ icon = "", title = "", subtitle = "", actions = "" }) {
   head.classList.remove("has-playlist-banner");
   head.style.removeProperty("--playlist-banner-image");
   head.style.removeProperty("--playlist-image-opacity");
-  head.innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>${actions ? `<div class="vh-actions">${actions}</div>` : ""}`;
+  // One row for the whole list header: the sort control sits with the actions
+  // instead of taking a row of its own above the column titles. Taken out first:
+  // rewriting the header would otherwise destroy it along with the old actions.
+  const tools = $("#listTools");
+  tools?.remove();
+  head.innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div><div class="vh-actions">${actions}</div>`;
+  if (tools) head.querySelector(".vh-actions").append(tools);
+  applyIconOnly();
 }
 
 // ─── Sorting ───
@@ -2704,7 +2703,6 @@ function renderSources() {
   });
   host.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); rescanFolder(b.dataset.refresh); }));
   host.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); removeSource(b.dataset.remove); }));
-  $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
 
 function openSource(folder) {
@@ -2857,7 +2855,6 @@ function renderPlaylists() {
   host.querySelectorAll("[data-cover]").forEach(el => { const pl = pls.find(p => p.id === el.dataset.cover); plCoverInto(el, pl); });
   void hydratePlaylistRowAssets(host, pls);
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
-  $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
 function openPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
@@ -2881,24 +2878,40 @@ function openPlaylist(id) {
   const shownPaths = pl.paths.filter(p => !(isStreamTrack(p) && dlBlock[ytId(p)]));
   const nHidden = pl.paths.length - shownPaths.length;
   const fw = followFor(id);
+  const playlistActions = buildLibraryActions({ downloadableCount: nDl, scope: "playlist" });
   setViewHead({
     icon: IC.note, title: pl.name, subtitle: `${shownPaths.length} songs${nHidden ? ` · ${nHidden} unavailable (hidden)` : ""}${fw ? ` · ↻ followed` : ""}`,
-    // Only what puts songs in or takes them out stays here. Appearance,
-    // refresh, follow, folder and file moves live in the playlist's right-click
-    // menu, and adding a song goes through Import → Song.
-    actions:
-      (nDl ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nDl} mp3)</button>` : "") +
-      `<button id="plDupsBtn" class="btn-line sm" title="Check and remove duplicate songs">${ic(IC.filter)} Clean duplicates</button>`,
+    // The library's five actions, acting on this playlist. Appearance, follow,
+    // folder and file moves stay in the playlist's right-click menu.
+    actions: renderLibraryActions(playlistActions, icon => ic(IC[icon]), esc),
   });
-  $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
-  $("#plDupsBtn")?.addEventListener("click", () => checkDuplicatesFlow("playlist", id));
+  bindLibraryActions($, playlistActions, {
+    refresh: refreshActiveViewAction,
+    addUrl: () => addUrlToPlaylist(id),
+    download: () => downloadPlaylist(id),
+    cleanDuplicates: () => checkDuplicatesFlow("playlist", id),
+    deleteBlocked: () => deleteBlockedTracks(PL.getPlaylists().find(p => p.id === id)?.paths || []),
+  }, runCleanup);
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
-  void applyPlaylistBanner(pl);
+  applyPlaylistBanner(pl).then(() => applyIconOnly()).catch(() => {});
   renderTracks(shownPaths.map(p => {
     const local = localFileFor(p);
     if (local) return byPath.get(local) || library.find(t => t.path === local) || ensureOnlineTrack(p);
     return byPath.get(p) || ensureOnlineTrack(p);
   }).filter(Boolean));
+}
+
+async function addUrlToPlaylist(id) {
+  if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
+  const pl = PL.getPlaylists().find(p => p.id === id);
+  if (!pl) return;
+  const url = await askText(`Add a video to “${pl.name}”`, { placeholder: "YouTube video URL", ok: "Add video" });
+  if (!url) return;
+  flash("Fetching…");
+  try {
+    const { added, where } = await addSongFromUrl(url, id, !!S().autoSaveImports);
+    flash(added ? `Added to ${where}` : `Already in ${where}`);
+  } catch (e) { flash(`Could not add: ${e}`); }
 }
 
 // Import → Song: one YouTube video, into the library alone or into a chosen
@@ -3993,9 +4006,10 @@ async function settleCleanupQueue(next, generation) {
     if (curIndex >= 0) await schedulePreload();
   }
 }
-async function deleteBlockedTracks() {
+// `scope`: only these paths (one playlist's). Without it, everything known.
+async function deleteBlockedTracks(scope = null) {
   const playlists = PL.getPlaylists();
-  const candidates = [
+  const candidates = Array.isArray(scope) ? [...scope] : [
     ...library.map(track => track.path),
     ...onlineIndex.keys(),
     ...playlists.flatMap(playlist => playlist.paths || []),
@@ -4040,7 +4054,9 @@ async function deleteBlockedTracks() {
       playlistsChanged = true;
     }
   }
-  const nextBlockedKeys = clearSuccessfulBlockKeys(blockedKeys, removed, failed, blockKeyByPath);
+  // A key is shared by every copy of a song (stream, downloaded file, other
+  // playlists). Deleting one playlist's entries must leave the others blocked.
+  const nextBlockedKeys = Array.isArray(scope) ? blockedKeys : clearSuccessfulBlockKeys(blockedKeys, removed, failed, blockKeyByPath);
   const blockedChanged = nextBlockedKeys.size !== blockedKeys.size
     || [...nextBlockedKeys].some(key => !blockedKeys.has(key));
   blockedKeys = nextBlockedKeys;
@@ -5416,7 +5432,52 @@ function nextIndex(from, manual = false) {
   if (repeatMode !== "off") {
     for (const idx of order) { if (idx !== from && !isBlocked(queue[idx])) return idx; }
   }
-  return -1;
+  return continueFromLibrary();
+}
+// Library songs added after the list (see continueFromLibrary).
+const _libraryContinued = new Set();
+// Turning the option off takes back the library song queued ahead of time.
+function dropQueuedContinuation() {
+  let dropped = false;
+  while (queue.length - 1 > curIndex && _libraryContinued.has(queue[queue.length - 1])) {
+    _libraryContinued.delete(queue.pop());
+    dropped = true;
+  }
+  if (dropped && shuffle) {
+    shufOrder = shufOrder.filter(index => index < queue.length);
+    shufQueueSignature = shuffleSignature(queue);
+  }
+  return dropped;
+}
+// Settings → "Keep playing from your library": once the list has nothing left to
+// play (repeat off), ONE library song is added after it, then the next one when
+// that one is reached, and so on. Shuffle picks them at random; without it they
+// come in library order. A list played from the library itself has none left.
+function continueFromLibrary() {
+  if (!S().continueWithLibrary || repeatMode !== "off" || !library.length) return -1;
+  // A song can sit in the queue as a stream and in the library as its download:
+  // both spellings, and the video id, count as already queued.
+  const queued = new Set(queue.flatMap(p => [p, effectivePath(p)]));
+  const queuedIds = new Set(queue.map(videoIdOf).filter(Boolean));
+  const fresh = library.filter(t => !queued.has(t.path)
+    && !queuedIds.has(videoIdOf(t.path))
+    && !isBlocked(t.path) && !(isStreamTrack(t.path) && dlBlock[ytId(t.path)]));
+  if (!fresh.length) return -1;
+  // Library order only matters without shuffle.
+  const candidates = shuffle ? fresh : sortTracks(fresh);
+  const path = pickLibraryContinuation(candidates.map(t => t.path), queue, { shuffle });
+  if (!path) return -1;
+  _libraryContinued.add(path);
+  const order = playOrder(); // settle the current order before it grows
+  queue.push(path);
+  const index = queue.length - 1;
+  if (shuffle) {
+    // Extend the shuffled order instead of rebuilding it, which would bring back
+    // songs that have already played.
+    shufOrder = [...order, index];
+    shufQueueSignature = shuffleSignature(queue);
+  }
+  return index;
 }
 function updateNowPlaying(t, path) {
   const artworkToken = _playbackArtworkGate.select(path || t?.path || "");
@@ -5425,7 +5486,7 @@ function updateNowPlaying(t, path) {
   // you can tell at a glance whether what is playing needs the network.
   $("#nowTitle").innerHTML = t
     ? `${esc(t.title)}${netBadge(path || t.path)}`
-    : esc((path || "").split("/").pop());
+    : esc(baseName(path || ""));
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
   const art = $("#npArt");
   if (t) {
@@ -5453,6 +5514,7 @@ function updateNowPlaying(t, path) {
 }
 async function playFrom(viewIdx) {
   _drainSkips = 0;
+  _libraryContinued.clear();
   const wanted = view[viewIdx]?.path;
   queue = uniqueQueuePaths(view.map(t => t.path));
   const startIdx = queue.indexOf(wanted);
@@ -6036,13 +6098,28 @@ function updateSideClasses() {
   document.body.classList.toggle("side-tight", w < SIDE_TIGHT_AT);
 }
 
-// "auto" drops the labels exactly when the track list has gone narrow, so the
-// whole interface changes density at one point instead of each row picking its
-// own moment. Tooltips carry the meaning in every mode.
+// "auto" keeps the labels while the list header has room for them beside the
+// title, and drops them the moment they would push the actions onto a second
+// row. Tooltips carry the meaning in every mode.
 function applyIconOnly() {
   const mode = S().iconOnly || "auto";
-  const on = mode === "always" || (mode === "auto" && document.body.classList.contains("main-narrow"));
+  const on = mode === "always" || (mode === "auto" && !headerFitsLabels());
   document.body.classList.toggle("icon-only", on);
+}
+let _headerFit = { key: "", fits: true };
+function headerFitsLabels() {
+  const head = $("#viewHead");
+  const actions = head?.querySelector(".vh-actions");
+  const text = head?.querySelector(".vh-txt");
+  if (!actions || !text || !actions.querySelector(".btn-line")) return true;
+  // Resizes fire this on every frame; only a new width or new header content
+  // needs the labelled layout measured again.
+  const key = head.clientWidth + "|" + head.className + "|" + actions.textContent;
+  if (key === _headerFit.key) return _headerFit.fits;
+  document.body.classList.remove("icon-only");
+  const fits = actions.offsetTop < text.offsetTop + text.offsetHeight;
+  _headerFit = { key, fits };
+  return fits;
 }
 function npIsPinned() { return !!S().npDocked && window.innerWidth >= 700; }
 function toggleNpPanel(force) {
@@ -6116,15 +6193,15 @@ function renderNpPanel() {
   });
 }
 
-// ─── Desktop media integration (MPRIS) ───
-// Pushes track + playback state to the OS so KDE/GNOME widgets, playerctl and
-// media keys see the player; their commands come back as "media" events.
+// ─── Windows media controls (SMTC) ───
+// Pushes track + playback state to Windows so the media flyout and media keys see
+// the player; their commands come back as "media" events.
 async function mediaUpdate(t) {
   if (!IS_NATIVE || !t) return;
   try {
     await invoke("media_update", {
       title: t.title || "", artist: t.artist || "", album: t.album || "",
-      art: t.thumbnail || "", durationSecs: t.duration_secs || 0,
+      art: t.thumbnail || "", durationSecs: t.duration_secs || 0, path: t.path || "",
     });
   } catch (e) { console.error("[mpris meta]", e); }
 }
@@ -6501,7 +6578,7 @@ async function pickFolder() {
   } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: IS_ANDROID ? ANDROID_MUSIC_DIR : "Folder path" }); if (p) await addSource(p); }
   finally { btn.disabled = false; }
 }
-async function addManual() { const p = await askText("Add a folder", { placeholder: "/path/to/music" }); if (p) await addSource(p); }
+async function addManual() { const p = await askText("Add a folder", { placeholder: "D:\\Music" }); if (p) await addSource(p); }
 
 // ─── Settings ───
 function applyAccent() {
@@ -6666,35 +6743,6 @@ function applySettings() {
   // Sans PI usager : pas un if — .catch(() => {}) évite un rejet non trappé si
   // le backend refuse le volume (device non prêt / init audio KO, surtout Android).
   const v = clampVolumePercent(S().defaultVolume); $("#volume").value = v; $("#volumePct").value = String(Math.round(v)); $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: volumeGainFromPercent(v) }).catch(() => {});
-}
-// Version switcher / downgrade (Settings → System → Updates). Lists the version
-// commits from local git and, on Build, checks one out + rebuilds + restarts.
-async function initVersionSwitcher() {
-  const sel = $("#setVerSel"), go = $("#setVerGo"), hint = $("#setVerHint");
-  const row = $("#setVerRow");
-  // Git-based version switching only makes sense with a local source tree
-  // (desktop dev). On installers / Android it's meaningless → keep it hidden.
-  if (!sel || !IS_NATIVE || IS_ANDROID) return;
-  let list = [];
-  try { list = await invoke("list_versions"); }
-  catch { return; } // no source tree → leave the switcher hidden
-  if (!Array.isArray(list) || !list.length) return;
-  if (row) row.hidden = false;
-  if (hint) hint.hidden = false;
-  sel.innerHTML = list.map(v => `<option value="${v.hash}" ${v.current ? "selected" : ""}>${esc(v.version)}${v.current ? " — current" : ""} · ${esc(v.date)}</option>`).join("");
-  const sync = () => { const cur = list.find(v => v.hash === sel.value); go.disabled = !sel.value || (cur && cur.current); };
-  sync();
-  sel.onchange = sync;
-  go.onclick = async () => {
-    const v = list.find(x => x.hash === sel.value); if (!v) return;
-    if (!await askConfirm(`Switch to ${v.version}?`, "The app rebuilds at that version and restarts. Your library, playlists and settings are kept.", "Build & switch")) return;
-    go.disabled = true; hint.textContent = `Building ${v.version}… this can take a minute.`;
-    try {
-      await invoke("switch_version", { rev: v.hash });
-      hint.textContent = `Built ${v.version} — restarting…`;
-      setTimeout(() => invoke("restart_app").catch(() => {}), 600);
-    } catch (e) { hint.textContent = String(e); go.disabled = false; flash(`Switch failed: ${e}`); }
-  };
 }
 let _diagEntries = [];
 function renderDiagnosticsPanel() {
@@ -6941,6 +6989,10 @@ function openSettings() {
       <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
       <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
+    <div class="set-group"><div class="set-title">Playback</div>
+      <div class="set-row"><label for="setContinueLib">Keep playing from your library</label><input type="checkbox" id="setContinueLib" ${s.continueWithLibrary ? "checked" : ""}></div>
+      <div class="set-hint">When a playlist, a search or any other list ends, songs from your library follow, one at a time: at random with shuffle on, otherwise in library order. Repeat keeps priority.</div>
+    </div>
     <div class="set-group"><div class="set-title">Track list</div>
       <div class="set-row"><label for="setTrackClick">Play a track with</label><select id="setTrackClick" class="sel sm-sel wide"><option value="single" ${s.trackClick !== "double" ? "selected" : ""}>One click</option><option value="double" ${s.trackClick === "double" ? "selected" : ""}>Double-click</option></select></div>
       <div class="set-hint">Ctrl+click and Shift+click still select several tracks; right-click opens the track menu.</div>
@@ -7032,7 +7084,7 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Disk storage</div>
       <div class="set-row"><label>Root MP3 folder</label>
         <span class="dir-pick">
-          <input type="text" id="setDlDir" class="text-in" placeholder="~/Music/MusicPlayer" value="${esc(s.downloadDir)}">
+          <input type="text" id="setDlDir" class="text-in" placeholder="Music\\MusicPlayer" value="${esc(s.downloadDir)}">
           <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">${ic(IC.folder)}</button>
         </span></div>
       <div class="set-row"><label>Shared tracks folder</label>
@@ -7044,7 +7096,7 @@ function openSettings() {
       <div class="set-hint">Several playlists point to one physical file. New shared titles use this folder; Organize moves existing shared files and updates every playlist reference.</div>
       <div class="set-row"><label>Storage cap <span class="set-sub">(max MB of audio per source folder · 0 = unlimited)</span></label><input type="number" id="setStorageCap" class="num-in" min="0" max="1000000" step="500" value="${s.storageCapMb ?? 0}"></div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
-      <div class="set-hint">Empty root = <b>~/Music/MusicPlayer</b>. Save locally always asks for a playlist folder when none is configured.</div>
+      <div class="set-hint">Empty root = <b>Music\\MusicPlayer</b> in your user folder. Save locally always asks for a playlist folder when none is configured.</div>
     </div>
     <div class="set-group"><div class="set-title">Playlist folders</div>
       <div class="disk-playlists">${PL.getPlaylists().length ? PL.getPlaylists().map(playlist => `<div class="disk-playlist-row"><span><b>${esc(playlist.name)}</b><small>${esc(playlist.downloadDir || s.downloadDir || "Default MP3 folder")}</small></span><span class="dir-pick"><button class="btn-line sm" data-disk-folder="${playlist.id}">${ic(IC.folder)} Folder</button><button class="btn-line sm" data-disk-move="${playlist.id}" ${playlist.paths.some(localFileFor) ? "" : "disabled"}>Move files</button></span></div>`).join("") : `<div class="set-hint">No playlist yet.</div>`}</div>
@@ -7063,7 +7115,7 @@ function openSettings() {
     <section class="set-pane" data-pane="system">
     ${IS_ANDROID ? "" : `<div class="set-group"><div class="set-title">Startup</div>
       <div class="set-row"><label>Launch at login</label><input type="checkbox" id="setBoot" ${s.startOnBoot ? "checked" : ""} ${IS_NATIVE ? "" : "disabled"}></div>
-      <div class="set-hint">Start Music Player automatically when you sign in. On Linux this adds a desktop entry to your autostart folder; on Windows/macOS it registers a login item.${IS_NATIVE ? "" : " <b>Needs the native app.</b>"}</div>
+      <div class="set-hint">Start Music Player automatically when you sign in to Windows.${IS_NATIVE ? "" : " <b>Needs the native app.</b>"}</div>
     </div>`}
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
@@ -7083,12 +7135,6 @@ function openSettings() {
       <div class="set-hint" id="setUpdHint">${IS_ANDROID
         ? "Automatic: instant updates apply on launch, and new APKs download themselves — Android only asks you to tap Install (that prompt can't be skipped). Notify me: shows an Update button instead. Android and desktop versions update independently."
         : "Automatic: instant updates apply on launch, and new installers download and run themselves. Notify me: shows an Update button instead."}</div>
-      <div class="set-row" id="setVerRow" hidden><label>Switch / downgrade version</label>
-        <span class="dir-pick">
-          <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
-          <button id="setVerGo" class="btn-line sm" disabled>${ic(IC.gear)} Build</button>
-        </span></div>
-      <div class="set-hint" id="setVerHint" hidden>Rebuilds a chosen version from the local source tree before restarting (desktop dev only).</div>
     </div>
     <div class="set-group"><div class="set-title">Diagnostics</div>
       <div class="set-hint">Recent application events are stored locally, with secrets removed. Nothing is uploaded automatically.</div>
@@ -7205,6 +7251,12 @@ function openSettings() {
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
   $("#setTrackClick")?.addEventListener("change", e => SETTINGS.setSetting("trackClick", e.target.value === "double" ? "double" : "single"));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
+  $("#setContinueLib")?.addEventListener("change", e => {
+    SETTINGS.setSetting("continueWithLibrary", e.target.checked);
+    if (!e.target.checked && dropQueuedContinuation()) _preloadFor = null;
+    if (curIndex >= 0) schedulePreload();
+    renderNpPanel();
+  });
   const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); if (!el) return; el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
   const ytTest = async () => {
     ytStatus("Testing…");
@@ -7278,7 +7330,6 @@ function openSettings() {
     } catch (e) { console.error("[thumb pick]", e); }
   });
   $("#setThumbClear").addEventListener("click", () => { SETTINGS.setSetting("sliderImage", ""); $("#setThumbImg").value = ""; applyThumbImage(S()); });
-  initVersionSwitcher();
   $("#setDlDir").addEventListener("change", async e => {
     const path = e.target.value.trim();
     SETTINGS.setSetting("downloadDir", path);
@@ -7339,7 +7390,6 @@ function openSettings() {
     catch (error) { console.error("[diagnostics] clear", error); flash("Couldn't clear diagnostics"); }
   });
   $("#updateBtn").addEventListener("click", () => {
-    if (updateReady) { invoke("restart_app").catch(e => { console.error("[restart]", e); flash("Restart failed — relaunch manually"); }); return; }
     if (!updateBusy && availableVersion) runUpdate();
   });
   renderUpdateBtn();  // reflect state already known from the startup check
@@ -7569,8 +7619,8 @@ async function checkForNewTracks(manual = false) {
   } finally { _newTracksBusy = false; }
 }
 
-// ─── Self-update (binary vs. source-tree version; repo mirrored on GitHub) ───
-let updateBusy = false, updateReady = false, availableVersion = "";
+// ─── Self-update (instant frontend update, or the release installer) ───
+let updateBusy = false, availableVersion = "";
 async function currentVersion() {
   try { return await T.app.getVersion(); } catch { return ""; }
 }
@@ -7581,8 +7631,7 @@ function renderUpdateBtn() {
   if (!btn) return;
   btn.disabled = updateBusy;
   const isDownload = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
-  if (updateBusy) { btn.hidden = false; btn.textContent = _otaMode ? "Updating…" : "Building update…"; }
-  else if (updateReady) { btn.hidden = false; btn.textContent = `v${availableVersion} ready — restart`; }
+  if (updateBusy) { btn.hidden = false; btn.textContent = _otaMode ? "Updating…" : "Downloading update…"; }
   else if (availableVersion) { btn.hidden = false; btn.textContent = _otaMode ? `Update to v${availableVersion} (instant)` : (isDownload ? `Download v${availableVersion}` : `Update to v${availableVersion}`); }
   else { btn.hidden = true; }
 }
@@ -7630,51 +7679,22 @@ async function checkUpdate(manual = false) {
     _otaMode = false;
   } catch (e) { _otaMode = false; }
   const cur = await currentVersion();
-  // Desktop with a source tree keeps the in-app rebuild flow; everyone else
-  // (installers, Android) checks GitHub for the newest release that ships an
-  // asset for THIS platform — versions are independent per platform.
-  const rel = await invoke("latest_release").catch(() => null);
-  const src = IS_ANDROID ? "" : await sourceTreeVersion(rel?.version);
-  if (src) {
-    if (cur && src !== cur) {
-      availableVersion = src; _releaseInfo = null;
-      if (autoMode) { runUpdate({ auto: true, waitIdle: !atBoot }); return; }
-      if (manual) flash(`Update available: v${cur} → v${src}`);
+  try {
+    const rel = await invoke("latest_release");
+    _releaseInfo = rel;
+    if (rel.version && cur && verCmp(rel.version, cur) > 0) {
+      availableVersion = rel.version;
+      // Hands-off in every mode but "off": the setup downloads, then launches
+      // once nothing plays.
+      if (autoNative) { renderUpdateBtn(); runUpdate({ auto: true, waitIdle: !atBoot }); return; }
+      if (manual) flash(`Update available: v${cur} → v${rel.version}`);
     } else {
       availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
     }
-  } else {
-    try {
-      if (!rel) throw new Error("GitHub releases are unreachable");
-      _releaseInfo = rel;
-      if (rel.version && cur && verCmp(rel.version, cur) > 0) {
-        availableVersion = rel.version;
-        // Hands-off in every mode but "off": desktop downloads the setup and
-        // launches it once nothing plays, Android downloads the APK and hands
-        // it to the system installer. Android still shows its own install
-        // prompt — that one is enforced by the OS and cannot be skipped.
-        if (autoNative) { renderUpdateBtn(); runUpdate({ auto: true, waitIdle: !atBoot }); return; }
-        if (manual) flash(`Update available for ${rel.platform}: v${cur} → v${rel.version}`);
-      } else {
-        availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
-      }
-    } catch (e) {
-      availableVersion = ""; if (manual) flash(`Could not check updates: ${e}`);
-    }
+  } catch (e) {
+    availableVersion = ""; if (manual) flash(`Could not check updates: ${e}`);
   }
   renderUpdateBtn();
-}
-// Dev builds run from a source checkout; installed ones do not. Native 0.22.156
-// and older answered source_version with the GitHub release tag even without a
-// checkout, so installed builds took the dev "rebuild" path, which can only
-// open the releases page. A value equal to the published release therefore
-// proves nothing: only a different version means a real tree.
-async function sourceTreeVersion(releaseVersion = "") {
-  // Release unknown (offline, rate limit): an old native's tag would pass for a
-  // tree and reopen the browser path — and a real tree cannot fetch either.
-  if (!releaseVersion) return "";
-  const src = await invoke("source_version").catch(() => "");
-  return src && src !== releaseVersion ? src : "";
 }
 // Background updates reload or restart the app: wait until nothing plays, then
 // count down visibly — starting playback again postpones the install.
@@ -7710,74 +7730,55 @@ async function runUpdate({ auto = false, waitIdle = false } = {}) {
     }
     return;
   }
-  // Android / installer builds have no source tree to rebuild — always go
-  // through the GitHub release download. Fetch the release info on the fly if
-  // the earlier check didn't populate it (e.g. it errored the first time).
-  if (!_releaseInfo && !availableVersion) { try { _releaseInfo = await invoke("latest_release"); } catch {} }
-  const noSourceTree = IS_ANDROID || !(await sourceTreeVersion(_releaseInfo?.version));
-  if (noSourceTree) {
-    if (!_releaseInfo) { try { _releaseInfo = await invoke("latest_release"); } catch (e) { flash(`Could not find a release: ${e}`); return; } }
-    const url = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
-    if (!url) { flash("No downloadable release found for this platform"); return; }
-    // Android: download the APK in-app (with progress in the Activity center),
-    // then hand it straight to the system installer — no browser, no GitHub,
-    // just "Install". Falls back to opening the download if anything fails.
-    if (IS_ANDROID && _releaseInfo.asset_url) {
-      updateBusy = true; renderUpdateBtn();
-      const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading APK… 0%" });
-      _apkTask = tid;
-      try {
-        const path = await invoke("download_apk", { url: _releaseInfo.asset_url });
-        taskEnd(tid, { detail: "downloaded — installer opened", ttl: 8000 });
-        await invoke("install_apk", { path });
-        flash("Tap Install in the Android prompt — your settings are kept");
-      } catch (e) {
-        taskEnd(tid, { status: "error", detail: String(e) });
-        try { await invoke("open_url", { url }); flash("Opening the APK download instead…"); } catch {}
-      }
-      _apkTask = null; updateBusy = false; renderUpdateBtn();
-      return;
-    }
-    // Desktop installer builds (Windows/macOS/AppImage): download the setup
-    // in-app — progress in the Activity center — then hand it to the OS.
-    // GitHub only opens as the last-resort fallback (e.g. an old binary that
-    // doesn't know the download_installer command yet).
-    if (!IS_ANDROID && _releaseInfo?.asset_url) {
-      updateBusy = true; renderUpdateBtn();
-      const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading installer… 0%" });
-      _apkTask = tid;
-      try {
-        const path = await invoke("download_installer", { url: _releaseInfo.asset_url });
-        taskEnd(tid, { detail: waitIdle ? "downloaded — installs once playback stops" : "downloaded — installer starting", ttl: 8000 });
-        if (auto && waitIdle) await waitUntilIdle(`Update v${availableVersion}`);
-        await invoke("run_installer", { path });
-        flash("Installing the update — the app restarts by itself. Your settings are kept.");
-      } catch (e) {
-        taskEnd(tid, { status: "error", detail: String(e) });
-        try { await invoke("open_url", { url }); flash("Opening the download instead…"); } catch {}
-      }
-      _apkTask = null; updateBusy = false; renderUpdateBtn();
-      return;
-    }
+  // GitHub release download. Fetch the release info on the fly if the earlier
+  // check didn't populate it (e.g. it errored the first time).
+  if (!_releaseInfo) { try { _releaseInfo = await invoke("latest_release"); } catch (e) { flash(`Could not find a release: ${e}`); return; } }
+  const url = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
+  if (!url) { flash("No downloadable release found for this platform"); return; }
+  // Android: download the APK in-app (with progress in the Activity center),
+  // then hand it straight to the system installer — no browser, no GitHub,
+  // just "Install". Falls back to opening the download if anything fails.
+  if (IS_ANDROID && _releaseInfo.asset_url) {
+    updateBusy = true; renderUpdateBtn();
+    const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading APK… 0%" });
+    _apkTask = tid;
     try {
-      await invoke("open_url", { url });
-      flash(IS_ANDROID ? "Opening the APK download — open the file to install" : "Opening the download page…");
-    } catch (e) { flash(`Could not open the download: ${e}`); }
+      const path = await invoke("download_apk", { url: _releaseInfo.asset_url });
+      taskEnd(tid, { detail: "downloaded — installer opened", ttl: 8000 });
+      await invoke("install_apk", { path });
+      flash("Tap Install in the Android prompt — your settings are kept");
+    } catch (e) {
+      taskEnd(tid, { status: "error", detail: String(e) });
+      try { await invoke("open_url", { url }); flash("Opening the APK download instead…"); } catch {}
+    }
+    _apkTask = null; updateBusy = false; renderUpdateBtn();
     return;
   }
-  // Desktop dev with a source tree: rebuild in place.
-  updateBusy = true; renderUpdateBtn();
-  try {
-    await invoke("self_update");
-    updateReady = true; updateBusy = false; renderUpdateBtn();
-    flash(`Update v${availableVersion} built — click the button to restart`);
-    notifyTrack({ title: "Music Player update ready", artist: `Click the update button in Settings to restart into v${availableVersion}`, album: "" });
-  } catch (e) {
-    updateBusy = false;
-    const btn = $("#updateBtn"); if (btn) { btn.disabled = false; btn.textContent = "Update failed — retry"; }
-    console.error("[update]", e);
-    flash("Update failed — see console/log");
+  // Desktop installer builds (Windows/macOS/AppImage): download the setup
+  // in-app — progress in the Activity center — then hand it to the OS.
+  // GitHub only opens as the last-resort fallback (e.g. an old binary that
+  // doesn't know the download_installer command yet).
+  if (!IS_ANDROID && _releaseInfo?.asset_url) {
+    updateBusy = true; renderUpdateBtn();
+    const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading installer… 0%" });
+    _apkTask = tid;
+    try {
+      const path = await invoke("download_installer", { url: _releaseInfo.asset_url });
+      taskEnd(tid, { detail: waitIdle ? "downloaded — installs once playback stops" : "downloaded — installer starting", ttl: 8000 });
+      if (auto && waitIdle) await waitUntilIdle(`Update v${availableVersion}`);
+      await invoke("run_installer", { path });
+      flash("Installing the update — the app restarts by itself. Your settings are kept.");
+    } catch (e) {
+      taskEnd(tid, { status: "error", detail: String(e) });
+      try { await invoke("open_url", { url }); flash("Opening the download instead…"); } catch {}
+    }
+    _apkTask = null; updateBusy = false; renderUpdateBtn();
+    return;
   }
+  try {
+    await invoke("open_url", { url });
+    flash(IS_ANDROID ? "Opening the APK download — open the file to install" : "Opening the download page…");
+  } catch (e) { flash(`Could not open the download: ${e}`); }
 }
 
 // ─── Cookies consent: explicit accept with a countdown + detected accounts ───
@@ -8421,12 +8422,6 @@ async function init() {
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
 
-  $("#sideFilter").addEventListener("input", e => {
-    const q = e.target.value.trim().toLowerCase();
-    document.querySelectorAll("#sourcesList .src-row, #playlistsList .pl-row[data-pl]").forEach(el => {
-      el.hidden = !!q && !el.textContent.toLowerCase().includes(q);
-    });
-  });
   $("#impAll").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = true); updateImpCount(); });
   $("#impNone").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = false); updateImpCount(); });
   $("#impList").addEventListener("change", updateImpCount);
@@ -8480,6 +8475,20 @@ async function init() {
   // Never show the WebView's native right-click menu (Reload etc.) — custom
   // menus only; text fields keep their native copy/paste menu.
   document.addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea")) e.preventDefault(); });
+  // The page handles drag and drop itself (track reordering), so a file dropped
+  // from Explorer would make WebView2 navigate to it and replace the whole app.
+  for (const type of ["dragover", "drop"]) {
+    document.addEventListener(type, e => {
+      if (!e.dataTransfer?.types?.includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "none";
+    });
+  }
+  document.addEventListener("keydown", e => {
+    if (!isBrowserShortcut(e)) return;
+    e.preventDefault();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") { const box = $("#search"); box?.focus(); box?.select(); }
+  }, true);
 
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
   // Capture-phase on document = fires for EVERY scroller, including the virtual

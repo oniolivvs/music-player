@@ -53,6 +53,11 @@ pub fn check_yt_id(id: &str) -> Result<(), String> {
     }
 }
 
+/// Piped on Windows, yt-dlp prints in the ANSI code page and drops what it cannot
+/// encode. A path holding `é` was not valid UTF-8 and one holding `藤` came back
+/// altered, so a finished download looked failed and was retried with every client.
+const YTDLP_UTF8: [&str; 2] = ["--encoding", "utf-8"];
+
 #[allow(unused_mut)]
 fn sys_cmd(prog: &str) -> Command {
     let mut cmd = Command::new(prog);
@@ -136,11 +141,11 @@ fn parse_custom_args(raw: &str) -> Result<Vec<String>, String> {
     if quote.is_some() { return Err("Custom yt-dlp arguments contain an unclosed quote".into()); }
     if !current.is_empty() { args.push(current); }
     if args.len() > 32 || raw.len() > 1500 { return Err("Custom yt-dlp arguments are too long".into()); }
-    const BLOCKED: [&str; 17] = [
+    const BLOCKED: [&str; 18] = [
         "--exec", "--exec-before-download", "--plugin-dirs", "--load-plugins",
         "--cookies", "--cookies-from-browser", "--output", "-o", "--paths", "-p",
         "--print", "--progress-template", "--newline", "--audio-format", "--audio-quality",
-        "--ffmpeg-location", "--config-locations",
+        "--ffmpeg-location", "--config-locations", "--encoding",
     ];
     for arg in &args {
         let option = arg.split('=').next().unwrap_or("").to_ascii_lowercase();
@@ -154,6 +159,11 @@ fn parse_custom_args(raw: &str) -> Result<Vec<String>, String> {
 /// Record yt-dlp failures in the shared, redacted and rotating diagnostics log.
 pub fn dbg_log(msg: &str) {
     let _ = crate::diagnostics::record("error", "youtube", "yt_dlp", msg);
+}
+
+/// Routine progress: it must not read as a failure in the diagnostics panel.
+fn dbg_info(msg: &str) {
+    let _ = crate::diagnostics::record("info", "youtube", "yt_dlp", msg);
 }
 
 fn check_bin(path: &str) -> Result<String, String> {
@@ -299,7 +309,7 @@ fn install_bin() -> Result<String, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
     let dest = std::path::Path::new(&dir).join(dest_name).to_string_lossy().into_owned();
     let tmp = format!("{dest}.part"); // download aside, rename in — never a half file
-    dbg_log(&format!("installing yt-dlp from {url}"));
+    dbg_info(&format!("installing yt-dlp from {url}"));
     // Timeouts are mandatory here: ensure_bin → install_bin sits on the path of
     // EVERY search, playlist fetch and download, and this runs while holding the
     // global install lock. A blackholed connection used to hang forever and take
@@ -327,7 +337,7 @@ fn install_bin() -> Result<String, String> {
         let _ = std::fs::remove_file(&dest);
         format!("downloaded yt-dlp did not run: {e}")
     })?;
-    dbg_log(&format!("yt-dlp installed at {dest}"));
+    dbg_info(&format!("yt-dlp installed at {dest}"));
     Ok(dest)
 }
 
@@ -376,7 +386,7 @@ fn install_ffmpeg() -> Result<String, String> {
     let url = format!("https://johnvansickle.com/ffmpeg/releases/{asset}");
     let tmp = std::env::temp_dir().join("mp-ffmpeg.tar.xz");
     let ex = std::env::temp_dir().join("mp-ffmpeg-extract");
-    dbg_log(&format!("installing ffmpeg from {url}"));
+    dbg_info(&format!("installing ffmpeg from {url}"));
     let resp = ureq::get(&url).call().map_err(|e| format!("ffmpeg download failed: {e}"))?;
     {
         let mut reader = resp.into_reader();
@@ -410,7 +420,7 @@ fn install_ffmpeg() -> Result<String, String> {
     let _ = std::fs::remove_file(&tmp);
     let _ = std::fs::remove_dir_all(&ex);
     check_bin(&ff).map_err(|e| format!("installed ffmpeg did not run: {e}"))?;
-    dbg_log(&format!("ffmpeg installed at {ff}"));
+    dbg_info(&format!("ffmpeg installed at {ff}"));
     Ok(ff)
 }
 
@@ -430,7 +440,7 @@ fn install_ffmpeg_windows() -> Result<String, String> {
     let url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
     let tmp = std::env::temp_dir().join("mp-ffmpeg.zip");
     let ex = std::env::temp_dir().join("mp-ffmpeg-extract");
-    dbg_log(&format!("installing ffmpeg from {url}"));
+    dbg_info(&format!("installing ffmpeg from {url}"));
     // Connect/read timeouts (NOT an overall cap — the zip is ~160 MB): if
     // github.com is blackholed, fail fast instead of hanging every download
     // start behind the install lock.
@@ -466,7 +476,7 @@ fn install_ffmpeg_windows() -> Result<String, String> {
     let _ = std::fs::remove_file(&tmp);
     let _ = std::fs::remove_dir_all(&ex);
     check_bin(&ff).map_err(|e| format!("installed ffmpeg did not run: {e}"))?;
-    dbg_log(&format!("ffmpeg installed at {ff}"));
+    dbg_info(&format!("ffmpeg installed at {ff}"));
     Ok(ff)
 }
 
@@ -514,56 +524,69 @@ pub struct BrowserInfo {
 /// consent dialog so the user knows what they are actually picking.
 #[tauri::command]
 pub async fn detect_browsers() -> Vec<BrowserInfo> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut out: Vec<BrowserInfo> = Vec::new();
+    let dir = |key: &str| std::env::var(key).map(std::path::PathBuf::from).unwrap_or_default();
+    browsers_in(&dir("LOCALAPPDATA"), &dir("APPDATA"))
+}
 
-    // Firefox: profiles.ini lists named profiles.
-    for (source, base) in [
-        ("system", format!("{home}/.mozilla/firefox")),
-        ("flatpak", format!("{home}/.var/app/org.mozilla.firefox/.mozilla/firefox")),
-    ] {
-        if let Ok(ini) = std::fs::read_to_string(format!("{base}/profiles.ini")) {
-            let profiles: Vec<String> = ini
-                .lines()
-                .filter_map(|l| l.strip_prefix("Name="))
-                .map(str::to_string)
-                .collect();
-            if !profiles.is_empty() {
-                out.push(BrowserInfo { browser: "firefox".into(), profiles, source: source.into() });
-            }
+/// What yt-dlp can use: it looks for a folder under `Profiles`, or a full path. The
+/// `Name=` shown in Firefox matches neither. A profile without cookies is useless
+/// here (Firefox keeps an empty "default" next to the real one).
+fn firefox_profiles(firefox: &std::path::Path, ini: &str) -> Vec<String> {
+    let profiles = firefox.join("Profiles");
+    ini.lines()
+        .filter_map(|line| line.trim().strip_prefix("Path="))
+        .map(|path| firefox.join(path.replace('/', "\\")))
+        .filter(|folder| folder.join("cookies.sqlite").exists())
+        .map(|folder| match folder.strip_prefix(&profiles) {
+            Ok(name) => name.to_string_lossy().into_owned(),
+            Err(_) => folder.to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
+fn browsers_in(local: &std::path::Path, roaming: &std::path::Path) -> Vec<BrowserInfo> {
+    let system = |browser: &str, profiles: Vec<String>| BrowserInfo {
+        browser: browser.into(),
+        profiles,
+        source: "system".into(),
+    };
+    let mut out = Vec::new();
+
+    let firefox = roaming.join(r"Mozilla\Firefox");
+    if let Ok(ini) = std::fs::read_to_string(firefox.join("profiles.ini")) {
+        let profiles = firefox_profiles(&firefox, &ini);
+        if !profiles.is_empty() {
+            out.push(system("firefox", profiles));
         }
     }
 
     // Chromium family: profile directories ("Default", "Profile N").
-    let chromiums = [
-        ("chrome", vec![format!("{home}/.config/google-chrome"), format!("{home}/.var/app/com.google.Chrome/config/google-chrome")]),
-        ("chromium", vec![format!("{home}/.config/chromium"), format!("{home}/.var/app/org.chromium.Chromium/config/chromium")]),
-        ("brave", vec![format!("{home}/.config/BraveSoftware/Brave-Browser"), format!("{home}/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser")]),
-        ("edge", vec![format!("{home}/.config/microsoft-edge")]),
-        ("vivaldi", vec![format!("{home}/.config/vivaldi")]),
-        ("opera", vec![format!("{home}/.config/opera")]),
-    ];
-    for (name, bases) in chromiums {
-        for (i, base) in bases.iter().enumerate() {
-            if !std::path::Path::new(&format!("{base}/Default")).exists() {
-                continue;
-            }
-            let mut profiles = vec!["Default".to_string()];
-            if let Ok(rd) = std::fs::read_dir(base) {
-                for e in rd.filter_map(Result::ok) {
-                    let n = e.file_name().to_string_lossy().into_owned();
-                    if n.starts_with("Profile ") {
-                        profiles.push(n);
-                    }
-                }
-            }
-            out.push(BrowserInfo {
-                browser: name.into(),
-                profiles,
-                source: if i == 0 { "system".into() } else { "flatpak".into() },
-            });
-            break; // one entry per browser
+    for (name, base) in [
+        ("chrome", r"Google\Chrome\User Data"),
+        ("chromium", r"Chromium\User Data"),
+        ("brave", r"BraveSoftware\Brave-Browser\User Data"),
+        ("edge", r"Microsoft\Edge\User Data"),
+        ("vivaldi", r"Vivaldi\User Data"),
+    ] {
+        let base = local.join(base);
+        if !base.join("Default").exists() {
+            continue;
         }
+        let mut profiles = vec!["Default".to_string()];
+        if let Ok(entries) = std::fs::read_dir(&base) {
+            profiles.extend(
+                entries
+                    .filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.starts_with("Profile ")),
+            );
+        }
+        out.push(system(name, profiles));
+    }
+
+    // Opera keeps its one profile directly in this folder.
+    if roaming.join(r"Opera Software\Opera Stable").exists() {
+        out.push(system("opera", vec!["Default".to_string()]));
     }
     out
 }
@@ -638,6 +661,7 @@ pub async fn dependency_install(cfg: State<'_, YtCfg>, dependency: String) -> Re
 
 fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<String, String> {
     let mut cmd = sys_cmd(bin);
+    cmd.args(YTDLP_UTF8);
     cmd.args(args);
     if let Some(c) = cookies {
         cmd.arg("--cookies-from-browser").arg(c);
@@ -1268,8 +1292,10 @@ fn register_download_root(dir: &str) -> String {
 /// including platform defaults and fallback locations. Startup calls this so a
 /// fresh empty setting registers the same root that a future download will use.
 #[tauri::command]
-pub fn yt_download_root(dir: String) -> Result<String, String> {
-    resolve_download_dir(&dir)
+pub async fn yt_download_root(dir: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || resolve_download_dir(&dir))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // Unlike writable(), this is used by cleanup scans and must never provision a
@@ -1334,8 +1360,12 @@ fn resolve_existing_download_dir(dir: &str) -> Result<Option<String>, String> {
 /// It intentionally does not create missing folders, but does register the
 /// selected fallback so capability-relative deletion permits its real files.
 #[tauri::command]
-pub fn yt_cleanup_download_root(dir: String) -> Result<Option<String>, String> {
-    Ok(resolve_existing_download_dir(&dir)?.map(|root| register_download_root(&root)))
+pub async fn yt_cleanup_download_root(dir: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(resolve_existing_download_dir(&dir)?.map(|root| register_download_root(&root)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// True if we can create `dir` and write a file into it.
@@ -1503,6 +1533,7 @@ fn download_attempt(
     extra_args: &[String],
 ) -> Result<String, String> {
     let mut cmd = sys_cmd(bin);
+    cmd.args(YTDLP_UTF8);
     cmd.arg("--no-playlist");
     if let Some(c) = client {
         cmd.arg("--extractor-args").arg(c);
@@ -1573,16 +1604,19 @@ fn download_attempt(
     let err_reader = stderr.map(|mut s| {
         std::thread::spawn(move || {
             use std::io::Read;
-            let mut buf = String::new();
-            let _ = s.read_to_string(&mut buf);
-            buf
+            let mut buf = Vec::new();
+            let _ = s.read_to_end(&mut buf);
+            String::from_utf8_lossy(&buf).into_owned()
         })
     });
 
     let stdout = child.lock().unwrap_or_else(|e| e.into_inner()).stdout.take().ok_or("no stdout")?;
     let mut filepath: Option<String> = None;
     let mut last_pct = -1i32;
-    for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+    // Raw lines: `lines()` ends at the first one that is not UTF-8, which closed the
+    // pipe on yt-dlp and lost the path it had just printed.
+    for line in std::io::BufReader::new(stdout).split(b'\n').map_while(Result::ok) {
+        let line = String::from_utf8_lossy(&line);
         let l = line.trim();
         if let Some(p) = l.strip_prefix("dlp|") {
             let pct = p.trim().trim_end_matches('%').parse::<f32>().unwrap_or(0.0) as i32;
@@ -1615,7 +1649,12 @@ fn download_attempt(
             .to_string();
         return Err(msg);
     }
-    filepath.ok_or_else(|| "yt-dlp did not report the output file".into())
+    // The file on disk is the proof: a path that does not resolve (or was not
+    // reported) must not turn a finished download into a failure and a re-download.
+    filepath
+        .filter(|path| std::path::Path::new(path).is_file())
+        .or_else(|| find_existing(dir, id))
+        .ok_or_else(|| "yt-dlp did not report the output file".into())
 }
 
 /// Kill a running download started by `yt_download`.
@@ -1716,6 +1755,35 @@ pub async fn resolve_async(state: &YtState, cfg: &YtCfg, id: &str) -> Result<Str
     let (state, cfg, id) = (state.clone(), cfg.clone(), id.to_string());
     tauri::async_runtime::spawn_blocking(move || resolve(&state, &cfg, &id))
         .await.map_err(|e| format!("stream resolver worker failed: {e}"))?
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::browsers_in;
+
+    #[test]
+    fn finds_browsers_where_windows_keeps_them() {
+        let base = std::env::temp_dir().join(format!("mp-browsers-{}", std::process::id()));
+        let (local, roaming) = (base.join("local"), base.join("roaming"));
+        for dir in [r"Microsoft\Edge\User Data\Default", r"Microsoft\Edge\User Data\Profile 2"] {
+            std::fs::create_dir_all(local.join(dir)).unwrap();
+        }
+        std::fs::create_dir_all(roaming.join(r"Mozilla\Firefox\Profiles\abc.default-release")).unwrap();
+        std::fs::write(roaming.join(r"Mozilla\Firefox\Profiles\abc.default-release\cookies.sqlite"), "").unwrap();
+        std::fs::write(
+            roaming.join(r"Mozilla\Firefox\profiles.ini"),
+            "[Profile1]\nName=default\nIsRelative=1\nPath=Profiles/empty.default\n\n[Profile0]\nName=default-release\nIsRelative=1\nPath=Profiles/abc.default-release\n",
+        ).unwrap();
+        std::fs::create_dir_all(roaming.join(r"Opera Software\Opera Stable")).unwrap();
+        let found = browsers_in(&local, &roaming);
+        std::fs::remove_dir_all(&base).unwrap();
+        let summary: Vec<(String, Vec<String>)> = found.into_iter().map(|b| (b.browser, b.profiles)).collect();
+        assert_eq!(summary, vec![
+            ("firefox".to_string(), vec!["abc.default-release".to_string()]),
+            ("edge".to_string(), vec!["Default".to_string(), "Profile 2".to_string()]),
+            ("opera".to_string(), vec!["Default".to_string()]),
+        ]);
+    }
 }
 
 #[cfg(test)]
@@ -1828,7 +1896,7 @@ mod url_guard_tests {
     fn download_root_uses_the_download_resolver_for_a_writable_directory() {
         let path = cleanup_test_root("provisioned");
         let raw = path.to_string_lossy().into_owned();
-        let resolved = yt_download_root(raw.clone()).unwrap();
+        let resolved = tauri::async_runtime::block_on(yt_download_root(raw.clone())).unwrap();
         assert_eq!(resolved, crate::library::canon(&raw));
         assert!(crate::library::MANAGED_ROOTS
             .lock()
@@ -1852,10 +1920,10 @@ mod url_guard_tests {
         let path = cleanup_test_root("existing");
         std::fs::create_dir_all(&path).unwrap();
         let raw = path.to_string_lossy().into_owned();
-        let download_root = yt_download_root(raw.clone()).unwrap();
+        let download_root = tauri::async_runtime::block_on(yt_download_root(raw.clone())).unwrap();
         remove_managed_test_root(&download_root);
         assert_eq!(
-            yt_cleanup_download_root(raw).unwrap(),
+            tauri::async_runtime::block_on(yt_cleanup_download_root(raw)).unwrap(),
             Some(download_root.clone())
         );
         assert!(crate::library::MANAGED_ROOTS

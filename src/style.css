@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.162 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.163 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -111,8 +111,6 @@ body.rs-dragging .rs-handle { background: var(--vio-glow); box-shadow: inset 0 0
   overflow-y: auto;
   position: relative;
 }
-.brand { font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-.brand span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item {
   text-align: left; background: transparent; border: none; color: var(--tx-2);
@@ -451,7 +449,7 @@ body.has-bg .top-drop {
   border: 1px solid transparent; cursor: pointer; transition: background .12s, transform .12s;
   min-width: 0; /* let equal 1fr tracks stay equal — a long title can't force width */
 }
-.yt-grid .yt-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.yt-grid .yt-card:hover { background: var(--bg-2); }
 .yt-grid .yt-card.selected { border-color: var(--accent); }
 .yt-grid .yt-card.playing .yc-title { color: var(--accent-2); }
 .yt-grid .yt-card.owned { opacity: .75; }
@@ -526,7 +524,7 @@ body.has-bg .top-drop {
 .empty-ico svg { width: 44px; height: 44px; }
 
 .track {
-  display: grid; grid-template-columns: 26px 40px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 26px 36px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px; align-items: center;
   padding: 6px 12px; border-radius: 8px; cursor: default; user-select: none;
 }
 .track:hover { background: var(--bg-2); }
@@ -855,6 +853,7 @@ body.bg-light.has-bg {
   --field-border: rgba(0, 0, 0, .26);
   --text-shadow-color: rgba(255, 255, 255, .92);
 }
+body.bg-light.has-bg .nav-bar,
 body.bg-light.has-bg .sidebar,
 body.bg-light.has-bg .player,
 body.bg-light.has-bg .main,
@@ -889,16 +888,8 @@ body.bg-light.has-bg input[type="text"],
 body.bg-light.has-bg input[type="search"],
 body.bg-light.has-bg select.sel,
 body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
-body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
+body.bg-light.has-bg button.ctrl.play { background: var(--tx-1); color: #fff; }
 body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
-/* The brand normally uses an accent gradient. On a light cover that gradient
-   can land in the same luminance range as the blurred artwork, so use the
-   proven dark text tone for the label while retaining the palette on icons. */
-body.artwork-theme.bg-light .brand span {
-  background: none;
-  -webkit-text-fill-color: var(--tx-1);
-  color: var(--tx-1);
-}
 
 /* Artwork panels use the palette's panel colour rather than a fixed black or
    white wash. This keeps the hot bar, top bar and drawers in one colour logic,
@@ -915,27 +906,11 @@ body.has-bg :where(.nav-bar, .sidebar, .main, .np-drawer, .player, input, textar
     0 0 1px var(--text-shadow-color);
 }
 
-/* Small icon controls sit directly over the artwork in several views. A
-   transparent button can always land on a same-colour patch, so the palette
-   gives them an opaque tinted plate and a foreground proven against that plate. */
-body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle) {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border: 1px solid var(--icon-border);
-}
-body.has-bg.icon-only .vh-actions .btn-line.sm {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border-color: var(--icon-border);
-}
-body.has-bg .sort-ico {
-  width: 28px;
-  height: 28px;
-  justify-content: center;
-  border-radius: 8px;
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border: 1px solid var(--icon-border);
+/* Quiet icon controls sit on the palette's panels, not on the bare artwork. They
+   get the same adaptive edge as text instead of an opaque plate, which keeps them
+   legible when the panels are made very transparent. */
+body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle, .vh-actions .btn-line, .top-nav .nav-item) svg {
+  filter: drop-shadow(0 1px min(2px, var(--text-shadow-blur, 2px)) var(--text-shadow-color));
 }
 /* Editable controls must belong to the same palette as the cover. Keep this
    after the generic wallpaper overrides so artwork themes do not fall back to
@@ -963,29 +938,6 @@ body.layout-compact .app { gap: 4px; padding: 4px; }
 body.layout-compact .sidebar { padding: 12px 10px; gap: 10px; }
 body.layout-compact .player { margin: 0 4px 4px; padding: 8px 12px; gap: 6px; }
 body.layout-compact .top-nav { gap: 4px; }
-body.artwork-theme .top-nav .nav-item {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border-color: var(--icon-border);
-}
-body.artwork-theme .top-nav .nav-item:hover {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border-color: var(--icon-fg);
-  filter: brightness(1.08);
-}
-body.artwork-theme .top-nav .nav-item.active {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(0, 0, 0, .28);
-}
-body.has-bg.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle):hover,
-body.has-bg.icon-only .vh-actions .btn-line.sm:hover {
-  background: var(--icon-surface);
-  color: var(--icon-fg);
-  box-shadow: 0 0 0 2px var(--icon-border);
-}
 body.has-bg .ctrl.active { color: var(--accent-2); }
 
 /* ─── Cookies consent ─── */
@@ -1143,7 +1095,6 @@ select.sel.sm-sel.sort-sel { flex: 0 0 auto; width: 144px; }
 /* Search-results filter dropdown ("All results" / "Artist matches"). */
 select#ytFilter.sm-sel { width: 138px; }
 .top-gear { font-size: 16px; width: 34px; height: 34px; flex-shrink: 0; }
-.side-filter { width: 100%; padding: 7px 10px; font-size: 12px; }
 
 /* ─── Playlist search hits (YouTube playlists modal) ─── */
 
@@ -1163,7 +1114,6 @@ select#ytFilter.sm-sel { width: 138px; }
 [data-ic], .row-ic { display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }
 .row-ic { width: 16px; color: var(--tx-3); flex-shrink: 0; }
 .pl-row.active .row-ic, .track.playing .row-ic { color: var(--accent-2); }
-.brand-ic { color: var(--accent); }
 .vh-icon svg { width: 34px; height: 34px; }
 .dl-ico svg { display: block; }
 .dl-row.done .dl-ico { color: #34d399; }
@@ -1313,11 +1263,11 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
    Windows display scaling makes CSS-px media queries unreliable here too — the
    same reason np-push is computed in JS. */
 body.main-narrow .track,
-body.main-narrow .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+body.main-narrow .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) 52px 28px; }
 body.main-narrow .track .album,
 body.main-narrow .lh-album { display: none; }
 body.main-tight .track,
-body.main-tight .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 28px; }
+body.main-tight .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) 28px; }
 body.main-tight .track .dur,
 body.main-tight .lh-dur { display: none; }
 .vh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; overflow-wrap: anywhere; }
@@ -1328,7 +1278,7 @@ body.main-tight .lh-dur { display: none; }
 
 /* ─── List column header ─── */
 .list-head {
-  display: grid; grid-template-columns: 26px 40px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px;
+  display: grid; grid-template-columns: 26px 36px minmax(0, 2.2fr) minmax(0, 1.4fr) 52px 28px; gap: 12px;
   padding: 4px 24px 8px; margin: 0 12px; border-bottom: 1px solid var(--bd);
   font-size: 11px; letter-spacing: .06em; color: var(--tx-3); font-weight: 700;
 }
@@ -1605,7 +1555,7 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 .pl-card-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 6px; }
 .pl-card-row { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px; }
 .pl-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: var(--bg-1); border: 1px solid transparent; cursor: pointer; transition: background .12s, transform .12s; }
-.pl-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.pl-card:hover { background: var(--bg-2); }
 .pc-thumb { position: relative; width: 64px; height: 48px; flex-shrink: 0; border-radius: 8px; background: var(--bg-3) center / cover no-repeat; display: grid; place-items: center; }
 .pc-badge { position: absolute; right: 3px; bottom: 3px; background: rgba(0,0,0,.72); border-radius: 5px; padding: 1px 3px; display: grid; place-items: center; }
 .pc-badge svg { width: 12px; height: 12px; color: #fff; }
@@ -1689,7 +1639,7 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
     border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
   }
   #sideResize { display: none; }
-  .track, .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+  .track, .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) 52px 28px; }
   .track .album, .list-head .lh-album { display: none; }
   .count { display: none; }
   /* Phone: the burger reappears beside the field, so centring would squeeze it.
@@ -1748,11 +1698,11 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
    collapse the column cell AND remove it from the template. */
 body.col-no-album .track > .album,
 body.col-no-album .list-head > .lh-album { display: none; }
-body.col-no-album .track, body.col-no-album .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+body.col-no-album .track, body.col-no-album .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) 52px 28px; }
 body.col-no-dur .track > .dur,
 body.col-no-dur .list-head > .lh-dur { display: none; }
-body.col-no-dur .track, body.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) minmax(0, 1.4fr) 28px; }
-body.col-no-album.col-no-dur .track, body.col-no-album.col-no-dur .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 28px; }
+body.col-no-dur .track, body.col-no-dur .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) minmax(0, 1.4fr) 28px; }
+body.col-no-album.col-no-dur .track, body.col-no-album.col-no-dur .list-head { grid-template-columns: 26px 36px minmax(0, 1fr) 28px; }
 
 /* The select chevron is a data: URI, and a data: URI is its own document —
    currentColor means nothing inside it, so the stroke has to be literal. It is
@@ -1797,7 +1747,7 @@ body.bg-light .select {
   padding: 8px; border-radius: 12px; background: var(--bg-1);
   border: 1px solid transparent; transition: background .12s, transform .12s;
 }
-.reco-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.reco-card:hover { background: var(--bg-2); }
 .reco-thumb {
   /* A REAL height, never the height:0 + padding-bottom ratio hack — the old
      Android WebView paints nothing over the padding zone (same trap as
@@ -1862,352 +1812,177 @@ body.artwork-theme.has-bg.np-push .app {
   margin-right: calc(var(--np-eff, 330px) + 8px + var(--safe-right, 0px));
 }
 
-/* ─── 2026 desktop redesign: one coherent shell, stronger hierarchy ─── */
+/* ─── Sober shell (2026-11): the list first, one accent for state only ───
+   Chrome recedes: flat panels, hairline separators, and quiet controls that only
+   show a surface when they are touched. The accent marks state and nothing else:
+   what is playing, the open tab, progress, a mode that is on, and Play. Windows
+   11's own Segoe UI Variable sets the type. */
 :root {
-  --shell-gap: 12px;
-  --surface-shadow: 0 18px 55px rgba(0, 0, 0, .28);
-  --surface-highlight: inset 0 1px 0 rgba(255, 255, 255, .045);
+  --shell-gap: 8px;
+  --surface-shadow: none;
+  --surface-highlight: none;
+  --ctl-h: 32px;
+  --ui-font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --ui-font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
-body:not(.has-bg) {
-  background:
-    radial-gradient(900px 520px at 12% -15%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
-    radial-gradient(760px 520px at 100% 15%, color-mix(in srgb, var(--accent-2) 9%, transparent), transparent 68%),
-    var(--bg-0);
-}
+body { font-family: var(--ui-font); }
+body:not(.has-bg) { background: var(--bg-0); }
+
+/* Navigation: plain tabs; the open one gets a surface and an accent glyph. */
 .nav-bar {
   margin: var(--shell-gap) var(--shell-gap) 0;
-  padding: 9px;
+  padding: 4px;
   gap: 10px;
   border: 1px solid var(--bd);
-  border-radius: calc(var(--r) + 4px);
-  background: color-mix(in srgb, var(--bg-1) 92%, var(--accent) 8%);
-  box-shadow: var(--surface-highlight), 0 10px 34px rgba(0, 0, 0, .2);
+  border-radius: var(--r);
+  background: var(--bg-1);
+  box-shadow: none;
 }
 .top-nav .nav-item {
-  min-height: 38px;
-  padding: 8px 13px;
-  border-radius: calc(var(--r) - 2px);
+  min-height: var(--ctl-h);
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  border-color: transparent;
   color: var(--tx-2);
-  letter-spacing: -.01em;
+  font-weight: 500;
+  letter-spacing: 0;
 }
-.top-nav .nav-item:hover { background: color-mix(in srgb, var(--bg-4) 72%, transparent); transform: translateY(-1px); }
-.top-nav .nav-item.active {
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-2));
-  color: var(--tx-1);
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 10%, transparent);
+.top-nav .ni-lbl { font-size: 13px; }
+.top-nav .nav-item .ni-ico { color: var(--tx-3); }
+.top-nav .nav-item:hover { background: var(--bg-2); color: var(--tx-1); }
+.top-nav .nav-item.active { background: var(--bg-3); color: var(--tx-1); }
+.top-nav .nav-item.active .ni-ico { color: var(--accent-2); }
+.top-nav > .nav-item:not(.nav-right),
+.top-nav > .top-drop-wrap {
+  flex: 0 0 auto;
 }
-.top-nav .nav-import {
-  margin-left: 5px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 7px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+.top-nav > .top-drop-wrap > .nav-item { width: auto; }
+.top-nav .nav-import { margin-left: 0; }
+.top-nav .nav-right { flex: 0 0 auto; margin-left: auto; }
+.np-drawer {
+  top: calc(var(--nav-bottom, 56px) + var(--shell-gap, 12px));
 }
-.top-nav .nav-import:hover { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #fff; }
+
+/* Shell: one flat surface per region. */
 .app {
-  grid-template-columns: var(--side-w, 278px) minmax(0, 1fr);
+  grid-template-columns: var(--side-w, 268px) minmax(0, 1fr);
   gap: var(--shell-gap);
   padding: var(--shell-gap);
 }
 .sidebar, .main, .np-drawer, .player {
   border: 1px solid var(--bd);
-  border-radius: calc(var(--r) + 4px);
-  box-shadow: var(--surface-highlight), var(--surface-shadow);
+  border-radius: var(--r);
+  box-shadow: none;
 }
-.sidebar {
-  padding: 20px 14px 14px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 90%, var(--accent) 10%), var(--bg-1) 42%);
-}
-.brand { padding: 2px 8px 8px; font-size: 19px; letter-spacing: -.035em; }
-.side-filter { min-height: 40px; border-radius: calc(var(--r) - 1px); }
-.ss-title { letter-spacing: .1em; }
-.pl-row { min-height: 46px; margin: 2px 0; border: 1px solid transparent; border-radius: calc(var(--r) - 2px); }
-.pl-row:hover { border-color: var(--bd); transform: translateX(2px); }
-.pl-row.active { background: color-mix(in srgb, var(--accent) 16%, var(--bg-3)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.main {
-  background: linear-gradient(155deg, color-mix(in srgb, var(--bg-1) 92%, var(--accent) 8%), var(--bg-1) 45%, color-mix(in srgb, var(--bg-2) 96%, var(--accent-2) 4%));
-}
-.topbar { padding-inline: 24px; }
-.search-wrap { max-width: min(760px, 70vw); }
+.sidebar { padding: 10px 8px; background: var(--bg-1); }
+.main { background: var(--bg-1); }
+
+/* Sidebar: the playlists start at the top; their heading is a quiet label. */
+#secPlaylists > .ss-head { padding: 0 8px; }
+.ss-title { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--tx-3); }
+.pl-row { min-height: 36px; margin: 0; padding: 6px 8px; gap: 9px; border: 0; border-radius: 8px; color: var(--tx-2); }
+.pl-row:hover { background: var(--bg-2); color: var(--tx-1); }
+.pl-row.active { background: var(--bg-3); color: var(--tx-1); }
+.pl-cover { width: 24px; height: 24px; border-radius: 5px; }
+
+/* Search: a plain field, no taller than a control row. */
+.topbar { padding: 10px 20px 8px; }
+.search-wrap { max-width: min(640px, 70vw); }
 .search-wrap input {
-  min-height: 44px;
-  border-radius: calc(var(--r) + 1px);
-  background: color-mix(in srgb, var(--bg-3) 86%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: 8px;
+  border-color: transparent;
+  background: var(--bg-2);
+  box-shadow: none;
 }
-.view-head { padding: 10px 28px 18px; }
-.vh-icon { width: 82px; height: 82px; border-radius: calc(var(--r) + 3px); }
-.vh-title { font-size: clamp(25px, 2.35vw, 36px); letter-spacing: -.045em; }
-.vh-sub { font-size: 12.5px; }
-.tracklist { padding: 5px 18px 22px; }
-.track {
-  margin: 3px 0;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: calc(var(--r) - 2px);
-  transition: background .14s, border-color .14s, transform .14s;
+.search-wrap input:hover { border-color: var(--bd-2); }
+.search-wrap input:focus { background: var(--bg-2); border-color: var(--accent); box-shadow: none; }
+
+/* List header: cover, title and every list action on one row; the sort control
+   joins them instead of taking a row of its own. */
+.view-head { gap: 12px; row-gap: 6px; padding: 2px 20px 8px; flex-wrap: wrap; }
+.vh-icon {
+  width: 40px; height: 40px; border-radius: 6px; font-size: 18px; flex-shrink: 0;
+  background: var(--bg-3); color: var(--tx-2); box-shadow: none;
 }
-.track:hover { background: color-mix(in srgb, var(--bg-3) 84%, transparent); border-color: var(--bd); transform: translateX(2px); }
-.track.playing {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, var(--bg-2)), color-mix(in srgb, var(--accent) 5%, var(--bg-2)));
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+.vh-icon svg { width: 20px; height: 20px; }
+.vh-txt { flex: 1 1 180px; min-width: 180px; }
+.vh-title {
+  font-family: var(--ui-font-display);
+  font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal;
 }
+.vh-sub { font-size: 12px; margin-top: 1px; }
+.vh-actions { flex: 0 1 auto; margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.vh-actions .btn-line.sm { min-height: var(--ctl-h); padding: 5px 10px; font-size: 12.5px; }
+body.icon-only .vh-actions .btn-line.sm { width: var(--ctl-h); padding: 0; gap: 0; justify-content: center; }
+.vh-actions .list-tools { display: flex; align-items: center; margin: 0 0 0 6px; padding: 0; gap: 0; }
+.vh-actions .list-tools .sort-ico { display: none; }
+.vh-actions .list-tools .sort-sel { min-height: var(--ctl-h); max-width: 180px; }
+.list-head { padding: 4px 20px 6px; margin: 0 10px; font-size: 12px; font-weight: 500; letter-spacing: 0; }
+
+/* Rows: denser, flat, the playing one tinted and named in the accent. */
+.tracklist { padding: 2px 10px 12px; }
+.track { margin: 1px 0; padding: 5px 10px; border: 0; border-radius: 6px; transition: background-color .12s; }
+.track:hover { background: var(--bg-2); }
+.track.selected { background: var(--bg-3); }
+.track.playing,
+body.paused .track.playing { background: color-mix(in srgb, var(--accent) 12%, var(--bg-2)); box-shadow: none; }
+.track.playing .t { color: var(--accent-2); font-weight: 600; }
+.meta .t { font-weight: 500; }
+.art { width: 36px; height: 36px; border-radius: 5px; }
+
+/* Player: quiet glyphs around one solid Play. */
 .player {
   margin: 0 var(--shell-gap) var(--shell-gap);
-  padding: 12px 20px 11px;
-  background: color-mix(in srgb, var(--bg-1) 91%, var(--accent) 9%);
+  padding: 8px 16px 9px;
+  gap: 6px;
+  background: var(--bg-1);
 }
-.np-art { border-radius: calc(var(--r) - 2px); box-shadow: 0 7px 18px rgba(0, 0, 0, .3); }
-.ctrl { border: 1px solid transparent; }
-.ctrl:not(.play):hover { border-color: var(--bd-2); background: var(--bg-3); }
-.ctrl.play { width: 44px; height: 44px; box-shadow: 0 8px 25px color-mix(in srgb, var(--accent) 30%, transparent); }
-.modal-backdrop { background: rgba(3, 4, 10, .76); backdrop-filter: blur(8px); }
-.modal {
-  border-radius: calc(var(--r) + 8px);
-  background: color-mix(in srgb, var(--bg-1) 94%, var(--accent) 6%);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, .62), var(--surface-highlight);
-}
-.modal-head { padding: 18px 22px; }
-.modal-head h2 { font-size: 19px; letter-spacing: -.025em; }
-.set-group { padding: 16px 18px; border-radius: calc(var(--r) + 1px); }
-.set-row { min-height: 38px; }
-.set-tab { min-height: 42px; border-radius: calc(var(--r) - 2px); }
-.set-tab.on { background: color-mix(in srgb, var(--accent) 15%, transparent); }
-.follow-choice {
-  display: block;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.follow-choice legend { font-size: 11px; font-weight: 700; color: var(--tx-3); margin: 0 0 5px; padding: 0; }
-.follow-choice-options { display: flex; align-items: center; gap: 6px; }
-.follow-choice label { position: relative; cursor: pointer; }
-.follow-choice input { position: absolute; opacity: 0; pointer-events: none; }
-.follow-choice span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 7px 11px;
-  border: 1px solid var(--bd-2);
-  border-radius: 9px;
-  color: var(--tx-2);
-  font-size: 12px;
-  font-weight: 700;
-}
-.follow-choice input:checked + span { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 24%, transparent); }
-.follow-choice input:focus-visible + span { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-.imp-import-actions { align-items: flex-end; flex-wrap: wrap; }
-.imp-import-actions .imp-dl {
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid var(--bd-2);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg-2) 80%, transparent);
-  box-sizing: border-box;
-}
-.data-transfer-card { min-height: 240px; justify-content: center; display: flex; flex-direction: column; gap: 14px; }
-.data-transfer-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.data-transfer-actions .btn, .data-transfer-actions .btn-line { min-height: 42px; }
-#setBackupStatus { overflow-wrap: anywhere; }
-#setBackupStatus.is-error { color: #f87171; }
-.st-wrap { padding: 4px 6px 28px; }
-.st-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.st-metric {
-  min-height: 126px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: 16px;
-  border: 1px solid var(--bd-2);
-  border-radius: calc(var(--r) + 3px);
-  background: linear-gradient(145deg, var(--bg-2), color-mix(in srgb, var(--bg-3) 78%, var(--accent) 22%));
-}
-.st-metric-primary { background: linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent-2) 56%, var(--bg-2))); color: #fff; }
-.st-metric span { margin-bottom: auto; color: currentColor; opacity: .72; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.st-metric strong { font-size: clamp(24px, 2.5vw, 38px); letter-spacing: -.05em; line-height: 1; }
-.st-metric small { margin-top: 7px; color: currentColor; opacity: .7; }
-.st-spotlight {
-  display: grid;
-  grid-template-columns: minmax(150px, .7fr) minmax(180px, 1fr) minmax(180px, 1.4fr);
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 14px;
-  padding: 14px 17px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--bd));
-  border-radius: calc(var(--r) + 1px);
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-2));
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-}
-.st-spotlight > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.st-spotlight-kicker { color: var(--accent-2); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.st-spotlight strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.st-spotlight > span:last-child { color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.st-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.st-card { padding: 16px; border-radius: calc(var(--r) + 2px); box-shadow: var(--surface-highlight); }
-.st-h { color: var(--tx-2); letter-spacing: .08em; }
-@media (max-width: 980px) {
-  .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .st-spotlight { grid-template-columns: 1fr; gap: 5px; }
-  .st-grid { grid-template-columns: 1fr; }
-  .st-wide { grid-column: auto; }
-}
-@media (max-width: 700px) {
-  :root { --shell-gap: 7px; }
-  .nav-bar { overflow-x: auto; flex-wrap: nowrap; }
-  .top-nav .nav-item { flex: 0 0 auto; }
-  .top-nav .nav-import { margin-left: 0; }
-  .app { grid-template-columns: 1fr; }
-  .view-head { padding-inline: 16px; }
-  .vh-icon { width: 62px; height: 62px; }
-  .tracklist { padding-inline: 8px; }
-  .st-hero { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .st-metric { min-height: 108px; padding: 13px; }
-  .follow-choice { width: 100%; flex-wrap: wrap; }
-  .follow-choice legend { flex-basis: 100%; }
-  .imp-foot-row:last-child .btn { margin-left: 0; width: 100%; }
-}
-
-/* ─── 2026 controls pass: balanced hot bar, perceptual controls, vivid actions ─── */
-.np-drawer {
-  top: calc(var(--nav-bottom, 56px) + var(--shell-gap, 12px));
-}
-.top-nav > .nav-item:not(.nav-right),
-.top-nav > .top-drop-wrap {
-  flex: 0 0 auto;
-}
-.top-nav > .top-drop-wrap > .nav-item {
-  width: auto;
-}
-.top-nav .nav-import { margin-left: 0; }
-.top-nav .nav-right { flex: 0 0 auto; margin-left: auto; }
-
-#navLibrary { --button-color: #a78bfa; }
-#navHistory { --button-color: #60a5fa; }
-#navStats { --button-color: #34d399; }
-#navYtFeed { --button-color: #fb7185; }
-#navSources { --button-color: #fbbf24; }
-#settingsBtn { --button-color: #c4b5fd; }
-.top-nav .nav-item:not(.nav-import) .ni-ico { color: var(--button-color, var(--accent-2)); }
-.top-nav .nav-item:not(.nav-import):hover {
-  color: var(--tx-1);
-  border-color: color-mix(in srgb, var(--button-color, var(--accent)) 34%, transparent);
-  background: color-mix(in srgb, var(--button-color, var(--accent)) 14%, var(--bg-2));
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--button-color, var(--accent)) 14%, transparent);
-}
-
-:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  transition: transform .16s ease, color .16s ease, border-color .16s ease,
-    background .16s ease, box-shadow .16s ease, filter .16s ease;
-}
-:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab):not(:disabled):hover {
-  transform: translateY(-2px);
-}
-:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab):not(:disabled):active {
-  transform: translateY(0) scale(.96);
-}
-.btn {
-  min-height: 40px;
-  border: 1px solid rgba(255, 255, 255, .18);
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent), var(--surface-highlight);
-}
-.btn::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: -1px;
-  background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,.25) 45%, transparent 70%);
-  transform: translateX(-125%);
-  transition: transform .42s ease;
-}
-.btn:not(:disabled):hover::after { transform: translateX(125%); }
-.btn-line {
-  min-height: 40px;
-  border-color: color-mix(in srgb, var(--accent-2) 24%, var(--bd));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--bg-2)), var(--bg-2));
-  box-shadow: var(--surface-highlight);
-}
-.btn-line:not(:disabled):hover {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-2) 65%, transparent);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 25%, var(--bg-2)), color-mix(in srgb, var(--accent-2) 15%, var(--bg-2)));
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.icon-btn:not(:disabled):hover, .ctrl:not(.play):not(:disabled):hover {
+.np-art { width: 44px; height: 44px; border-radius: 6px; box-shadow: none; }
+.now-title { font-weight: 600; }
+.controls { gap: 6px; }
+.ctrl { width: 34px; height: 34px; border: 1px solid transparent; border-radius: 8px; }
+.ctrl.play { width: 40px; height: 40px; border-radius: 50%; }
+.ctrl.state-ctrl { border: 1px solid transparent; background: transparent; }
+.ctrl.state-ctrl.active,
+body.has-bg .ctrl.state-ctrl.active,
+.ctrl.state-ctrl.active:hover {
   color: var(--accent-2);
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
-  background: color-mix(in srgb, var(--accent) 15%, var(--bg-3));
-  box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: none;
+  transform: none;
 }
-.ctrl.play {
-  color: #fff;
-  border-color: rgba(255,255,255,.24);
-  background: linear-gradient(145deg, var(--accent-2), var(--accent));
-  box-shadow: 0 9px 28px color-mix(in srgb, var(--accent) 38%, transparent);
-}
-.set-tab:hover { background: color-mix(in srgb, var(--accent) 11%, var(--bg-2)); }
-.set-tab.on {
-  color: #fff;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 28%, var(--bg-2)), color-mix(in srgb, var(--accent-2) 9%, var(--bg-2)));
-  box-shadow: inset 3px 0 0 var(--accent-2), 0 7px 20px color-mix(in srgb, var(--accent) 12%, transparent);
-}
-button:disabled { cursor: not-allowed; opacity: .58; filter: saturate(.7); }
-
-.modal.dlg { width: min(440px, 92vw); }
-.modal.dlg .modal-body { padding: 22px; gap: 16px; }
-.modal.dlg .setup-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-bottom: 0; }
-.modal.dlg .setup-actions > button { width: 100%; min-height: 46px; }
-#dlgOk, #ckOk, #setBackupExport {
-  background: linear-gradient(135deg, #8b5cf6, #3b82f6 56%, #06b6d4);
-}
-#setBackupImport {
-  border-color: color-mix(in srgb, #22d3ee 44%, var(--bd));
-  background: linear-gradient(135deg, color-mix(in srgb, #3b82f6 18%, var(--bg-2)), color-mix(in srgb, #06b6d4 12%, var(--bg-2)));
-}
-.btn.timer-armed {
-  opacity: 1;
-  color: rgba(255,255,255,.82);
-  filter: saturate(.82);
-}
-.btn.timer-armed::before {
+.ctrl.state-ctrl.active::after {
   content: "";
   position: absolute;
-  z-index: -1;
-  inset: 0;
-  transform-origin: left;
-  background: linear-gradient(90deg, #7c3aed, #2563eb, #06b6d4);
-  animation: button-countdown 5s linear forwards;
-}
-@keyframes button-countdown { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-
-.volume input#volume {
-  width: 150px;
-  border-radius: 999px;
-  filter: drop-shadow(0 3px 8px color-mix(in srgb, var(--accent) 22%, transparent));
-}
-.volume input#volume::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; }
-.volume input#volume::-webkit-slider-thumb {
-  width: 17px;
-  height: 17px;
-  margin-top: -5.5px;
-  border: 3px solid #fff;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent), 0 3px 9px rgba(0,0,0,.42);
+  left: 50%; bottom: 3px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateX(-50%);
 }
 
-body.no-anim .btn::after,
-body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
+/* Modals and settings. */
+.modal-backdrop { background: rgba(3, 4, 10, .72); backdrop-filter: blur(6px); }
+.modal {
+  border-radius: calc(var(--r) + 4px);
+  background: var(--bg-1);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+}
+.modal-head { padding: 16px 20px; }
+.modal-head h2 { font-family: var(--ui-font-display); font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.set-group { padding: 14px 16px; border-radius: var(--r); }
+.set-row { min-height: 36px; }
+.set-tab { min-height: 36px; border-radius: 8px; }
+.set-tab:hover { background: var(--bg-2); }
+.set-tab.on { color: var(--tx-1); background: var(--bg-3); box-shadow: inset 2px 0 0 var(--accent); }
 
-/* Every explicit two-choice group uses the same geometry, including settings
-   cards and confirmation popups. Individual button styles may still differ. */
+/* Two-choice groups share one geometry everywhere. */
 .paired-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2220,264 +1995,248 @@ body.no-anim .btn.timer-armed::before { animation: none; transition: none; }
   min-height: 46px;
   justify-content: center;
 }
-/* Stateful playback controls: the enabled mode must remain unmistakable over
-   dark, light and artwork-driven themes, including while hovered. */
-.ctrl.state-ctrl {
-  border: 1px solid color-mix(in srgb, var(--bd-2) 72%, transparent);
-  background: color-mix(in srgb, var(--bg-3) 72%, transparent);
+.modal.dlg { width: min(440px, 92vw); }
+.modal.dlg .modal-body { padding: 22px; gap: 16px; }
+.modal.dlg .setup-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-bottom: 0; }
+.modal.dlg .setup-actions > button { width: 100%; min-height: 46px; }
+.follow-choice {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.ctrl.state-ctrl:hover { border-color: color-mix(in srgb, var(--accent-2) 45%, var(--bd-2)); }
-.ctrl.state-ctrl.active,
-body.has-bg .ctrl.state-ctrl.active,
-.ctrl.state-ctrl.active:hover {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-2) 75%, #fff);
-  background: linear-gradient(145deg, #8b5cf6, #3b82f6 58%, #06b6d4);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 7px 20px color-mix(in srgb, var(--accent) 42%, transparent);
-  transform: translateY(-1px) scale(1.04);
+.follow-choice legend { font-size: 11px; font-weight: 600; color: var(--tx-3); margin: 0 0 5px; padding: 0; }
+.follow-choice-options { display: flex; align-items: center; gap: 6px; }
+.follow-choice label { position: relative; cursor: pointer; }
+.follow-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.follow-choice span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--bd-2);
+  border-radius: 8px;
+  color: var(--tx-2);
+  font-size: 12px;
+  font-weight: 600;
 }
-.ctrl.state-ctrl.active::after {
-  content: "";
-  position: absolute;
-  left: 50%; bottom: 2px;
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 7px #fff;
-  transform: translateX(-50%);
+.follow-choice input:checked + span { color: #fff; background: var(--accent); border-color: var(--accent); }
+.follow-choice input:focus-visible + span { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.imp-import-actions { align-items: flex-end; flex-wrap: wrap; }
+.imp-import-actions .imp-dl {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--bd-2);
+  border-radius: 8px;
+  background: var(--bg-2);
+  box-sizing: border-box;
 }
-.ctrl.state-ctrl.active:active { transform: scale(.94); }
+.data-transfer-card { min-height: 240px; justify-content: center; display: flex; flex-direction: column; gap: 14px; }
+.data-transfer-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.data-transfer-actions .btn, .data-transfer-actions .btn-line { min-height: 42px; }
+#setBackupStatus { overflow-wrap: anywhere; }
+#setBackupStatus.is-error { color: #f87171; }
 
-/* Readable dynamic player text + vivid frosted controls. The artwork palette
-   already computes WCAG-safe --tx-* colors; do not turn the brand transparent
-   and let an accent gradient accidentally blend into the cover underneath. */
-body.artwork-theme .brand > span:last-child {
-  background: none;
-  -webkit-background-clip: initial;
-  background-clip: border-box;
-  -webkit-text-fill-color: var(--tx-1);
-  color: var(--tx-1);
+/* Stats: flat cards; only the headline figure carries the accent. */
+.st-wrap { padding: 4px 6px 28px; }
+.st-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+.st-metric {
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 14px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--bg-2);
 }
-body.artwork-theme .player :where(.now-title, .time, .volume-pct, .volume-pct input) { color: var(--tx-1); }
-body.artwork-theme .player :where(.now-sub, .vol-ico, .volume-pct-sign) { color: var(--tx-2); }
-
-/* Player ranges keep a visible high-contrast rail, a two-tone played gradient,
-   and an always-discoverable thumb instead of a faint YouTube-style hairline. */
-.player input[type="range"]::-webkit-slider-runnable-track {
-  height: 7px;
-  border: 1px solid color-mix(in srgb, var(--tx-1) 28%, transparent);
-  border-radius: 4px;
-  background: linear-gradient(90deg,
-    var(--accent) 0%,
-    var(--accent-2) var(--fill, 0%),
-    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--fill, 0%),
-    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--buf, var(--fill, 0%)),
-    color-mix(in srgb, var(--bg-4) 72%, transparent) var(--buf, var(--fill, 0%)));
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .42), 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent);
+.st-metric-primary { background: color-mix(in srgb, var(--accent) 22%, var(--bg-2)); color: var(--tx-1); }
+.st-metric span { margin-bottom: auto; color: currentColor; opacity: .72; font-size: 12px; font-weight: 600; }
+.st-metric strong { font-family: var(--ui-font-display); font-size: clamp(24px, 2.4vw, 34px); font-weight: 600; letter-spacing: -.02em; line-height: 1; }
+.st-metric small { margin-top: 7px; color: currentColor; opacity: .7; }
+.st-spotlight {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(180px, 1fr) minmax(180px, 1.4fr);
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
-.player input[type="range"]::-webkit-slider-thumb,
-.volume input#volume::-webkit-slider-thumb {
-  width: 17px;
-  height: 17px;
-  margin-top: -6px;
-  border: 2px solid var(--tx-1);
-  border-radius: 5px;
-  opacity: .92;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent), 0 4px 10px rgba(0, 0, 0, .48);
-}
-.player .seekbar:hover::-webkit-slider-thumb,
-.player .seekbar:active::-webkit-slider-thumb { opacity: 1; }
-
-/* Square frosted geometry is shared by toolbar, player, modal and settings
-   actions. Palette variables keep the glass and border dynamic per artwork. */
-:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) {
-  border-radius: 9px;
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-}
-.ctrl { border-radius: 10px; }
-.ctrl.play { border-radius: 12px; }
-.btn-line {
-  border: 1px solid transparent;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--bg-2) 72%, transparent), color-mix(in srgb, var(--accent) 12%, var(--bg-2))) padding-box,
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 72%, transparent), color-mix(in srgb, var(--accent-2) 42%, transparent)) border-box;
-}
-.top-nav .nav-item {
-  border: 1px solid transparent;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--bg-2) 76%, transparent), color-mix(in srgb, var(--button-color, var(--accent)) 10%, var(--bg-2))) padding-box,
-    linear-gradient(135deg, color-mix(in srgb, var(--button-color, var(--accent)) 68%, transparent), color-mix(in srgb, var(--accent-2) 34%, transparent)) border-box;
-}
-body.artwork-theme .top-nav .nav-item,
-body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more, .dl-toggle) {
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--icon-surface) 78%, transparent),
-    color-mix(in srgb, var(--accent) 24%, transparent));
-  color: var(--icon-fg);
-  border-color: color-mix(in srgb, var(--icon-border) 82%, transparent);
-  backdrop-filter: blur(14px) saturate(1.35);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35);
-}
-body.artwork-theme .top-nav .nav-item.active {
-  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 42%, var(--icon-surface)), color-mix(in srgb, var(--accent-2) 28%, var(--icon-surface)));
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 8px 24px color-mix(in srgb, var(--accent) 26%, transparent);
-}
-@media (prefers-reduced-motion: reduce) {
-  :where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) { transition: none; }
-  .btn::after, .btn.timer-armed::before { animation: none; transition: none; }
+.st-spotlight > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-spotlight-kicker { color: var(--accent-2); font-size: 12px; font-weight: 600; }
+.st-spotlight strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-spotlight > span:last-child { color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.st-card { padding: 14px; border-radius: var(--r); box-shadow: none; }
+.st-h { color: var(--tx-2); letter-spacing: 0; text-transform: none; }
+@media (max-width: 980px) {
+  .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-spotlight { grid-template-columns: 1fr; gap: 5px; }
+  .st-grid { grid-template-columns: 1fr; }
+  .st-wide { grid-column: auto; }
 }
 @media (max-width: 700px) {
+  :root { --shell-gap: 6px; }
+  .nav-bar { overflow-x: auto; flex-wrap: nowrap; }
+  .top-nav .nav-item { flex: 0 0 auto; }
   .top-nav .nav-right { margin-left: 0; }
+  .app { grid-template-columns: 1fr; }
+  .view-head { padding-inline: 14px; }
+  .tracklist { padding-inline: 6px; }
+  .st-hero { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .st-metric { min-height: 100px; padding: 12px; }
+  .follow-choice { width: 100%; flex-wrap: wrap; }
+  .follow-choice legend { flex-basis: 100%; }
+  .imp-foot-row:last-child .btn { margin-left: 0; width: 100%; }
 }
 @media (max-width: 520px) {
   .paired-actions { grid-template-columns: 1fr; }
 }
 
-/* Final shared button skin: every real button gets the same square glass
-   treatment, including dynamically rendered row, picker, YouTube and close
-   actions. Role-specific rules below only change emphasis or layout. */
+/* Buttons: one quiet skin. Secondary actions are a plain surface; toolbar
+   glyphs show one only when touched; the primary action is solid accent. Every
+   rendered button gets it, row and picker actions included. */
+:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) {
+  position: relative;
+  transition: color .12s ease, border-color .12s ease, background-color .12s ease;
+}
+:where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab):not(:disabled):active { transform: scale(.97); }
 button {
   appearance: none;
   font: inherit;
-  border: 1px solid color-mix(in srgb, var(--accent-2) 46%, var(--bd));
-  border-radius: 9px;
   color: var(--tx-1);
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--bg-2) 66%, transparent),
-    color-mix(in srgb, var(--accent) 17%, var(--bg-2)));
-  backdrop-filter: blur(16px) saturate(1.35);
-  -webkit-backdrop-filter: blur(16px) saturate(1.35);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 5px 16px color-mix(in srgb, var(--accent) 11%, transparent);
+  border: 1px solid var(--bd-2);
+  border-radius: 8px;
+  background: var(--bg-2);
+  box-shadow: none;
 }
-button:not(:disabled):hover {
-  color: var(--tx-1);
-  border-color: color-mix(in srgb, var(--accent-2) 82%, var(--tx-1));
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--accent) 30%, var(--bg-2)),
-    color-mix(in srgb, var(--accent-2) 22%, var(--bg-2)));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 9px 24px color-mix(in srgb, var(--accent) 25%, transparent);
-  transform: translateY(-2px);
-}
-button:not(:disabled):active { transform: translateY(0) scale(.96); }
+button:not(:disabled):hover { background: var(--bg-3); }
 button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-button.btn {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-2) 78%, #fff);
-  background: linear-gradient(135deg, var(--accent), var(--accent-2) 56%, #06b6d4);
-}
+.btn, .btn-line { min-height: 40px; }
+button.btn { color: #fff; font-weight: 600; border-color: transparent; background: var(--accent); }
+button.btn:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
 button.btn-line,
-button.pick-opt {
-  border-color: color-mix(in srgb, var(--accent-2) 52%, var(--bd));
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--bg-2) 62%, transparent),
-    color-mix(in srgb, var(--accent) 15%, var(--bg-2)));
+button.pick-opt { color: var(--tx-1); border-color: var(--bd-2); background: var(--bg-2); }
+button:is(.icon-btn, .ctrl:not(.play), .more, .src-btn, .pl-del, .pl-eye, .fl-x, .dl-x, .dl-toggle, .nav-item),
+.vh-actions button.btn-line {
+  color: var(--tx-2);
+  border-color: transparent;
+  background: transparent;
 }
-button.icon-btn,
-button.ctrl,
-button.more,
-button.src-btn,
-button.pl-del,
-button.pl-eye,
-button.fl-x,
-button.dl-x,
-button.dl-toggle,
-button.yc-play {
-  border: 1px solid color-mix(in srgb, var(--accent-2) 58%, var(--bd));
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--bg-3) 70%, transparent),
-    color-mix(in srgb, var(--accent) 22%, var(--bg-3)));
-  color: var(--tx-1);
-}
-button.ctrl { border-radius: 10px; }
-button.ctrl.play {
-  border-radius: 12px;
-  color: #fff;
-  background: linear-gradient(145deg, var(--accent-2), var(--accent), #06b6d4);
-}
-button.ctrl.state-ctrl.active {
-  color: #fff;
-  border-color: var(--accent-2);
-  background: linear-gradient(145deg, var(--accent), #3b82f6 58%, #06b6d4);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), 0 8px 22px color-mix(in srgb, var(--accent) 44%, transparent);
-}
-button.set-tab,
-button.nav-item {
-  border-color: color-mix(in srgb, var(--button-color, var(--accent-2)) 54%, var(--bd));
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--bg-2) 65%, transparent),
-    color-mix(in srgb, var(--button-color, var(--accent)) 14%, var(--bg-2)));
-}
-button.set-tab.on,
-button.nav-item.active {
-  color: var(--tx-1);
-  border-color: color-mix(in srgb, var(--accent-2) 82%, var(--tx-1));
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--accent) 34%, var(--bg-2)),
-    color-mix(in srgb, var(--accent-2) 23%, var(--bg-2)));
-}
-button.yc-play { border-radius: 10px; }
-button.swatch { border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 4px 12px rgba(0,0,0,.24); }
-button.nav-import {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-2) 82%, #fff);
-  background: linear-gradient(135deg, var(--accent), var(--accent-2) 56%, #06b6d4);
-}
-body.has-bg .sort-ico {
-  border: 1px solid color-mix(in srgb, var(--accent-2) 58%, var(--bd));
-  border-radius: 9px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--bg-3) 70%, transparent), color-mix(in srgb, var(--accent) 22%, var(--bg-3)));
-  color: var(--tx-1);
-  backdrop-filter: blur(16px) saturate(1.35);
-  -webkit-backdrop-filter: blur(16px) saturate(1.35);
-}
-button:disabled { box-shadow: none; }
+button:is(.icon-btn, .ctrl:not(.play), .more, .src-btn, .pl-del, .pl-eye, .fl-x, .dl-x, .dl-toggle):not(:disabled):hover,
+.vh-actions button.btn-line:not(:disabled):hover { color: var(--tx-1); background: var(--bg-3); }
+button.ctrl.play { color: rgb(var(--panel-rgb, 11 11 15)); border-color: transparent; background: var(--tx-1); }
+button.ctrl.play:not(:disabled):hover { background: color-mix(in srgb, var(--tx-1) 86%, var(--accent)); }
+button.yc-play { color: #fff; border-color: transparent; background: var(--accent); }
+button.yc-play:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+button.yc-play { border-radius: 50%; }
+button.set-tab { color: var(--tx-2); border-color: transparent; background: transparent; }
+button.swatch { border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2); }
+button:disabled { cursor: not-allowed; opacity: .5; box-shadow: none; }
 
-/* Last cascade layer: wallpaper-specific rules above used to replace the
-   shared skin with a flat pale `--icon-surface`. Keep every button square,
-   frosted and visibly gradient-driven even when the artwork scheme is light. */
-body.has-bg button:not(.swatch) {
-  border-radius: 5px !important;
-  border-color: color-mix(in srgb, var(--accent-2) 68%, var(--bd)) !important;
-  color: var(--tx-1);
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 46%, var(--bg-2)),
-    color-mix(in srgb, var(--accent-2) 34%, var(--bg-2))) !important;
-  backdrop-filter: blur(16px) saturate(1.45);
-  -webkit-backdrop-filter: blur(16px) saturate(1.45);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.22),
-    0 6px 18px color-mix(in srgb, var(--accent) 20%, transparent);
+/* Labels in sentence case: capitals, tracking and the accent read as decoration.
+   Group titles take the text colour; small labels stay muted. */
+.folder-add label, .section-label, .ctx-label, .set-nav-group, .set-title, .np-next-head,
+.ss-title, .imp-lbl, .st-h, .dl-title, .dl-head, .list-sep, .feed-section > .list-sep, .reco-head {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
 }
-body.has-bg button:not(.swatch):not(:disabled):hover {
+.set-title, .np-next-head, .dl-title { color: var(--tx-1); font-size: 13px; }
+.set-nav-group, .ctx-label, .imp-lbl, .section-label, .folder-add label { color: var(--tx-3); font-size: 12px; }
+
+/* The countdown that arms a confirmation fills the button left to right. */
+.btn.timer-armed {
+  opacity: 1;
+  color: rgba(255, 255, 255, .82);
+}
+.btn.timer-armed::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  transform-origin: left;
+  background: rgba(255, 255, 255, .2);
+  pointer-events: none;
+  animation: button-countdown 5s linear forwards;
+}
+@keyframes button-countdown { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+body.no-anim .btn.timer-armed::before { animation: none; }
+
+/* Sliders: a visible rail, the played part in the accent, the buffered part
+   lighter, and a small round thumb. */
+.volume input#volume { width: 120px; }
+.volume input#volume::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; }
+.player input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    var(--accent-2) 0%,
+    var(--accent-2) var(--fill, 0%),
+    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--fill, 0%),
+    color-mix(in srgb, var(--tx-1) 34%, transparent) var(--buf, var(--fill, 0%)),
+    color-mix(in srgb, var(--tx-1) 14%, transparent) var(--buf, var(--fill, 0%)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tx-1) 6%, transparent);
+}
+.player input[type="range"]::-webkit-slider-thumb,
+.volume input#volume::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  opacity: 1;
+  background: var(--tx-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+}
+body.artwork-theme .player :where(.now-title, .time, .volume-pct, .volume-pct input) { color: var(--tx-1); }
+body.artwork-theme .player :where(.now-sub, .vol-ico, .volume-pct-sign) { color: var(--tx-2); }
+
+/* Over a wallpaper or artwork: the same quiet skin, as frosted glass tinted by
+   the current palette. */
+body.has-bg .top-nav .nav-item { background: transparent; border-color: transparent; }
+body.has-bg .top-nav .nav-item:hover { background: color-mix(in srgb, var(--icon-surface) 55%, transparent); }
+body.has-bg .top-nav .nav-item.active { background: color-mix(in srgb, var(--icon-surface) 80%, transparent); color: var(--tx-1); }
+body.has-bg button:not(.swatch) {
   color: var(--tx-1);
-  border-color: color-mix(in srgb, var(--accent-2) 90%, var(--tx-1)) !important;
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 62%, var(--bg-2)),
-    color-mix(in srgb, var(--accent-2) 52%, var(--bg-2))) !important;
+  border-color: color-mix(in srgb, var(--icon-border) 45%, transparent);
+  background: color-mix(in srgb, var(--icon-surface) 50%, transparent);
+  backdrop-filter: blur(var(--ui-panel-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--ui-panel-blur, 14px));
+}
+body.has-bg button:not(.swatch):not(:disabled):hover { background: color-mix(in srgb, var(--icon-surface) 80%, transparent); }
+body.has-bg button:not(.swatch):where(.icon-btn, .ctrl:not(.play), .more, .src-btn, .pl-del, .pl-eye, .fl-x, .dl-x, .dl-toggle, .set-tab:not(.on)),
+body.has-bg .vh-actions button.btn-line:not(.swatch) {
+  border-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+body.has-bg button:not(.swatch):where(.icon-btn, .ctrl:not(.play), .more, .src-btn, .pl-del, .pl-eye, .fl-x, .dl-x, .dl-toggle):not(:disabled):hover,
+body.has-bg .vh-actions button.btn-line:not(.swatch):not(:disabled):hover { background: color-mix(in srgb, var(--icon-surface) 70%, transparent); }
+/* An active mode keeps its tinted surface: the quiet-glyph rule above would
+   otherwise clear it over a wallpaper, leaving colour alone to tell on from off. */
+body.has-bg button.ctrl.state-ctrl.active:not(.swatch) {
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 body.has-bg button.btn,
-body.has-bg button.nav-import,
-body.has-bg button.ctrl.play,
-body.has-bg button.ctrl.state-ctrl.active {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-2) 82%, #fff) !important;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2) 56%, #06b6d4) !important;
-}
-body.has-bg button.set-tab.on,
-body.has-bg button.nav-item.active {
-  color: var(--tx-1);
-  border-color: var(--accent-2) !important;
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 58%, var(--bg-2)),
-    color-mix(in srgb, var(--accent-2) 42%, var(--bg-2))) !important;
-}
+body.has-bg button.yc-play { color: #fff; border-color: transparent; background: var(--accent); }
+body.has-bg button.ctrl.play { color: rgb(var(--panel-rgb, 11 11 15)); border-color: transparent; background: var(--tx-1); }
+/* The generic glass hover above outranks these; without their own hover, Play
+   and the primary buttons turned into a dark plate under the pointer. */
+body.has-bg button.ctrl.play:not(:disabled):hover { background: color-mix(in srgb, var(--tx-1) 86%, var(--accent)); }
+body.has-bg button:is(.btn, .yc-play):not(:disabled):hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+body.has-bg button.set-tab.on { background: color-mix(in srgb, var(--icon-surface) 80%, transparent); }
 body.has-bg button.swatch {
-  border-radius: 5px !important;
-  border-color: rgba(255,255,255,.5) !important;
-  backdrop-filter: blur(12px) saturate(1.35);
-  -webkit-backdrop-filter: blur(12px) saturate(1.35);
+  border-color: rgba(255, 255, 255, .5);
 }
 body.artwork-theme.has-bg .track :where(.meta .t, .meta .s, .album, .dur) {
   color: var(--tx-1);
@@ -2486,10 +2245,14 @@ body.artwork-theme.has-bg .track :where(.meta .t, .meta .s, .album, .dur) {
 }
 body.artwork-theme.has-bg .track :where(.meta .s, .album, .dur) { color: var(--tx-2); }
 body.has-bg select.sel {
-  border-radius: 5px;
-  border-color: color-mix(in srgb, var(--accent-2) 58%, var(--bd));
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--icon-border) 45%, transparent);
+  backdrop-filter: blur(var(--ui-panel-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--ui-panel-blur, 14px));
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.btn, .btn-line, .icon-btn, .ctrl, .nav-item, .set-tab) { transition: none; }
+  .btn.timer-armed::before { animation: none; }
 }
 
 /* WebView keeps a native white focus outline on password/text controls unless
@@ -2521,10 +2284,7 @@ body.bg-light.has-bg .imp-foot select option {
 /* The high-specificity generic button rule above must not undo the primary
    button foreground. This is deliberately explicit for light artwork, where
    the old cascade produced a black label on the vivid import gradient. */
-body.has-bg button.nav-import,
-body.has-bg button.btn,
-body.has-bg button.ctrl.play,
-body.has-bg button.ctrl.state-ctrl.active {
+body.has-bg button.btn {
   color: #fff !important;
   -webkit-text-fill-color: #fff !important;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .28);

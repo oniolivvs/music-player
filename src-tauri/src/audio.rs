@@ -1,25 +1,33 @@
 //! Native audio engine — gapless queue + per-track gain + anti-click fade.
 //!
-//! `rodio`'s `OutputStream` is `!Send`, so the stream lives in a dedicated thread
-//! that owns a single persistent `Sink`. Gapless playback is achieved the way
-//! rodio is designed for: the NEXT track is `append`ed to the same sink before the
-//! current one ends, so rodio transitions with no gap. Each appended source is
-//! wrapped with a short `fade_in` (kills clicks) and `amplify(gain)` (per-track
-//! ReplayGain — the sink's own volume stays the user's master control on top).
+//! A dedicated thread owns a single persistent `Sink`. Gapless playback is achieved
+//! the way rodio is designed for: the NEXT track is `append`ed to the same sink
+//! before the current one ends, so rodio transitions with no gap. Each appended
+//! source is wrapped with a short `fade_in` (kills clicks) and `amplify(gain)`
+//! (per-track ReplayGain — the sink's own volume stays the user's master control on
+//! top). Sinks play into the master mixer of `audio_output`, which owns the device.
 //!
-//! Play/Preload/Clear need the (!Send) stream handle, so they go through the
-//! channel. Pause/resume/seek/volume/status act on the shared `Sink` directly.
+//! Play/Preload/Clear go through the channel. Pause/resume/seek/volume/status act
+//! on the shared `Sink` directly.
 
+use crate::audio_output::{self, OutputEvent};
 use crate::stream::{HttpStream, ReResolve};
-use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
+use rodio::{Decoder, Sink, Source};
 use serde::Serialize;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// How long the seek command waits for the decoder before answering. The seek
+/// itself keeps going: a slow network or a missing device only delays it.
+#[cfg(not(test))]
+const SEEK_WAIT: Duration = Duration::from_secs(4);
+#[cfg(test)]
+const SEEK_WAIT: Duration = Duration::from_millis(200);
 
 const FADE: Duration = Duration::from_millis(20);
 // Automatic gain control: evens out perceived loudness across tracks (YouTube
@@ -93,6 +101,8 @@ pub struct PlaybackStatus {
 // ignored instead of being misread as a gapless track transition.
 pub struct AudioController {
     tx: Mutex<Sender<AudioCmd>>,
+    output: Sender<OutputEvent>,
+    latest_seek: Arc<AtomicU64>,
     sink: Arc<Mutex<(u64, Option<Arc<Sink>>)>>,
     next_epoch: AtomicU64,
     stream_request: Arc<AtomicU64>,
@@ -104,7 +114,7 @@ pub struct AudioController {
     // decode, or a runtime output error) so the frontend can actually tell the
     // user why there's no sound.
     last_err: Arc<Mutex<Option<String>>>,
-    // Opened output-device config ("48000 Hz · 2 ch · F32") for diagnostics.
+    // Output device and its config ("Speakers · 48000 Hz · 2 ch · F32"), for diagnostics.
     info: Arc<Mutex<String>>,
 }
 
@@ -230,88 +240,23 @@ impl AudioController {
         let last_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let err_t = last_err.clone();
         let info = Arc::new(Mutex::new(String::new()));
-        let info_t = info.clone();
         let stream_request = Arc::new(AtomicU64::new(0));
         let stream_request_t = stream_request.clone();
 
+        let sink_audible = sink.clone();
+        let (output, mixer_rx) = audio_output::spawn(
+            move || {
+                let guard = sink_audible.lock().unwrap_or_else(|e| e.into_inner());
+                guard.1.as_ref().is_some_and(|sink| !sink.is_paused() && !sink.empty())
+            },
+            last_err.clone(),
+            info.clone(),
+        );
+        let output_t = output.clone();
+
         thread::spawn(move || {
-            // Mark that the thread reached here — if the diagnostic ever shows
-            // this, the open code below never returned (hang), vs "" = thread
-            // never spawned.
-            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = "opening…".to_string();
-            // The OutputStream must stay alive for the whole thread. The audio
-            // system can be briefly unavailable at cold start (esp. Android),
-            // so retry a few times before giving up loudly. A custom error
-            // callback records RUNTIME output errors (e.g. AAudio dropping the
-            // stream mid-playback) so silent failures during playback surface too.
-            let stream = {
-                let mut got = None;
-                // Keep trying for ~30s: on Android the device can't open until
-                // setup() has bridged the Android context into ndk_context, and
-                // this thread starts BEFORE setup runs.
-                for attempt in 0..60 {
-                    let cb_err = err_t.clone();
-                    // cpal's AAudio backend can PANIC (unwraps on JNI results),
-                    // not just return Err — catch it so the reason is visible
-                    // instead of silently killing the audio thread.
-                    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        OutputStreamBuilder::from_default_device()
-                            .and_then(|b| {
-                                b.with_error_callback(move |e| {
-                                    let m = format!("audio output error: {e}");
-                                    eprintln!("[audio] {m}");
-                                    *cb_err.lock().unwrap_or_else(|e| e.into_inner()) = Some(m);
-                                })
-                                .open_stream()
-                            })
-                            .or_else(|_| OutputStreamBuilder::open_default_stream())
-                    }));
-                    let res = match res {
-                        Ok(r) => r,
-                        Err(p) => {
-                            let m = p.downcast_ref::<&str>().map(|s| s.to_string())
-                                .or_else(|| p.downcast_ref::<String>().cloned())
-                                .unwrap_or_else(|| "panic".into());
-                            eprintln!("[audio] open panicked: {m} (attempt {attempt})");
-                            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open panicked: {m}");
-                            *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("audio panic: {m}"));
-                            thread::sleep(std::time::Duration::from_millis(500));
-                            continue;
-                        }
-                    };
-                    match res {
-                        Ok(v) => { got = Some(v); break; }
-                        Err(e) => {
-                            let msg = format!("no audio output device: {e}");
-                            if attempt % 4 == 0 { eprintln!("[audio] {msg} (attempt {attempt})"); }
-                            *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg.clone());
-                            // Show the real reason live in the diagnostic even
-                            // while retrying (not only after giving up).
-                            *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open failed: {e}");
-                            thread::sleep(std::time::Duration::from_millis(500));
-                        }
-                    }
-                }
-                match got {
-                    Some(v) => {
-                        let c = v.config();
-                        *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!(
-                            "{:?} · {} ch · {:?}",
-                            c.sample_rate(), c.channel_count(), c.sample_format()
-                        );
-                        *err_t.lock().unwrap_or_else(|e| e.into_inner()) = None;
-                        v
-                    }
-                    None => {
-                        // Give up, but expose WHY (the real cpal/AAudio error) so
-                        // the "Audio output" diagnostic shows the cause.
-                        let why = err_t.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| "unknown".into());
-                        *info_t.lock().unwrap_or_else(|e| e.into_inner()) = format!("open failed: {why}");
-                        return;
-                    }
-                }
-            };
-            *sink_t.lock().unwrap_or_else(|e| e.into_inner()) = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));
+            let Ok(master) = mixer_rx.recv() else { return };
+            *sink_t.lock().unwrap_or_else(|e| e.into_inner()) = (0, Some(Arc::new(Sink::connect_new(&master))));
 
             while let Ok(cmd) = rx.recv() {
                 let agc_on = agc_t.load(Ordering::Relaxed);
@@ -319,7 +264,7 @@ impl AudioController {
                     match cmd {
                         AudioCmd::Play(path, gain, epoch, request) => {
                             if stream_request_t.load(Ordering::SeqCst) != request { return; }
-                            let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
+                            let new_sink = Arc::new(Sink::connect_new(&master));
                             new_sink.pause();
                             new_sink.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
                             match open_track_source(&path) {
@@ -391,7 +336,7 @@ impl AudioController {
                         }
                         AudioCmd::PlayPrepared(prepared, gain, epoch, _rr, request) => {
                             if stream_request_t.load(Ordering::Relaxed) == request {
-                                let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
+                                let new_sink = Arc::new(Sink::connect_new(&master));
                                 new_sink.pause();
                                 new_sink.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
                                 match prepared {
@@ -428,7 +373,7 @@ impl AudioController {
                             }
                         }
                         AudioCmd::Clear(epoch, request) => {
-                            let s = Arc::new(Sink::connect_new(stream.mixer()));
+                            let s = Arc::new(Sink::connect_new(&master));
                             s.set_volume(*vol_t.lock().unwrap_or_else(|e| e.into_inner()));
                             replace_current_sink(&sink_t, &stream_request_t, request, epoch, s);
                         }
@@ -441,11 +386,17 @@ impl AudioController {
                     eprintln!("[audio] command processing panicked: {m}");
                     *err_t.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("audio panic: {m}"));
                 }
+                // A new sink may need the device; a replaced one must be drained
+                // even when no device is open, or its decoder would stay alive.
+                let _ = output_t.send(OutputEvent::Wake);
+                let _ = output_t.send(OutputEvent::Pump);
             }
         });
 
         AudioController {
             tx: Mutex::new(tx),
+            output,
+            latest_seek: Arc::default(),
             sink,
             next_epoch: AtomicU64::new(0),
             stream_request,
@@ -462,7 +413,8 @@ impl AudioController {
         self.last_err.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
-    /// Opened audio-device config, or "" if none opened (device diagnostics).
+    /// Output device and its config, "<device> · standby" while none is needed, or
+    /// "" when Windows has no output device at all (device diagnostics).
     pub fn info(&self) -> String {
         self.info.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -542,16 +494,38 @@ impl AudioController {
     }
     pub fn resume(&self) {
         self.with_sink(|s| s.play());
+        let _ = self.output.send(OutputEvent::Wake);
     }
     pub fn set_volume(&self, level: f32) {
         let level = level.clamp(0.0, 2.0);
         *self.vol.lock().unwrap_or_else(|e| e.into_inner()) = level;
         self.with_sink(|s| s.set_volume(level));
     }
+    /// `Sink::try_seek` blocks until the mix reaches the decoder: forever when no
+    /// device pulls samples, seconds on a slow network. It waits on its own thread,
+    /// and `Pump` lets a seek complete without waking the device (paused for a
+    /// while, or no device at all). Called off the UI thread (see the command).
     pub fn seek(&self, secs: f64) {
-        self.with_sink(|s| {
-            let _ = s.try_seek(Duration::from_secs_f64(secs.max(0.0)));
+        let Some(sink) = self.sink.lock().unwrap_or_else(|e| e.into_inner()).1.clone() else { return };
+        let target = Duration::from_secs_f64(secs.max(0.0));
+        let this_seek = self.latest_seek.fetch_add(1, Ordering::SeqCst) + 1;
+        let latest = self.latest_seek.clone();
+        let (done_tx, done_rx) = channel();
+        thread::spawn(move || {
+            // A newer order replaces a pending one, so an older seek must not write last.
+            if latest.load(Ordering::SeqCst) == this_seek {
+                let _ = sink.try_seek(target);
+            }
+            let _ = done_tx.send(());
         });
+        let deadline = Instant::now() + SEEK_WAIT;
+        loop {
+            let _ = self.output.send(OutputEvent::Pump);
+            match done_rx.recv_timeout(Duration::from_millis(10)) {
+                Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => {}
+                _ => return,
+            }
+        }
     }
     pub fn status(&self) -> PlaybackStatus {
         let guard = self.sink.lock().unwrap_or_else(|e| e.into_inner());
@@ -591,6 +565,8 @@ mod tests {
         let (tx, rx) = channel();
         (AudioController {
             tx: Mutex::new(tx),
+            output: channel().0,
+            latest_seek: Arc::default(),
             sink: Arc::new(Mutex::new((0, None))),
             next_epoch: AtomicU64::new(0),
             stream_request: Arc::new(AtomicU64::new(0)),
@@ -599,6 +575,20 @@ mod tests {
             last_err: Arc::new(Mutex::new(None)),
             info: Arc::new(Mutex::new(String::new())),
         }, rx)
+    }
+
+    #[test]
+    fn seek_answers_even_when_nothing_pulls_samples() {
+        // No device, no output thread: try_seek alone would wait forever and, as a
+        // sync command, freeze the whole window.
+        let (audio, _rx) = controller_without_device();
+        let (mixer, _source) = rodio::mixer::mixer(2, 48_000);
+        let sink = Sink::connect_new(&mixer);
+        sink.append(rodio::buffer::SamplesBuffer::new(2, 48_000, vec![0.0f32; 96_000]));
+        *audio.sink.lock().unwrap() = (1, Some(Arc::new(sink)));
+        let started = Instant::now();
+        audio.seek(0.5);
+        assert!(started.elapsed() < SEEK_WAIT + Duration::from_secs(1));
     }
 
     #[test]

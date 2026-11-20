@@ -88,7 +88,10 @@ test("shuffle and repeat expose unmistakable active states", async () => {
   assert.match(html, /id="repeatBtn"[^>]*state-ctrl[^>]*aria-pressed="false"/);
   assert.match(main, /function updateShuffleBtn\(\)[\s\S]*aria-pressed/);
   assert.match(main, /function updateRepeatBtn\(\)[\s\S]*aria-pressed/);
-  assert.match(stylesheet, /\.ctrl\.state-ctrl\.active[\s\S]*linear-gradient[\s\S]*box-shadow/);
+  // On: the glyph takes the accent over an accent-tinted surface, with a dot
+  // under it — a difference of colour, surface and shape, not of colour alone.
+  assert.match(stylesheet, /\.ctrl\.state-ctrl\.active,[^{]*\{[^}]*color:\s*var\(--accent-2\)[^}]*background:\s*color-mix\(in srgb, var\(--accent\)/s);
+  assert.match(stylesheet, /\.ctrl\.state-ctrl\.active::after\s*\{[^}]*content:\s*""[^}]*border-radius:\s*50%/s);
 });
 
 test("track handoff resets the clock, buffer, timer and previous artwork immediately", async () => {
@@ -125,18 +128,21 @@ test("gapless handoff starts a fresh generation and hydrates the next duration",
   assert.match(handoff, /hydrateMissingDuration\(path, t, seq\)/);
 });
 
-test("artwork player text and controls stay readable, vivid, and frosted", async () => {
+test("artwork player text and controls stay readable over any cover", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(stylesheet, /body\.has-bg button:not\(\.swatch\)\s*\{[\s\S]*border-radius:\s*5px !important[\s\S]*background:\s*linear-gradient/);
+  // Buttons over a wallpaper are frosted glass tinted by the current palette.
+  assert.match(stylesheet, /body\.has-bg button:not\(\.swatch\)\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--icon-surface\)[^}]*backdrop-filter:\s*blur\(var\(--ui-panel-blur/s);
+  // Quiet glyphs get the text's adaptive edge instead of an opaque plate.
+  assert.match(stylesheet, /body\.has-bg :where\([^{]*\.icon-btn[^{]*\) svg\s*\{[^}]*drop-shadow\([^}]*var\(--text-shadow-color\)/s);
   assert.match(stylesheet, /body\.artwork-theme\.has-bg \.track :where\(\.meta \.t, \.meta \.s, \.album, \.dur\)/);
-  assert.match(stylesheet, /body\.artwork-theme \.brand > span:last-child\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);
   assert.match(stylesheet, /body\.artwork-theme \.player :where\(\.now-title, \.time, \.volume-pct, \.volume-pct input\)\s*\{[^}]*var\(--tx-1\)/s);
-  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*linear-gradient[^}]*var\(--accent-2\)[^}]*box-shadow/s);
-  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-thumb[\s\S]*border-radius:\s*5px[\s\S]*linear-gradient/s);
-  assert.match(stylesheet, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\)\s*\{[^}]*border-radius:\s*9px[^}]*backdrop-filter:\s*blur\(14px\)/s);
-  assert.match(stylesheet, /button\s*\{[^}]*border-radius:\s*9px[^}]*backdrop-filter:\s*blur\(16px\)/s);
-  assert.match(stylesheet, /button\.btn-line,\s*button\.pick-opt\s*\{[^}]*background:\s*linear-gradient/s);
-  assert.match(stylesheet, /button\.icon-btn,[\s\S]*button\.yc-play\s*\{[^}]*background:\s*linear-gradient/s);
+  // Play is drawn in the text colour, which the palette always contrasts with
+  // the panel (an accent taken from a dark cover could vanish), hover included.
+  assert.match(stylesheet, /body\.has-bg button\.ctrl\.play\s*\{[^}]*background:\s*var\(--tx-1\)/s);
+  assert.match(stylesheet, /body\.has-bg button\.ctrl\.play:not\(:disabled\):hover\s*\{[^}]*var\(--tx-1\)/s);
+  // The rail stays visible: played part in the accent, buffered part lighter.
+  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*linear-gradient[^}]*var\(--accent-2\)[^}]*var\(--buf/s);
+  assert.match(stylesheet, /\.player input\[type="range"\]::-webkit-slider-thumb[\s\S]*?border-radius:\s*50%[\s\S]*?opacity:\s*1/s);
 });
 
 test("UI customization exposes layout and player visibility controls", async () => {

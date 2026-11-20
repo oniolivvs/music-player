@@ -33,24 +33,11 @@ fn write_backup(path: PathBuf, data: String) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
     }
-    let previous = path.with_extension("json.bak");
-    if path.exists() {
-        let _ = fs::remove_file(&previous);
-        fs::rename(&path, &previous).map_err(|error| error.to_string())?;
-    }
-    match fs::rename(&temp, &path) {
-        Ok(()) => {
-            let _ = fs::remove_file(previous);
-            Ok(())
-        }
-        Err(error) => {
-            let _ = fs::remove_file(&temp);
-            if previous.exists() {
-                let _ = fs::rename(previous, &path);
-            }
-            Err(error.to_string())
-        }
-    }
+    // One rename replaces the old export, or leaves it untouched if it fails.
+    crate::store::rename_retrying(&temp, &path).map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        error.to_string()
+    })
 }
 
 fn read_backup(path: PathBuf) -> Result<String, String> {

@@ -10,6 +10,20 @@ export function uniqueQueuePaths(paths = []) {
   });
 }
 
+// "Keep playing from your library": the song that follows a list once it has
+// played to its end. Never one already in the queue (the list's own songs, or the
+// library songs added before it); at random with shuffle, otherwise the first
+// remaining one in library order, so the library plays one song after another.
+export function pickLibraryContinuation(libraryPaths = [], queuePaths = [], { shuffle = false, random = Math.random } = {}) {
+  const queued = new Set(queuePaths.map(path => String(path ?? "")));
+  const candidates = libraryPaths.filter(path => path && !queued.has(String(path)));
+  if (!candidates.length) return null;
+  if (!shuffle) return candidates[0];
+  const sample = Number(random());
+  const bounded = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 0.9999999999999999) : 0;
+  return candidates[Math.floor(bounded * candidates.length)];
+}
+
 export function shuffleSignature(paths = []) {
   return JSON.stringify(paths.map(path => String(path ?? "")));
 }

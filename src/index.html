@@ -31,10 +31,6 @@
   </nav>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-ic" data-ic="headphones"></span> <span>Music Player</span></div>
-
-      <input id="sideFilter" type="search" placeholder="Filter playlists…" autocomplete="off" class="side-filter">
-
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
         <div class="ss-body grow">
@@ -61,18 +57,18 @@
         <span class="sort-ico" data-ic="filter" title="Sort"></span>
         <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
           <option value="default">Sort: default</option>
-          <option value="title">Title A→Z</option>
-          <option value="title-desc">Title Z→A</option>
-          <option value="artist">Artist</option>
-          <option value="album">Album</option>
-          <option value="dur">Shortest first</option>
-          <option value="dur-desc">Longest first</option>
+          <option value="title">Sort: title A→Z</option>
+          <option value="title-desc">Sort: title Z→A</option>
+          <option value="artist">Sort: artist</option>
+          <option value="album">Sort: album</option>
+          <option value="dur">Sort: shortest first</option>
+          <option value="dur-desc">Sort: longest first</option>
         </select>
       </div>
 
       <div class="list-head" id="listHead">
-        <span class="lh-idx">#</span><span></span><span>TITLE</span>
-        <span class="lh-album">ALBUM</span><span class="lh-dur" data-ic="clock"></span><span></span>
+        <span class="lh-idx">#</span><span></span><span>Title</span>
+        <span class="lh-album">Album</span><span class="lh-dur" data-ic="clock"></span><span></span>
       </div>
 
       <section id="trackList" class="tracklist">
@@ -351,7 +347,7 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
           <p class="setup-p"><b>3/5 — Storage</b></p>
           <div class="setup-row">
             <label class="imp-lbl">Folder</label>
-            <input type="text" id="suDlDir" class="text-in grow" placeholder="~/Music/MusicPlayer">
+            <input type="text" id="suDlDir" class="text-in grow" placeholder="Music\MusicPlayer">
             <button id="suDlPick" class="btn-line sm" data-ic="folder"></button>
           </div>
           <label class="setup-chk"><input type="checkbox" id="suPrefLocal" checked> Play the local file when a track is downloaded</label>

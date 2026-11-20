@@ -3,7 +3,7 @@
 //! as JSON and atomic (temp file + rename) so a crash can't corrupt a file.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 fn safe_key(key: &str) -> Result<&str, String> {
@@ -50,17 +50,21 @@ fn store_load_blocking(path: PathBuf, key: String) -> Result<String, String> {
             }
             Err(format!("{key}.json is not valid JSON"))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        // Only "never saved" when there is no backup either: a missing primary next
+        // to a backup is an interrupted save, not an empty library.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(e) => Err(format!("cannot read {key}: {e}")),
     };
-    // Primary is missing-but-present, corrupt, or unreadable — try the backup.
+    // Primary is missing, corrupt, or unreadable — try the backup.
     let bak = path.with_extension("json.bak");
-    if let Ok(s) = fs::read_to_string(&bak) {
-        if !s.trim().is_empty() && serde_json::from_str::<serde::de::IgnoredAny>(&s).is_ok() {
-            return Ok(s);
-        }
+    match fs::read_to_string(&bak) {
+        Ok(s) if s.trim().is_empty() => primary,
+        Ok(s) if serde_json::from_str::<serde::de::IgnoredAny>(&s).is_ok() => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => primary,
+        // Something is there and cannot be used: reporting "never saved" would let
+        // the frontend rebuild an empty library and save it over the real one.
+        _ => primary.and(Err(format!("{key}.json is missing and its backup is unreadable"))),
     }
-    primary
 }
 
 #[tauri::command]
@@ -101,12 +105,103 @@ fn store_save_blocking(path: PathBuf, data: String) -> Result<(), String> {
         f.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
         f.sync_all().map_err(|e| e.to_string())?;
     }
-    if path.exists() {
-        let _ = fs::rename(&path, path.with_extension("json.bak"));
-    }
-    if let Err(e) = fs::rename(&tmp, &path) {
+    swap_in(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp); // never leave orphaned .tmp files behind
-        return Err(e.to_string());
+        e.to_string()
+    })
+}
+
+/// Copied, not moved: the primary must exist until its replacement is in place.
+/// Moving it first left no library.json at all whenever the rename then failed.
+fn swap_in(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    if path.exists() {
+        let _ = fs::copy(path, path.with_extension("json.bak"));
     }
-    Ok(())
+    rename_retrying(tmp, path)
+}
+
+#[cfg(not(test))]
+const RENAME_ATTEMPTS: u32 = 8; // about 5 s in all
+#[cfg(test)]
+const RENAME_ATTEMPTS: u32 = 5; // about 0.6 s in all
+
+/// Antivirus and indexer scans hold a freshly written file for a moment, and Windows
+/// refuses the rename until they let go (access denied, sharing or lock violation).
+pub(crate) fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut wait = std::time::Duration::from_millis(20);
+    for _ in 0..RENAME_ATTEMPTS {
+        match fs::rename(from, to) {
+            Err(e) if matches!(e.raw_os_error(), Some(5 | 32 | 33)) => std::thread::sleep(wait),
+            other => return other,
+        }
+        wait *= 2;
+    }
+    fs::rename(from, to)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mp-store-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("library.json")
+    }
+
+    #[test]
+    fn a_save_outlasts_a_scanner_holding_the_file() {
+        let path = scratch("held");
+        fs::write(&path, "[1]").unwrap();
+        // Share mode 0: exactly what makes Windows refuse a rename over this file.
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            drop(held);
+        });
+        store_save_blocking(path.clone(), "[2]".into()).unwrap();
+        release.join().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[2]");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_previous_data() {
+        let path = scratch("failed");
+        fs::write(&path, "[1]").unwrap();
+        // The scanner holds the new file past every retry.
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, "[2]").unwrap();
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&tmp).unwrap();
+        assert!(swap_in(&tmp, &path).is_err());
+        drop(held);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[1]");
+        assert_eq!(fs::read_to_string(path.with_extension("json.bak")).unwrap(), "[1]");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_missing_primary_falls_back_to_the_backup() {
+        let path = scratch("backup");
+        fs::write(path.with_extension("json.bak"), "[1]").unwrap();
+        assert_eq!(store_load_blocking(path.clone(), "library".into()).unwrap(), "[1]");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_unusable_backup_is_a_failure_not_an_empty_library() {
+        let path = scratch("corrupt");
+        fs::write(path.with_extension("json.bak"), "[1").unwrap();
+        assert!(store_load_blocking(path.clone(), "library".into()).is_err());
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn nothing_saved_yet_reads_as_empty() {
+        let path = scratch("empty");
+        assert_eq!(store_load_blocking(path.clone(), "library".into()).unwrap(), "");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }

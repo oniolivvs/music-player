@@ -149,7 +149,10 @@ test("playlist storage supports folder selection, physical moves, and shared-fil
   assert.match(main, /data-move="1"/);
   // Moving files is a playlist setting: it lives in the playlist's right-click menu.
   assert.match(main, /data-a="move">\$\{ic\(IC\.folder\)\}Move local files…/);
-  assert.doesNotMatch(main, /id="plMoveBtn"|id="plStyleBtn"|id="plUrlBtn"/);
+  // Appearance and file moves stay in the menu. Adding a video is one of the
+  // library's five actions, which every playlist header now carries.
+  assert.doesNotMatch(main, /id="plMoveBtn"|id="plStyleBtn"/);
+  assert.match(main, /buildLibraryActions\(\{ downloadableCount: nDl, scope: "playlist" \}\)/);
   assert.match(main, /invoke\("move_audio_file"/);
   assert.match(main, /PL\.replaceMany\(pathMap\)/);
   assert.match(main, /Smart pointer deduplication/);
@@ -224,7 +227,8 @@ test("hot bar actions keep natural widths with equal gaps except Settings", asyn
   assert.match(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*0 0 auto/s);
   assert.match(css, /\.top-nav \.nav-right\s*\{[^}]*margin-left:\s*auto/s);
   assert.doesNotMatch(css, /\.top-nav > \.nav-item:not\(\.nav-right\),\s*\.top-nav > \.top-drop-wrap\s*\{[^}]*flex:\s*1 1 0/s);
-  assert.match(css, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\):not\(:disabled\):hover\s*\{[^}]*translateY\(-2px\)/s);
+  // Sober: controls do not jump under the pointer.
+  assert.doesNotMatch(css, /:where\(\.btn, \.btn-line, \.icon-btn, \.ctrl, \.nav-item, \.set-tab\):not\(:disabled\):hover\s*\{[^}]*translateY/s);
   assert.match(css, /\.btn\.timer-armed::before\s*\{[^}]*animation:\s*button-countdown 5s linear forwards/s);
 });
 

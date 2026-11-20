@@ -2,6 +2,21 @@ const { chromium } = require('playwright');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 
+// WCAG contrast of two computed colours (alpha composited on white, the light
+// scheme's panel base, which is the case this test renders).
+function rgba(value) {
+  const [r, g, b, a = 1] = value.match(/[\d.]+/g).map(Number);
+  return [r, g, b].map(c => c * a + 255 * (1 - a));
+}
+function luminance(rgb) {
+  return rgb.map(c => c / 255).map(c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+}
+function contrast(fg, bg) {
+  const [a, b] = [luminance(rgba(fg)), luminance(rgba(bg))].sort((x, y) => y - x);
+  return (a + 0.05) / (b + 0.05);
+}
+
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
@@ -36,12 +51,17 @@ const assert = require('node:assert/strict');
         dependencyToolbar.innerHTML = '<button class="btn-line sm">Refresh</button><button class="btn sm">Install / repair all</button>';
         document.body.append(dependencyToolbar);
       });
+      // Artwork mode fades colours in (500 ms): read them once it has settled.
+      await page.waitForTimeout(800);
       const result = await page.evaluate(() => {
         const nav = document.querySelector('.nav-bar').getBoundingClientRect();
         const main = document.querySelector('.main').getBoundingClientRect();
         const player = document.querySelector('.player').getBoundingClientRect();
         const importer = document.querySelector('#importPlaylistBtn').getBoundingClientRect();
         const importerStyle = getComputedStyle(document.querySelector('#importPlaylistBtn'));
+        const navBarBackground = getComputedStyle(document.querySelector('.nav-bar')).backgroundColor;
+        const idleShuffle = getComputedStyle(document.querySelector('#shuffleBtn'));
+        const idleShuffleColor = idleShuffle.color, idleShuffleBackground = idleShuffle.backgroundColor;
         const optionStyle = getComputedStyle(document.querySelector('#sortSel option[value="title"]'));
         const listTitleStyle = getComputedStyle(document.querySelector('#trackList .meta .t'));
         const listSubStyle = getComputedStyle(document.querySelector('#trackList .meta .s'));
@@ -51,6 +71,8 @@ const assert = require('node:assert/strict');
           .map(button => button.getBoundingClientRect());
         const focusStyle = getComputedStyle(document.querySelector('input[type="password"]'));
         const shuffle = document.querySelector('#shuffleBtn');
+        // Read the end state, not the first frame of its colour transition.
+        shuffle.style.transition = 'none';
         shuffle.classList.add('active');
         const activeShuffle = getComputedStyle(shuffle);
         const nowPlaying = document.querySelector('#npPanel');
@@ -75,8 +97,9 @@ const assert = require('node:assert/strict');
           dependencyTopDelta: Math.max(...dependencyButtons.map(box => box.top)) - Math.min(...dependencyButtons.map(box => box.top)),
           dependencyHeight: dependencyButtons[0].height,
           focusedTextOutline: focusStyle.outlineStyle,
-          activeShuffleBackground: activeShuffle.backgroundImage,
-          activeShuffleShadow: activeShuffle.boxShadow,
+          navBarBackground,
+          activeShuffleChanged: activeShuffle.color !== idleShuffleColor && activeShuffle.backgroundColor !== idleShuffleBackground,
+          activeShuffleDot: getComputedStyle(shuffle, '::after').content,
           nowPlayingTop: npBox.top, nowPlayingRight: npBox.right, nowPlayingBottom: npBox.bottom,
           nowPlayingArtRight: artBox.right, nowPlayingArtBottom: artBox.bottom,
           nowPlayingFitsViewport: npBox.left >= -1 && npBox.right <= window.innerWidth + 1 && npBox.top >= nav.bottom,
@@ -89,7 +112,7 @@ const assert = require('node:assert/strict');
       assert.ok(result.navBottom <= result.mainTop + 1, JSON.stringify({ viewport, result }));
       assert.ok(result.mainBottom <= result.playerTop + 1, JSON.stringify({ viewport, result }));
       assert.ok(result.importerWidth > 0, JSON.stringify({ viewport, result }));
-      assert.equal(result.importerColor, 'rgb(255, 255, 255)', JSON.stringify({ viewport, result }));
+      assert.ok(contrast(result.importerColor, result.navBarBackground) >= 4.5, JSON.stringify({ viewport, result }));
       assert.equal(result.optionColor, 'rgb(17, 19, 24)', JSON.stringify({ viewport, result }));
       assert.equal(result.optionBackground, 'rgb(255, 255, 255)', JSON.stringify({ viewport, result }));
       assert.notEqual(result.listTitleColor, 'rgb(255, 255, 255)', JSON.stringify({ viewport, result }));
@@ -100,8 +123,8 @@ const assert = require('node:assert/strict');
       assert.ok(result.dependencyTopDelta <= 0.1, JSON.stringify({ viewport, result }));
       assert.equal(result.dependencyHeight, 40, JSON.stringify({ viewport, result }));
       assert.equal(result.focusedTextOutline, 'none', JSON.stringify({ viewport, result }));
-      assert.match(result.activeShuffleBackground, /linear-gradient/);
-      assert.notEqual(result.activeShuffleShadow, 'none');
+      assert.equal(result.activeShuffleChanged, true, JSON.stringify({ viewport, result }));
+      assert.equal(result.activeShuffleDot, '""', JSON.stringify({ viewport, result }));
       assert.equal(result.nowPlayingFitsViewport, true, JSON.stringify({ viewport, result }));
       assert.equal(result.nowPlayingFitsPlayer, true, JSON.stringify({ viewport, result }));
       if (viewport.width <= 560) assert.ok(result.nowPlayingCenterDelta <= 1, JSON.stringify({ viewport, result }));

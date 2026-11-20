@@ -283,25 +283,24 @@ test("artwork theme gives every editable field palette-driven colors", async () 
   assert.match(rule[2], /border-color:\s*var\(--icon-border\)/);
 });
 
-test("artwork backgrounds give shared icon controls an opaque readable surface", async () => {
+test("artwork backgrounds keep icon glyphs readable without opaque plates", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  const sharedRule = [...stylesheet.matchAll(/body\.has-bg\s+:where\((.*?)\)\s*\{([^}]*)\}/gs)]
+  // Quiet icons sit on the palette's panels; the text's adaptive edge keeps them
+  // legible when those panels are made very transparent. Play is not one of them.
+  const sharedRule = [...stylesheet.matchAll(/body\.has-bg\s+:where\(([^{]*?)\) svg\s*\{([^}]*)\}/gs)]
     .find(match => match[1].includes(".icon-btn"));
-  assert.ok(sharedRule, "shared artwork icon-control rule is missing");
-  assert.match(sharedRule[1], /\.icon-btn/);
+  assert.ok(sharedRule, "shared artwork icon rule is missing");
   assert.match(sharedRule[1], /\.ctrl:not\(\.play\)/);
   assert.doesNotMatch(sharedRule[1], /\.ctrl\.play/);
-  assert.match(sharedRule[2], /background:\s*var\(--icon-surface\)/);
-  assert.match(sharedRule[2], /color:\s*var\(--icon-fg\)/);
-  assert.match(sharedRule[2], /border:\s*1px solid var\(--icon-border\)/);
-  assert.match(stylesheet, /body\.has-bg\s+\.sort-ico\s*\{[^}]*var\(--icon-surface\)[^}]*var\(--icon-fg\)[^}]*\}/s);
+  assert.match(sharedRule[2], /drop-shadow\([^;]*var\(--text-shadow-color\)/);
+  assert.doesNotMatch(stylesheet, /body\.has-bg\s+:where\([^{]*\.icon-btn[^{]*\)\s*\{[^}]*background:\s*var\(--icon-surface\)/s);
 });
 
 test("artwork theme colors every top navigation state from the cover palette", async () => {
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
-  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\s*\{[^}]*background:\s*var\(--icon-surface\)[^}]*color:\s*var\(--icon-fg\)[^}]*border-color:\s*var\(--icon-border\)/s);
-  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item:hover\s*\{[^}]*border-color:\s*var\(--icon-fg\)/s);
-  assert.match(stylesheet, /body\.artwork-theme\s+\.top-nav\s+\.nav-item\.active\s*\{[^}]*border-color:\s*var\(--accent\)[^}]*box-shadow:/s);
+  assert.match(stylesheet, /body\.has-bg \.top-nav \.nav-item:hover\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--icon-surface\)/s);
+  assert.match(stylesheet, /body\.has-bg \.top-nav \.nav-item\.active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--icon-surface\)[^}]*color:\s*var\(--tx-1\)/s);
+  assert.match(stylesheet, /\.top-nav \.nav-item\.active \.ni-ico\s*\{[^}]*color:\s*var\(--accent-2\)/s);
 });
 
 test("blurred artwork surfaces use an adaptive text contrast shadow", async () => {
@@ -316,7 +315,8 @@ test("artwork hot bar uses the same palette panel tint and stronger light-scheme
   const stylesheet = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(stylesheet, /body\.artwork-theme\.has-bg\s+:where\([^)]*\.sidebar[^)]*\.player[^)]*\)\s*\{[^}]*background:\s*rgb\(var\(--panel-rgb/);
   assert.match(stylesheet, /body\.bg-light\.has-bg\s*\{[^}]*--tx-2:\s*#27303f[^}]*--tx-3:\s*#374151/s);
-  assert.match(stylesheet, /body\.artwork-theme\.bg-light\s+\.brand\s+span\s*\{[^}]*-webkit-text-fill-color:\s*var\(--tx-1\)/s);
+  // The light scheme covers the nav bar too: dark text never lands on a dark bar.
+  assert.match(stylesheet, /body\.bg-light\.has-bg \.nav-bar,[^{]*\{[^}]*background:\s*rgba\(255, 255, 255/s);
 });
 
 test("a slow previous cover cannot overwrite the current cover", async () => {

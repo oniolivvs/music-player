@@ -4,6 +4,7 @@
 compile_error!("Music Player is supported on Windows only.");
 
 mod audio;
+mod audio_output;
 mod diagnostics;
 mod importer;
 mod lyrics;
@@ -121,9 +122,13 @@ fn set_agc(on: bool, state: State<AppState>) {
     state.audio.set_agc(on);
 }
 
+// Not on the UI thread: a seek waits for the decoder, which takes seconds on a
+// slow stream and used to freeze the window for as long.
 #[tauri::command]
-fn seek(secs: f64, state: State<AppState>) {
-    state.audio.seek(secs);
+async fn seek(secs: f64, app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().audio.seek(secs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -306,143 +311,6 @@ async fn prefetch_stream(
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<(), String> {
     resolve_stream_url(&yt, &cfg, &id).await.map(|_| ())
-}
-
-// ─── Self-update: the binary is built from the local source tree (the GitHub
-// repo checkout), so "latest version" = the version in the tree's
-// tauri.conf.json, and "update" = cargo build + restart. ───
-
-fn source_dir() -> Result<std::path::PathBuf, String> {
-    // exe lives at <src-tauri>/target/debug/music-player
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe
-        .ancestors()
-        .nth(3)
-        .ok_or("cannot locate the source tree")?
-        .to_path_buf();
-    if dir.join("tauri.conf.json").exists() {
-        Ok(dir)
-    } else {
-        Err("source tree not found next to the binary".into())
-    }
-}
-
-const DEV_BOX: &str = "mp-dev"; // container holding git + the Rust toolchain
-
-fn dev_user() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "user".into())
-}
-
-/// Best-effort: make sure the dev container is running before we exec into it.
-fn ensure_devbox() {
-    let _ = std::process::Command::new("podman").args(["start", DEV_BOX]).output();
-}
-
-/// Run git in the source repo. Immutable/atomic hosts (Bazzite/Silverblue) have
-/// no git on the host — the dev tools live in the dev container — so if the
-/// host git isn't found, run git INSIDE that container (the repo path is shared).
-fn git_out(dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    match std::process::Command::new("git").arg("-C").arg(dir).args(args).output() {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            ensure_devbox();
-            let dirs = dir.to_string_lossy().to_string();
-            let mut cmd = std::process::Command::new("podman");
-            cmd.args(["exec", "-u", &dev_user(), DEV_BOX, "git", "-C", &dirs]);
-            cmd.args(args);
-            cmd.output()
-        }
-        other => other,
-    }
-}
-
-/// The build command. Prefer `cargo` on PATH (app launched inside the toolchain
-/// env); otherwise build inside the dev container where the Rust toolchain
-/// lives — so the in-app Update / downgrade work even when the app runs on a
-/// host that has no cargo. `touch tauri.conf.json` forces Tauri to re-embed the
-/// frontend (its build script doesn't watch src/).
-fn build_argv(dir: &std::path::Path) -> (String, Vec<String>) {
-    let inner = format!(
-        "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd '{}' && touch tauri.conf.json && cargo build 2>&1",
-        dir.display()
-    );
-    let has_cargo = std::process::Command::new("bash")
-        .arg("-lc")
-        .arg("command -v cargo >/dev/null 2>&1")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if has_cargo {
-        ("bash".into(), vec!["-lc".into(), inner])
-    } else {
-        ensure_devbox();
-        (
-            "podman".into(),
-            vec![
-                "exec".into(), "-u".into(), dev_user(), DEV_BOX.into(),
-                "bash".into(), "-lc".into(), inner,
-            ],
-        )
-    }
-}
-
-/// Stream a cargo build; "update" events carry the progress lines.
-fn do_build(app: &tauri::AppHandle) -> Result<String, String> {
-    use std::io::BufRead;
-    use tauri::Emitter;
-    let dir = source_dir()?;
-    let (prog, args) = build_argv(&dir);
-    let mut child = std::process::Command::new(&prog)
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run the build ({prog}): {e}"))?;
-    let mut tail: Vec<String> = Vec::new();
-    if let Some(out) = child.stdout.take() {
-        for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
-            let _ = app.emit("update", line.clone());
-            tail.push(line);
-            if tail.len() > 40 {
-                tail.remove(0);
-            }
-        }
-    }
-    let status = child.wait().map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err(format!("build failed:\n{}", tail.join("\n")));
-    }
-    Ok("built".into())
-}
-
-/// Latest version PUBLISHED ON GITHUB (origin/main) so "check for updates"
-/// reflects GitHub, not whatever happens to be checked out locally.
-#[tauri::command]
-async fn source_version() -> Result<String, String> {
-    if let Ok(dir) = source_dir() {
-        let _ = git_out(
-            &dir,
-            &["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=10", "fetch", "origin", "--tags", "--quiet"],
-        );
-        let txt = git_out(&dir, &["show", "origin/main:src-tauri/tauri.conf.json"])
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .or_else(|| std::fs::read_to_string(dir.join("tauri.conf.json")).ok())
-            .ok_or("cannot read version")?;
-        let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
-        return v["version"].as_str().map(str::to_string).ok_or_else(|| "no version field".into());
-    }
-    // Installed builds have no tree. Answering with the GitHub release tag here
-    // made the frontend believe it ran from source: it then called
-    // `self_update`, which can only open the releases page in the browser — so
-    // native updates never installed by themselves.
-    Err("installed build: no source tree".into())
-}
-
-/// Relaunch the app process — used right after a build replaced the binary.
-#[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
 }
 
 /// Windows update info from GitHub releases.
@@ -815,112 +683,6 @@ async fn latest_release() -> Result<ReleaseInfo, String> {
     Err("no release with an installer for this platform".into())
 }
 
-/// Update to the latest version on GitHub: fetch, move the tree onto origin/main,
-/// then rebuild. (The app's source tree is only ever a clean checkout.)
-#[tauri::command]
-async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
-    if let Ok(dir) = source_dir() {
-        let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
-        // The update must build EXACTLY origin/main, whatever the local tree
-        // holds: `checkout -B main origin/main` only moves the branch pointer,
-        // so existing local edits (stale or experimental) still compiled and
-        // the app restarted on something other than the published release.
-        let _ = git_out(&dir, &["reset", "--hard", "origin/main", "--quiet"]);
-        return do_build(&app);
-    }
-
-    // No source tree (installer / mobile): open the releases page to download.
-    use tauri_plugin_opener::OpenerExt;
-    let _ = app
-        .opener()
-        .open_url("https://github.com/oniolivvs/music-player/releases/latest".to_string(), None::<&str>);
-    Err("Opened the download page in your browser. Please run the new installer to update.".into())
-}
-
-#[derive(serde::Serialize)]
-struct VersionEntry {
-    version: String,
-    hash: String,
-    date: String,
-    current: bool,
-}
-
-/// List the version commits in the local git history (any branch) so the user
-/// can switch (downgrade or re-upgrade) between built versions.
-#[tauri::command]
-async fn list_versions() -> Result<Vec<VersionEntry>, String> {
-    let dir = source_dir()?;
-    let git = |args: &[&str]| git_out(&dir, args);
-    // Pull the latest versions published on GitHub first (best-effort — offline
-    // or no cached credentials just falls back to whatever is already local).
-    let _ = git(&[
-        "-c", "http.lowSpeedLimit=1000",
-        "-c", "http.lowSpeedTime=10", // give up if the network stalls for 10s
-        "fetch", "origin", "--tags", "--quiet",
-    ]);
-    let out = git(&["log", "--all", "--date-order", "--pretty=%H\x1f%cs\x1f%s", "-n", "500"])
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err("not a git checkout (version switching needs the source repo)".into());
-    }
-    let head = git(&["rev-parse", "HEAD"])
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut seen = std::collections::HashSet::new();
-    let mut list = Vec::new();
-    for line in text.lines() {
-        let mut it = line.splitn(3, '\x1f');
-        let hash = it.next().unwrap_or("").to_string();
-        let date = it.next().unwrap_or("").to_string();
-        let subj = it.next().unwrap_or("");
-        let ver = subj.split_whitespace().next().unwrap_or("");
-        // Only "vX…" commit subjects; keep the newest occurrence of each version.
-        if !ver.starts_with('v') || !ver[1..].starts_with(|c: char| c.is_ascii_digit()) {
-            continue;
-        }
-        if !seen.insert(ver.to_string()) {
-            continue;
-        }
-        let current = !hash.is_empty() && hash == head;
-        list.push(VersionEntry { version: ver.to_string(), hash, date, current });
-    }
-    Ok(list)
-}
-
-/// Check out a version commit and rebuild into it, then the UI restarts.
-/// Refuses if the working tree is dirty (would clobber local edits).
-#[tauri::command]
-async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, String> {
-    let dir = source_dir()?;
-    // Make sure the target commit (possibly GitHub-only) is available locally.
-    let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
-    // Force-checkout the chosen version: the source tree is only ever a clean
-    // checkout, so this is safe and avoids a "dirty tree" dead-end for the user.
-    // `rev` arrives from the webview. Git treats a leading `-` as an OPTION, so
-    // an unvalidated rev turns this into an arbitrary `git checkout` invocation.
-    // Tags and SHAs only need this alphabet; anything else is rejected outright.
-    if rev.is_empty()
-        || rev.len() > 100
-        || rev.starts_with('-')
-        || rev.contains("..")
-        || !rev.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
-    {
-        return Err("invalid version reference".into());
-    }
-    let co = git_out(&dir, &["-c", "advice.detachedHead=false", "checkout", "-f", &rev])
-        .map_err(|e| e.to_string())?;
-    if !co.status.success() {
-        return Err(format!(
-            "git checkout failed: {}",
-            String::from_utf8_lossy(&co.stderr).trim()
-        ));
-    }
-    // Rebuild AT this version (not origin/main — that's what self_update does).
-    do_build(&app)
-}
-
 /// WebView2 was never told the window was minimized: it kept compositing every
 /// frame (measured: more GPU minimized than in the foreground, 1.87 % vs
 /// 0.76 %), and the page stayed "visible". Hiding the WebView on minimize is
@@ -1020,7 +782,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, fs_exists, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
-            source_version, self_update, restart_app, list_versions, switch_version,
             latest_release, open_url, download_apk, install_apk, download_installer, run_installer,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,

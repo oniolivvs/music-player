@@ -15,17 +15,23 @@ use lofty::prelude::*;
 use lofty::read_from_path;
 use lofty::tag::ItemKey;
 
+/// The first picture embedded in a track's tags, with its MIME type.
+pub fn embedded_picture(path: &str) -> Option<(Vec<u8>, String)> {
+    let tagged = read_from_path(path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    let pic = tag.pictures().first()?;
+    let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
+    Some((pic.data().to_vec(), mime.to_string()))
+}
+
 /// Embedded cover art for a single track, as a `data:` URL (or None if the file
 /// has no embedded picture). Called lazily by the frontend, deduped per album.
 /// async: reads a file — must never block the main (UI) thread.
 #[tauri::command]
 pub async fn cover(path: String) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let tagged = read_from_path(&path).ok()?;
-        let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-        let pic = tag.pictures().first()?;
-        let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
-        cover_data_url(pic.data(), mime).ok()
+        let (data, mime) = embedded_picture(&path)?;
+        cover_data_url(&data, &mime).ok()
     })
     .await
     .ok()
@@ -40,6 +46,26 @@ pub struct Track {
     pub album: String,
     pub duration_secs: u64,
     pub gain: f32, // linear ReplayGain multiplier (1.0 = no change)
+}
+
+#[cfg(test)]
+#[test]
+fn remote_images_come_only_from_the_known_hosts() {
+    assert!(remote_image_allowed("https://i.ytimg.com/vi/abc/hq720.jpg?sqp=x&rs=y"));
+    assert!(!remote_image_allowed("http://i.ytimg.com/vi/abc/hq720.jpg"));
+    assert!(!remote_image_allowed("https://evil.example/?u=i.ytimg.com"));
+    assert!(!remote_image_allowed("https://i.ytimg.com.evil.example/a.jpg"));
+}
+
+#[cfg(test)]
+#[test]
+fn strip_verbatim_keeps_network_shares_absolute() {
+    assert_eq!(strip_verbatim(r"\\?\C:\Music\a.mp3"), r"C:\Music\a.mp3");
+    assert_eq!(strip_verbatim(r"\\?\UNC\nas\music\a.mp3"), r"\\nas\music\a.mp3");
+    assert_eq!(strip_verbatim(r"\\nas\music"), r"\\nas\music");
+    assert_eq!(strip_verbatim(r"D:\Music"), r"D:\Music");
+    assert_eq!(strip_verbatim(r"\\?\Volume{abc}\Music"), r"\\?\Volume{abc}\Music");
+    assert!(std::path::Path::new(&strip_verbatim(r"\\?\UNC\nas\music\a.mp3")).is_absolute());
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,44 +100,28 @@ const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac",
     // NOT read as an empty source, and its files can be sized / deleted.
     "mp4", "webm", "mkv"];
 
-/// Canonical form of a path: symlinks resolved (e.g. Fedora atomic's
-/// /home/user → /var/home/user), Windows' `\\?\` verbatim prefix stripped.
-/// The SAME folder picked through two different spellings used to produce two
-/// distinct path strings for every file — doubling the whole library.
+/// Canonical form of a path: symlinks resolved, Windows' `\\?\` verbatim prefix
+/// stripped. The SAME folder picked through two different spellings used to produce
+/// two distinct path strings for every file — doubling the whole library.
 pub fn canon(path: &str) -> String {
-    #[allow(unused_mut)]
-    let mut s = match std::fs::canonicalize(path) {
-        Ok(p) => {
-            let s = p.to_string_lossy().into_owned();
-            s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
-        }
+    match std::fs::canonicalize(path) {
+        Ok(p) => strip_verbatim(&p.to_string_lossy()),
         Err(_) => path.to_string(),
-    };
-    // Distrobox/Fedora-atomic quirk: inside the dev container /home and
-    // /var/home are two BIND MOUNTS of the same directory (no symlink for
-    // canonicalize to resolve), so both spellings survive as "canonical" and
-    // every file can still exist under two paths — exactly what doubled the
-    // library. When both really are one filesystem object, fold onto /var/home.
-    // NB: compare at /home/<user> level — inside the container the /home and
-    // /var/home ROOTS are distinct overlay dirs even when the user dirs are
-    // the very same mount (observed: /home 133:777264 vs /var/home 133:783629,
-    // but /home/user == /var/home/user == 63:257).
-    #[cfg(unix)]
-    if let Some(rest) = s.strip_prefix("/home/") {
-        let user = rest.split('/').next().unwrap_or("");
-        if !user.is_empty() && same_file(&format!("/home/{user}"), &format!("/var/home/{user}")) {
-            s = format!("/var/home/{rest}");
-        }
     }
-    s
 }
 
-#[cfg(unix)]
-fn same_file(a: &str, b: &str) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (std::fs::metadata(a), std::fs::metadata(b)) {
-        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
-        _ => false,
+/// `\\?\UNC\server\share` is the verbatim form of `\\server\share`, not of
+/// `UNC\server\share`: that relative path made every network share and mapped
+/// drive (canonicalize resolves those to UNC too) unusable as a music source.
+fn strip_verbatim(path: &str) -> String {
+    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    // Only a drive path has a plain form: `\\?\Volume{…}\` (a disk mounted without
+    // a letter) would turn into a relative path too.
+    match path.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => path.to_string(),
     }
 }
 
@@ -136,23 +146,32 @@ pub fn register_root(path: &str) {
 
 /// Frontend startup: declare the source folders (and download dir) up front so
 /// destructive operations are bounded even before the first scan of the session.
+/// Off the UI thread, like canon_path below: canonicalizing touches the disk, and
+/// a sleeping hard disk or an offline network drive answers after many seconds.
 #[tauri::command]
-pub fn register_roots(paths: Vec<String>) {
-    for p in paths.iter().filter(|p| !p.is_empty()) {
-        register_root(p);
-    }
+pub async fn register_roots(paths: Vec<String>) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        for p in paths.iter().filter(|p| !p.is_empty()) {
+            register_root(p);
+        }
+    })
+    .await;
 }
 
 /// Frontend helper: canonicalize one path (folder pickers may return aliases).
 #[tauri::command]
-pub fn canon_path(path: String) -> String {
-    canon(&path)
+pub async fn canon_path(path: String) -> String {
+    let fallback = path.clone();
+    tauri::async_runtime::spawn_blocking(move || canon(&path)).await.unwrap_or(fallback)
 }
 
 /// Batch canonicalization — one IPC call for the whole library at startup.
 #[tauri::command]
-pub fn canon_paths(paths: Vec<String>) -> Vec<String> {
-    paths.iter().map(|p| canon(p)).collect()
+pub async fn canon_paths(paths: Vec<String>) -> Vec<String> {
+    let fallback = paths.clone();
+    tauri::async_runtime::spawn_blocking(move || paths.iter().map(|p| canon(p)).collect())
+        .await
+        .unwrap_or(fallback)
 }
 
 /// Total size in bytes of all audio files under a folder (recursive). Powers the
@@ -881,59 +900,29 @@ pub async fn delete_file(path: String) -> Result<(), String> {
     .map_err(|error| error.to_string())?
 }
 
-/// Reveal a path in the host file manager. For a file we open its containing
-/// folder (so it works for both source folders and individual tracks). The app
-/// may run inside a container whose `xdg-open` forwards to the host; if that
-/// isn't wired, fall back to `distrobox-host-exec xdg-open`.
+/// Reveal a path in Explorer. A real file gets SELECTED in its folder, which is what
+/// you expect from a track row; a missing one opens the folder it was in.
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
+pub async fn open_path(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || reveal_path(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn reveal_path(path: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     let p = std::path::Path::new(&path);
-    let is_file = p.is_file();
-    let target = if is_file || p.is_dir() {
-        path.clone()
+    let mut explorer = std::process::Command::new("explorer");
+    if p.is_file() {
+        // raw_arg: `arg` quotes the whole `/select,…` when the path holds a space,
+        // and Explorer then ignores it and opens Documents.
+        explorer.raw_arg(format!("/select,\"{}\"", path.replace('/', "\\")));
+    } else if p.is_dir() {
+        explorer.arg(&path);
     } else {
-        p.parent()
-            .map(|d| d.to_string_lossy().into_owned())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| path.clone())
-    };
-    #[cfg(target_os = "windows")]
-    {
-        // A real file gets SELECTED in Explorer (`/select,"C:\…"`) instead of only
-        // opening its parent folder — matches what the user expects from a track row.
-        if is_file {
-            return std::process::Command::new("explorer")
-                .arg(format!("/select,{}", target.replace('/', "\\")))
-                .spawn()
-                .map(|_| ())
-                .map_err(|e| format!("cannot open file manager: {e}"));
-        }
-        std::process::Command::new("explorer")
-            .arg(&target)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("cannot open file manager: {e}"))
+        explorer.arg(p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(p));
     }
-    #[cfg(target_os = "android")]
-    {
-        // The system file manager has no CLI (no xdg-open/explorer on Android) —
-        // opening a folder needs an Intent bridge we don't carry; the JS hides
-        // the entry anyway (revealPath guard). Be honest instead of erroring on
-        // a missing binary.
-        let _ = target;
-        return Err("no file manager bridge on Android".into());
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "android")))]
-    {
-        if std::process::Command::new("xdg-open").arg(&target).spawn().is_ok() {
-            return Ok(());
-        }
-        std::process::Command::new("distrobox-host-exec")
-            .args(["xdg-open", target.as_str()])
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("cannot open file manager: {e}"))
-    }
+    explorer.spawn().map(|_| ()).map_err(|e| format!("cannot open file manager: {e}"))
 }
 
 /// Local image file → data URL (custom app backgrounds). Kept off the UI thread.
@@ -1208,16 +1197,51 @@ fn gif_downscale_with_limit(data: &[u8], output_limit: usize) -> Result<Option<V
 static NET_IMG_CACHE: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
 const NET_IMG_CACHE_MAX: usize = 200;
 
-/// Fetch a remote thumbnail (YouTube covers) and return it as a data URL. The
-/// Android WebView refuses to load external network background-images, so covers
-/// are proxied through Rust (which reaches i.ytimg fine) and handed back inline.
-/// Restricted to known image hosts and cached in memory.
+const REMOTE_IMAGE_HOSTS: [&str; 4] = ["i.ytimg.com", "i9.ytimg.com", "yt3.ggpht.com", "lh3.googleusercontent.com"];
+
+fn remote_image_allowed(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        .is_some_and(|host| REMOTE_IMAGE_HOSTS.contains(&host))
+}
+
+/// Download a thumbnail from one of the known image hosts, with its MIME type.
+/// Blocking: never call it from an async worker.
+pub fn fetch_remote_image(url: &str) -> Result<(Vec<u8>, String), String> {
+    if !remote_image_allowed(url) {
+        return Err("unsupported image url".into());
+    }
+    // One shared agent: connection keep-alive to i.ytimg.com. Building a
+    // fresh agent per call cost a full TLS handshake per thumbnail
+    // (~5s each on this setup — a 100-card page took minutes).
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    let agent = AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+    });
+    let resp = agent
+        .get(url)
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0")
+        .call()
+        .map_err(|e| e.to_string())?;
+    let mime = resp.header("Content-Type").unwrap_or("image/jpeg").to_string();
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .take(6 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("empty image".into());
+    }
+    Ok((bytes, mime))
+}
+
+/// Fetch a remote thumbnail (YouTube covers) and return it as a data URL, cached in
+/// memory. Restricted to known image hosts.
 #[tauri::command]
 pub async fn net_image(url: String) -> Result<String, String> {
-    let ok_host = ["i.ytimg.com", "i9.ytimg.com", "yt3.ggpht.com", "lh3.googleusercontent.com"]
-        .iter()
-        .any(|h| url.contains(h));
-    if !url.starts_with("https://") || !ok_host {
+    if !remote_image_allowed(&url) {
         return Err("unsupported image url".into());
     }
     let cache = NET_IMG_CACHE.get_or_init(|| Mutex::new(Vec::new()));
@@ -1232,29 +1256,7 @@ pub async fn net_image(url: String) -> Result<String, String> {
     // for minutes (the first few painted, the rest never resolved).
     let u = url.clone();
     let data = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        // One shared agent: connection keep-alive to i.ytimg.com. Building a
-        // fresh agent per call cost a full TLS handshake per thumbnail
-        // (~5s each on this setup — a 100-card page took minutes).
-        static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
-        let agent = AGENT.get_or_init(|| {
-            ureq::AgentBuilder::new()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-        });
-        let resp = agent
-            .get(&u)
-            .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
-            .call()
-            .map_err(|e| e.to_string())?;
-        let mime = resp.header("Content-Type").unwrap_or("image/jpeg").to_string();
-        let mut bytes = Vec::new();
-        resp.into_reader()
-            .take(6 * 1024 * 1024)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        if bytes.is_empty() {
-            return Err("empty image".into());
-        }
+        let (bytes, mime) = fetch_remote_image(&u)?;
         remote_image_data_url(&bytes, &mime)
     })
     .await
