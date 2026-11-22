@@ -87,6 +87,19 @@ function readableAccent(color, panel, lightSurface) {
   return target;
 }
 
+function readableBorder(color, panel, lightSurface) {
+  const hsl = rgbToHsl(color);
+  hsl.s = Math.min(hsl.s, 0.34);
+  const calm = hslToRgb(hsl);
+  if (contrastRatio(calm, panel) >= 1.9) return calm;
+  const target = lightSurface ? rgb(15, 20, 30) : rgb(242, 245, 250);
+  for (const weight of [0.16, 0.3, 0.45, 0.6]) {
+    const candidate = blend(calm, target, weight);
+    if (contrastRatio(candidate, panel) >= 1.9) return candidate;
+  }
+  return blend(panel, target, 0.42);
+}
+
 export function paletteFromPixels(rgba, { allowNeutral = false, textMode = 'auto', dim = 0 } = {}) {
   if (!rgba || rgba.length < 4) return null;
   const bins = new Map();
@@ -156,9 +169,10 @@ export function paletteFromPixels(rgba, { allowNeutral = false, textMode = 'auto
     ? blend(dominant, black, 0.72)
     : blend(dominant, white, 0.78);
   const iconForeground = readableAccent(iconForegroundSeed, iconSurface, lightSurface);
-  const iconBorder = lightSurface
-    ? blend(dominant, black, 0.34)
-    : blend(dominant, white, 0.34);
+  const iconBorderSeed = lightSurface
+    ? blend(dominant, black, 0.36)
+    : blend(dominant, white, 0.36);
+  const iconBorder = readableBorder(iconBorderSeed, panel, lightSurface);
 
   return {
     dominant,

@@ -1,5 +1,5 @@
 {
-  "version": "0.22.163",
+  "version": "0.22.164",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "A calmer look with more room for your songs: the list header fits on one row, every playlist gets the library actions, and a new option keeps playing songs from your library when a list ends. Also: Ctrl+F searches, F5 and Ctrl+P no longer reload or print the app. Device switching, drag to reorder and downloads with accents come with the new installer.",
+  "notes": "Calmer, more cohesive UI with crisp button borders across every view, drawer, modal and menu, refined dark/light artwork theme contrast, and synced active states for Lyrics and Downloads.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }

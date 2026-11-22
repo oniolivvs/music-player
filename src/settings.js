@@ -4,11 +4,11 @@
 import { storeLoad, storeSave, storeSaveQuietly } from "./store.js";
 
 export const THEMES = {
-  dark:     { "--bg-0": "#0b0b0f", "--bg-1": "#121218", "--bg-2": "#17171f", "--bg-3": "#20202b", "--bg-4": "#2a2a38", "--tx-1": "#f4f5f8", "--tx-2": "#a6a9b8", "--tx-3": "#6d7080" },
-  midnight: { "--bg-0": "#060b18", "--bg-1": "#0b1224", "--bg-2": "#101a30", "--bg-3": "#16233f", "--bg-4": "#1e2f52", "--tx-1": "#eef2fb", "--tx-2": "#9fb0d0", "--tx-3": "#64748b" },
-  black:    { "--bg-0": "#000000", "--bg-1": "#050506", "--bg-2": "#0a0a0c", "--bg-3": "#141418", "--bg-4": "#1f1f26", "--tx-1": "#f5f5f5", "--tx-2": "#a3a3ad", "--tx-3": "#66686f" },
-  plum:     { "--bg-0": "#120a14", "--bg-1": "#1a0f1e", "--bg-2": "#221429", "--bg-3": "#2e1c38", "--bg-4": "#3b2549", "--tx-1": "#f7f2fa", "--tx-2": "#c0aed0", "--tx-3": "#7d6b8f" },
-  forest:   { "--bg-0": "#08110c", "--bg-1": "#0d1a12", "--bg-2": "#122218", "--bg-3": "#1a2f21", "--bg-4": "#243e2d", "--tx-1": "#f0f7f2", "--tx-2": "#a3c2ad", "--tx-3": "#5f7a68" },
+  dark:     { "--bg-0": "#0b0b0f", "--bg-1": "#111218", "--bg-2": "#171821", "--bg-3": "#1f212d", "--bg-4": "#292c3b", "--tx-1": "#f3f4f7", "--tx-2": "#a9adbc", "--tx-3": "#767b8d" },
+  midnight: { "--bg-0": "#070c17", "--bg-1": "#0c1322", "--bg-2": "#121c30", "--bg-3": "#192640", "--bg-4": "#223354", "--tx-1": "#eef2fa", "--tx-2": "#a3b3cf", "--tx-3": "#6f809c" },
+  black:    { "--bg-0": "#000000", "--bg-1": "#070709", "--bg-2": "#0e0f13", "--bg-3": "#16181f", "--bg-4": "#21242e", "--tx-1": "#f4f4f6", "--tx-2": "#a6a7b1", "--tx-3": "#70727c" },
+  plum:     { "--bg-0": "#110b14", "--bg-1": "#18101d", "--bg-2": "#211627", "--bg-3": "#2b1d34", "--bg-4": "#372642", "--tx-1": "#f6f2f9", "--tx-2": "#bfaecd", "--tx-3": "#867496" },
+  forest:   { "--bg-0": "#08100c", "--bg-1": "#0e1913", "--bg-2": "#14221a", "--bg-3": "#1c2e24", "--bg-4": "#253c2f", "--tx-1": "#eff6f2", "--tx-2": "#a4c0ae", "--tx-3": "#6c8675" },
 };
 
 export const ACCENTS = {
@@ -83,8 +83,8 @@ const DEFAULTS = {
   sortMode: "default",   // default | title | title-desc | artist | album | dur | dur-desc
   theme: "dark",         // key of THEMES, or "custom"
   customBg: "#0b0b0f",   // custom theme: window background
-  customPanel: "#121218",// custom theme: panel base (shades derived)
-  customText: "#f4f5f8", // custom theme: text (secondary shades derived)
+  customPanel: "#111218",// custom theme: panel base (shades derived)
+  customText: "#f3f4f7", // custom theme: text (secondary shades derived)
   radius: 12,            // corner radius (px) of panels/rows
   uiScale: 100,          // UI zoom %
   bgTextMode: "auto",    // text on wallpaper: auto (detect brightness) | light | dark

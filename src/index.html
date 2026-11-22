@@ -82,7 +82,7 @@
     <div class="np-head">
       <span class="dl-title">Now playing</span>
       <span class="np-head-actions">
-        <button id="npLyricsBtn" class="btn-line sm" type="button" title="Lyrics and subtitles">Lyrics</button>
+        <button id="npLyricsBtn" class="btn-line sm" type="button" title="Lyrics and subtitles" aria-pressed="false">Lyrics</button>
         <button id="npAltBtn" class="btn-line sm" type="button" title="Find a matching public source">Alternative</button>
       </span>
     </div>
@@ -138,7 +138,7 @@
         <button id="repeatBtn" class="ctrl state-ctrl" title="Repeat: off" aria-label="Repeat: off" aria-pressed="false"></button>
       </div>
       <div class="volume">
-        <button id="dlToggle" class="dl-toggle" hidden title="Downloads"><span data-ic="dl"></span> <span id="dlBadge"></span></button>
+        <button id="dlToggle" class="dl-toggle" hidden title="Downloads" aria-pressed="false"><span data-ic="dl"></span> <span id="dlBadge"></span></button>
         <span class="vol-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
         <input id="volume" type="range" min="0" max="100" value="80">
         <label class="volume-pct" title="Volume percentage">

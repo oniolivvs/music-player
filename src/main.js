@@ -49,7 +49,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.163";
+const SRC_VERSION = "0.22.164";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -997,6 +997,11 @@ function renderLyrics() {
   const panel = $("#npLyrics");
   if (!panel) return;
   panel.hidden = !lyricsState.open;
+  const btn = $("#npLyricsBtn");
+  if (btn) {
+    btn.classList.toggle("active", lyricsState.open);
+    btn.setAttribute("aria-pressed", String(lyricsState.open));
+  }
   const status = $("#npLyricsStatus"), host = $("#npLyricsLines");
   if (!lyricsState.open) return;
   status.hidden = false;
@@ -4357,7 +4362,7 @@ let dlOpen = false; // drawer is opt-in: nothing pops up on its own
 function dlRender() {
   saveDlQueue(); // persist the pending set whenever it changes
   const bar = $("#dlBar"), tog = $("#dlToggle");
-  if (!dlQueue.length && !bgTasks.size) { bar.hidden = true; tog.hidden = true; dlOpen = false; return; }
+  if (!dlQueue.length && !bgTasks.size) { bar.hidden = true; tog.hidden = true; dlOpen = false; tog.classList.remove("active"); tog.setAttribute("aria-pressed", "false"); return; }
   const n = { done: 0, error: 0, canceled: 0, queued: 0, active: 0 };
   for (const d of dlQueue) n[d.status]++;
   const tRun = [...bgTasks.values()].filter(t => t.status === "run").length;
@@ -4379,6 +4384,8 @@ function dlRender() {
     (tRun ? ` · ${tRun} task${tRun === 1 ? "" : "s"} running` : "") +
     (n.error ? ` · ${n.error} failed` : "") + (dlNotice ? ` · ${dlNotice}` : "") + " (click to open)";
   bar.hidden = !dlOpen;
+  tog.classList.toggle("active", dlOpen);
+  tog.setAttribute("aria-pressed", String(dlOpen));
   if (!dlOpen) return;
   $("#dlTitle").textContent =
     (bgTasks.size ? `Activity${tRun ? ` — ${tRun} running` : ""}${dlQueue.length ? " · " : ""}` : "") +
