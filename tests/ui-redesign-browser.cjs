@@ -77,14 +77,27 @@ function contrast(fg, bg) {
         const activeShuffle = getComputedStyle(shuffle);
         const nowPlaying = document.querySelector('#npPanel');
         nowPlaying.hidden = false;
-        document.body.classList.add('np-open');
+        document.body.classList.add('np-open', 'np-push');
         document.documentElement.style.setProperty('--nav-bottom', `${nav.bottom}px`);
         document.documentElement.style.setProperty('--player-top', `${window.innerHeight - player.top}px`);
+        const npNav = document.querySelector('.nav-bar').getBoundingClientRect();
         const npBox = nowPlaying.getBoundingClientRect();
         const artBox = document.querySelector('#ovArt').getBoundingClientRect();
+        const toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast show';
+        toast.textContent = 'Fetching playlist…';
+        document.body.append(toast);
+        const toastZ = Number(getComputedStyle(toast).zIndex);
+        const modalBackdropZ = Number(getComputedStyle(document.querySelector('#importModal')).zIndex);
+        const dropZ = Number(getComputedStyle(document.querySelector('#srcDrop')).zIndex);
+        const npZ = Number(getComputedStyle(nowPlaying).zIndex);
         return {
           bodyOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           navBottom: nav.bottom, mainTop: main.top, mainBottom: main.bottom, playerTop: player.top,
+          navFullWidthWithNp: Math.abs(npNav.width - player.width) <= 1 && Math.abs(npNav.right - player.right) <= 1,
+          toastBehindModal: toastZ < modalBackdropZ,
+          dropAboveDrawer: dropZ > npZ && dropZ < modalBackdropZ,
           importerWidth: importer.width,
           importerColor: importerStyle.webkitTextFillColor || importerStyle.color,
           optionColor: optionStyle.color,
@@ -127,6 +140,9 @@ function contrast(fg, bg) {
       assert.equal(result.activeShuffleDot, '""', JSON.stringify({ viewport, result }));
       assert.equal(result.nowPlayingFitsViewport, true, JSON.stringify({ viewport, result }));
       assert.equal(result.nowPlayingFitsPlayer, true, JSON.stringify({ viewport, result }));
+      assert.equal(result.navFullWidthWithNp, true, JSON.stringify({ viewport, result }));
+      assert.equal(result.toastBehindModal, true, JSON.stringify({ viewport, result }));
+      assert.equal(result.dropAboveDrawer, true, JSON.stringify({ viewport, result }));
       if (viewport.width <= 560) assert.ok(result.nowPlayingCenterDelta <= 1, JSON.stringify({ viewport, result }));
       assert.ok(result.nowPlayingArtRight <= result.nowPlayingRight + 1, JSON.stringify({ viewport, result }));
       assert.ok(result.nowPlayingArtBottom <= result.nowPlayingBottom + 1, JSON.stringify({ viewport, result }));

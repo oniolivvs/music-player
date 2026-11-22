@@ -219,6 +219,27 @@ test("every layout keeps the hot bar full width and aligns Now Playing below it"
   assert.match(css, /\.rs-handle::after\s*\{[^}]*left:\s*3px;[^}]*width:\s*2px;[^}]*opacity:\s*0;/s);
   assert.match(css, /\.rs-handle:hover::after[^}]*opacity:\s*1;/s);
   assert.doesNotMatch(css, /body\.artwork-theme\.has-bg[^}]*\.nav-bar\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff/s);
+  assert.doesNotMatch(css, /body\.np-push\s+\.nav-bar\s*\{[^}]*margin-right:\s*calc\(var\(--np-eff/s);
+});
+
+test("toasts render behind modal backdrops and sources dropdown sits above drawers", async () => {
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  const toastZ = Number(css.match(/\.toast\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+  const backdropZ = Number(css.match(/\.modal-backdrop\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+  const npZ = Number(css.match(/\.np-drawer\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+  const dropZ = Number(css.match(/\.top-drop\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+  assert.ok(toastZ > 0 && backdropZ > 0 && toastZ < backdropZ, `expected toast (${toastZ}) < modal-backdrop (${backdropZ})`);
+  assert.ok(dropZ > npZ && dropZ < backdropZ, `expected top-drop (${dropZ}) between np-drawer (${npZ}) and modal-backdrop (${backdropZ})`);
+});
+
+test("sources dropdown uses delegated closest clicks, explicit close and Windows-safe folder matching", async () => {
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(main, /function normalizeSourcePath\(p\)/);
+  assert.match(main, /function openSourcesDrop\(\)/);
+  assert.match(main, /function closeSourcesDrop\(\)/);
+  assert.match(main, /\$\("#sourcesList"\)\?\.addEventListener\("click"/);
+  assert.match(main, /closestEl\(e\.target,\s*"\.src-row\[data-src\]"\)/);
+  assert.match(main, /function openSource\(folder\)[\s\S]*?closeSourcesDrop\(\)/);
 });
 
 test("hot bar actions keep natural widths with equal gaps except Settings", async () => {

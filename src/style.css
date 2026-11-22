@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.164 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.165 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -416,15 +416,15 @@ body.has-bg .track.pinned { background: rgba(255, 255, 255, .06); }
 .top-nav .ni-lbl { font-size: 12.5px; }
 .top-drop-wrap { position: relative; }
 .top-drop {
-  position: absolute; right: 0; top: calc(100% + 8px); z-index: 70;
-  width: 300px; max-height: 60vh; overflow-y: auto;
+  position: absolute; left: 0; right: auto; top: calc(100% + 8px); z-index: 105;
+  width: 300px; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto;
   background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 12px;
   padding: 12px; display: flex; flex-direction: column; gap: 8px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, .45);
 }
 body.has-bg .top-drop {
   background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100));
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--ui-panel-blur, 14px)); -webkit-backdrop-filter: blur(var(--ui-panel-blur, 14px));
 }
 
 /* ─── YouTube home feed (navYtFeed tab) ─── */
@@ -733,7 +733,7 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 .swatch.on { border-color: var(--tx-1); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor; }
 
 /* ─── Toast ─── */
-.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 140; max-width: min(88vw, 460px); overflow-wrap: anywhere; word-break: break-word; }
+.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 115; max-width: min(88vw, 460px); overflow-wrap: anywhere; word-break: break-word; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .mock-banner { background: rgba(245,158,11,.12); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 12px; margin: 10px 12px; font-size: 12px; }
@@ -890,6 +890,7 @@ body.artwork-theme.has-bg {
   --btn-bd-active: color-mix(in srgb, var(--accent-2) 68%, var(--icon-border));
 }
 body.bg-light.has-bg .nav-bar,
+body.bg-light.has-bg .top-drop,
 body.bg-light.has-bg .sidebar,
 body.bg-light.has-bg .player,
 body.bg-light.has-bg .main,
@@ -930,7 +931,7 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 /* Artwork panels use the palette's panel colour rather than a fixed black or
    white wash. This keeps the hot bar, top bar and drawers in one colour logic,
    especially when the cover is bright and the automatic light scheme is on. */
-body.artwork-theme.has-bg :where(.nav-bar, .sidebar, .main, .np-drawer, .player, .dl-drawer, .ctx-menu, .modal) {
+body.artwork-theme.has-bg :where(.nav-bar, .top-drop, .sidebar, .main, .np-drawer, .player, .dl-drawer, .ctx-menu, .modal) {
   background: rgb(var(--panel-rgb, 10 10 15) / calc(var(--panel-alpha, 85) / 100));
 }
 
@@ -970,10 +971,13 @@ body.artwork-theme :where(input[type="text"], input[type="search"], input[type="
 body.layout-focus .app { grid-template-columns: 1fr; }
 body.layout-focus .sidebar,
 body.layout-focus #sideResize { display: none; }
+body.layout-compact { --shell-gap: 4px; }
 body.layout-compact .app { gap: 4px; padding: 4px; }
 body.layout-compact .sidebar { padding: 12px 10px; gap: 10px; }
 body.layout-compact .player { margin: 0 4px 4px; padding: 8px 12px; gap: 6px; }
 body.layout-compact .top-nav { gap: 4px; }
+body.layout-compact.np-push .app { margin-right: calc(var(--np-eff, 330px) + 4px); }
+body.layout-compact .np-drawer { right: calc(4px + var(--safe-right, 0px)); bottom: calc(var(--player-top, 118px) + 4px); }
 body.has-bg .ctrl.active { color: var(--accent-2); }
 
 /* ─── Cookies consent ─── */
@@ -1104,14 +1108,10 @@ body.np-open { --np-eff: min(var(--np-w, 330px), max(34vw, 260px)); }
    room for sidebar + a usable track list, the drawer becomes a true third
    column and the WHOLE app shrinks around it; otherwise it floats over the
    content like on phones. */
-body.np-push .app { margin-right: calc(var(--np-eff, 330px) + 8px); }
-/* The nav bar only steps aside when the drawer is PINNED, i.e. actually part
-   of the layout. Floating, the drawer overlays the content and shrinking the
-   nav bar for it made the whole top row jump every time the panel opened —
-   for a bar that ends well before the drawer's edge anyway. The drawer sits
-   above it in z-order, so the buttons it does cover stay reachable by closing
-   or unpinning it. */
-body.np-push .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
+body.np-push .app { margin-right: calc(var(--np-eff, 330px) + var(--shell-gap, 8px)); }
+/* The top navigation bar always stays full width above the entire layout,
+   including when Now Playing is open or docked in push mode: the drawer sits
+   below --nav-bottom, so shrinking .nav-bar left an empty notch on the right. */
 /* Pinned AND given its own column: it is part of the layout now, so it drops
    the overlay cues — no lifting shadow, a plain panel border like the sidebar.
    Pinned but too narrow to split keeps the shadow: it is still floating over
@@ -1222,7 +1222,9 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 .src-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--bd); border-radius: 8px; background: color-mix(in srgb, var(--bg-2) 55%, transparent); cursor: pointer; color: var(--tx-2); font-size: 13px; transition: background-color .12s, border-color .12s, color .12s; }
 .src-row:hover { background: var(--bg-3); border-color: var(--btn-bd-hover); color: var(--tx-1); }
 .src-row.active { background: color-mix(in srgb, var(--accent) 13%, var(--bg-3)); border-color: var(--btn-bd-active); color: var(--tx-1); }
-.src-ico { font-size: 14px; }
+.src-ico { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--tx-3); font-size: 14px; }
+.src-ico svg { width: 14px; height: 14px; display: block; }
+.src-row.active .src-ico { color: var(--accent-2); }
 .src-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .src-count { font-size: 11px; color: var(--tx-3); }
 .src-btn { border: 1px solid var(--btn-bd-subtle); background: var(--btn-bg); color: var(--tx-2); cursor: pointer; font-size: 13px; width: 24px; height: 24px; border-radius: 6px; opacity: 0; transition: opacity .12s, background-color .12s, border-color .12s, color .12s; }
@@ -1672,7 +1674,7 @@ body.bg-light.has-bg .ctx-item.ctx-danger:hover { background: rgba(220, 38, 38, 
   .top-nav .nav-item { padding: 7px 9px; }
   /* Phone: the Sources dropdown becomes a fixed full-width sheet under the
      nav bar instead of an anchored popover that could overflow the screen. */
-  .top-drop { position: fixed; left: 8px; right: 8px; top: 110px; width: auto; max-height: 70vh; }
+  .top-drop { position: fixed; left: 8px; right: 8px; top: calc(var(--nav-bottom, 56px) + 6px); width: auto; max-height: 70vh; }
   /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
      modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {
@@ -1871,7 +1873,9 @@ body:not(.has-bg) { background: var(--bg-0); }
 
 /* Navigation: crisp bordered tabs; the active tab takes an accent outline. */
 .nav-bar {
-  margin: var(--shell-gap) var(--shell-gap) 0;
+  position: relative;
+  z-index: 85;
+  margin: var(--shell-gap) calc(var(--shell-gap) + var(--safe-right, 0px)) 0 calc(var(--shell-gap) + var(--safe-left, 0px));
   padding: 5px 6px;
   gap: 10px;
   border: 1px solid var(--bd-2);

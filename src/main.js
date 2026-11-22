@@ -49,7 +49,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.164";
+const SRC_VERSION = "0.22.165";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -238,14 +238,22 @@ function dirOf(p) {
   const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
   return i > 0 ? s.slice(0, i) : "";
 }
+function normalizeSourcePath(p) {
+  let out = String(p || "").trim().replace(/\\/g, "/");
+  if (out.startsWith("//?/UNC/")) out = "//" + out.slice(8);
+  else if (out.startsWith("//?/")) out = out.slice(4);
+  out = out.replace(/\/+$/, "");
+  return /^([a-z]:\/|\/\/)/i.test(out) ? out.toLowerCase() : out;
+}
+function samePath(a, b) {
+  const na = normalizeSourcePath(a), nb = normalizeSourcePath(b);
+  return !!na && na === nb;
+}
 function inFolder(t, f) {
-  // Normalize \ → / (and drop any trailing slash) before comparing: on Windows
-  // both the source folder and the scanned track paths are stored with
-  // backslashes ("D:\music", "D:\music\song.mp3"), so the old startsWith(f+"/")
-  // never matched and every source showed 0 songs. Separator-agnostic now.
-  const norm = s => String(s || "").replace(/\\/g, "/").replace(/\/+$/, "");
-  const tp = norm(t.path), fp = norm(f);
-  return tp === fp || tp.startsWith(fp + "/");
+  // Normalize \ → /, strip Windows \\?\ prefixes, and compare case-insensitively
+  // on Windows drive/UNC paths so D:\Music and d:\music always match.
+  const tp = normalizeSourcePath(t?.path), fp = normalizeSourcePath(f);
+  return !!fp && (tp === fp || tp.startsWith(fp + "/"));
 }
 function trackByPath(p) {
   if (!p) return null;
@@ -1592,7 +1600,14 @@ function wireDialogs() {
 
 function flash(msg) {
   let el = $("#toast");
-  if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast";
+    el.className = "toast";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+  }
   // Hard cap so a stray long string (e.g. a stream URL) can never blow up the UI.
   const s = String(msg);
   el.textContent = s.length > 200 ? s.slice(0, 200) + "…" : s;
@@ -2685,33 +2700,74 @@ function openSourceCtx(x, y, folder) {
 }
 
 // ─── Sources (folders) ───
+function closestEl(target, selector) {
+  const el = target instanceof Element ? target : target?.parentElement;
+  return el ? el.closest(selector) : null;
+}
+function syncNavSourcesActive() {
+  const btn = $("#navSources");
+  const d = $("#srcDrop");
+  if (!btn) return;
+  const open = !!d && !d.hidden;
+  btn.setAttribute("aria-expanded", String(open));
+  btn.classList.toggle("active", open || active.type === "source");
+}
+function positionSourcesDrop() {
+  const d = $("#srcDrop");
+  const wrap = d?.closest(".top-drop-wrap");
+  if (!d || d.hidden || !wrap) return;
+  if (window.innerWidth <= 700) { d.style.left = ""; d.style.right = ""; return; }
+  d.style.left = "0px";
+  d.style.right = "auto";
+  const r = d.getBoundingClientRect();
+  const maxRight = window.innerWidth - 8;
+  let shift = 0;
+  if (r.right > maxRight) shift = maxRight - r.right;
+  if (r.left + shift < 8) shift = 8 - r.left;
+  if (shift) d.style.left = `${Math.round(shift)}px`;
+}
+function openSourcesDrop() {
+  const d = $("#srcDrop");
+  if (!d) return;
+  renderSources();
+  d.hidden = false;
+  positionSourcesDrop();
+  syncNavSourcesActive();
+}
+function closeSourcesDrop() {
+  const d = $("#srcDrop");
+  if (!d) return;
+  d.hidden = true;
+  d.style.left = "";
+  d.style.right = "";
+  syncNavSourcesActive();
+}
 function renderSources() {
   const host = $("#sourcesList");
+  if (!host) return;
   // Empty sources stay visible: users often register a destination before
   // copying or downloading music into it.
   const shown = folders;
   if (!shown.length) { host.innerHTML = `<div class="src-empty">No folders yet — add one above.</div>`; return; }
   host.innerHTML = shown.map(f => {
     const count = library.filter(t => inFolder(t, f)).length;
-    const on = active.type === "source" && active.id === f;
-    return `<div class="src-row ${on ? "active" : ""}" data-src="${esc(f)}" title="${esc(f)}">
-      <span class="src-ico" data-ic="folder"></span>
+    const on = active.type === "source" && samePath(active.id, f);
+    return `<div class="src-row ${on ? "active" : ""}" data-src="${esc(f)}" title="${esc(f)}" role="button" tabindex="0">
+      <span class="src-ico">${IC.folder}</span>
       <span class="src-name">${esc(baseName(f))}</span>
       <span class="src-count">${count}</span>
-      <button class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">${IC.refresh}</button>
-      <button class="src-btn" data-remove="${esc(f)}" title="Remove source">${IC.x}</button>
+      <button type="button" class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">${IC.refresh}</button>
+      <button type="button" class="src-btn" data-remove="${esc(f)}" title="Remove source">${IC.x}</button>
     </div>`;
   }).join("");
-  host.querySelectorAll("[data-src]").forEach(el => {
-    el.addEventListener("click", (e) => { if (e.target.dataset.refresh !== undefined || e.target.dataset.remove !== undefined) return; openSource(el.dataset.src); });
-    el.addEventListener("contextmenu", (e) => { e.preventDefault(); openSourceCtx(e.clientX, e.clientY, el.dataset.src); });
-  });
-  host.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); rescanFolder(b.dataset.refresh); }));
-  host.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); removeSource(b.dataset.remove); }));
 }
 
 function openSource(folder) {
+  if (!folder) return;
+  const searchEl = $("#search");
+  if (searchEl && searchEl.value) searchEl.value = "";
   active = { type: "source", id: folder };
+  closeSourcesDrop();
   markActive();
   selected.clear();
   const tracks = library.filter(t => inFolder(t, folder));
@@ -5390,6 +5446,7 @@ function markActive() {
   $("#navHistory").classList.toggle("active", active.type === "history");
   $("#navStats").classList.toggle("active", active.type === "stats");
   $("#navYtFeed")?.classList.toggle("active", active.type === "ytfeed");
+  syncNavSourcesActive();
   renderSources();
   // playlist highlight is refreshed by renderPlaylists on open; refresh to sync
   document.querySelectorAll("#playlistsList .pl-row[data-pl]").forEach(el => el.classList.toggle("active", active.type === "playlist" && active.id === el.dataset.pl));
@@ -6527,11 +6584,14 @@ async function unsuppress(vid) {
 // updated now, the library restore runs in the background.
 function unsuppressNow(vid) { if (vid && suppressedSet.has(vid)) unsuppress(vid); }
 async function addSource(path) {
+  path = String(path || "").trim().replace(/^["']|["']$/g, "").trim();
   if (!path) return;
   // Folder pickers can return an alias of an already-added source (symlinked
   // /home vs /var/home): canonicalize before comparing, or the same folder
   // gets scanned twice under two spellings and every track doubles.
   if (IS_NATIVE) { try { path = await invoke("canon_path", { path }); } catch {} }
+  const existing = folders.find(f => samePath(f, path));
+  if (existing) path = existing;
   flash(`Scanning ${baseName(path)}…`);
   let tracks;
   try { tracks = await invoke("scan", { paths: [path] }); }
@@ -6545,6 +6605,7 @@ async function addSource(path) {
   library = library.concat(found.filter(t => !seen.has(t.path)));
   applySuppressedFilter(); // a rescan must not resurrect a deleted-on-purpose track
   if (!folders.includes(path)) folders.push(path);
+  if (IS_NATIVE) { invoke("register_roots", { paths: [path] }).catch(() => {}); }
   await saveLibrary();
   renderSources();
   if (folders.includes(path)) openSource(path);
@@ -6569,6 +6630,7 @@ async function rescanAll() {
   flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
 async function pickFolder() {
+  closeSourcesDrop();
   if (!IS_NATIVE) { const p = await askText("Add a folder", { placeholder: "Folder path" }); if (p) await addSource(p); return; }
   // Android has no system folder picker through the dialog plugin (it silently
   // returns nothing → the button "does nothing"). Ask for the path directly,
@@ -6580,12 +6642,17 @@ async function pickFolder() {
   }
   const btn = $("#pickBtn"); btn.disabled = true;
   try {
-    const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
+    const picked = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
+    const path = Array.isArray(picked) ? picked[0] : picked;
     if (path) await addSource(path);
   } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: IS_ANDROID ? ANDROID_MUSIC_DIR : "Folder path" }); if (p) await addSource(p); }
   finally { btn.disabled = false; }
 }
-async function addManual() { const p = await askText("Add a folder", { placeholder: "D:\\Music" }); if (p) await addSource(p); }
+async function addManual() {
+  closeSourcesDrop();
+  const p = await askText("Add a folder", { placeholder: "D:\\Music" });
+  if (p) await addSource(p);
+}
 
 // ─── Settings ───
 function applyAccent() {
@@ -8079,13 +8146,14 @@ function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom, panel 
   });
 }
 function initResizers() {
+  const shellGap = () => parseFloat(getComputedStyle(document.body).getPropertyValue("--shell-gap")) || 8;
   wireResizer("#sideResize", {
     min: 190, max: 480, def: 268, setting: "sideW", cssVar: "--side-w", panel: ".sidebar",
-    widthFrom: (ev) => ev.clientX - 8, // .app left padding
+    widthFrom: (ev) => ev.clientX - shellGap(), // .app left padding
   });
   wireResizer("#npResize", {
     min: 250, max: 560, def: 330, setting: "npW", cssVar: "--np-w", panel: "#npPanel",
-    widthFrom: (ev) => window.innerWidth - 8 - ev.clientX, // drawer is right-anchored (right: calc(8px + var(--safe-right, 0px)))
+    widthFrom: (ev) => window.innerWidth - shellGap() - ev.clientX, // drawer is right-anchored
   });
 }
 
@@ -8411,21 +8479,49 @@ async function init() {
     if (settingsOpen) openSettings();
     flash("Playlist appearance saved");
   });
-  // Sources dropdown (topbar): toggle on click, close on outside click / Esc.
+  // Sources dropdown (topbar): toggle on click, delegated source actions,
+  // close on source pick / outside click / Esc.
+  $("#sourcesList")?.addEventListener("click", e => {
+    const refreshBtn = closestEl(e.target, "[data-refresh]");
+    if (refreshBtn) { e.stopPropagation(); rescanFolder(refreshBtn.dataset.refresh); return; }
+    const removeBtn = closestEl(e.target, "[data-remove]");
+    if (removeBtn) { e.stopPropagation(); removeSource(removeBtn.dataset.remove); return; }
+    const row = closestEl(e.target, ".src-row[data-src]");
+    if (row) { e.stopPropagation(); openSource(row.dataset.src); }
+  });
+  $("#sourcesList")?.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (closestEl(e.target, "button")) return;
+    const row = closestEl(e.target, ".src-row[data-src]");
+    if (!row) return;
+    e.preventDefault();
+    openSource(row.dataset.src);
+  });
+  $("#sourcesList")?.addEventListener("contextmenu", e => {
+    const row = closestEl(e.target, ".src-row[data-src]");
+    if (!row) return;
+    e.preventDefault();
+    openSourceCtx(e.clientX, e.clientY, row.dataset.src);
+  });
   $("#navSources")?.addEventListener("click", e => {
     e.stopPropagation();
     const d = $("#srcDrop");
-    d.hidden = !d.hidden;
-    $("#navSources").classList.toggle("active", !d.hidden);
+    if (!d) return;
+    if (d.hidden) openSourcesDrop();
+    else closeSourcesDrop();
   });
   document.addEventListener("click", e => {
     const d = $("#srcDrop");
     if (!d || d.hidden) return;
-    if (!e.target.closest(".top-drop-wrap")) { d.hidden = true; $("#navSources").classList.remove("active"); }
+    const wrap = d.closest(".top-drop-wrap");
+    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+    const inside = (wrap && path.includes(wrap)) || !!closestEl(e.target, ".top-drop-wrap");
+    if (!inside) closeSourcesDrop();
   });
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { const d = $("#srcDrop"); if (d && !d.hidden) { d.hidden = true; $("#navSources").classList.remove("active"); } }
+    if (e.key === "Escape") { const d = $("#srcDrop"); if (d && !d.hidden) closeSourcesDrop(); }
   });
+  window.addEventListener("resize", positionSourcesDrop);
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
 

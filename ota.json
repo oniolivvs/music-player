@@ -1,5 +1,5 @@
 {
-  "version": "0.22.164",
+  "version": "0.22.165",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Calmer, more cohesive UI with crisp button borders across every view, drawer, modal and menu, refined dark/light artwork theme contrast, and synced active states for Lyrics and Downloads.",
+  "notes": "Keep toast notifications behind modal backdrop blur, keep the top navigation bar full width when Now Playing is open, and fix source folder selection and Windows path matching in the Sources menu.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }
