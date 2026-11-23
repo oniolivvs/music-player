@@ -1,5 +1,5 @@
 {
-  "version": "0.22.165",
+  "version": "0.22.166",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -22,7 +22,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Keep toast notifications behind modal backdrop blur, keep the top navigation bar full width when Now Playing is open, and fix source folder selection and Windows path matching in the Sources menu.",
+  "notes": "Fix Listening Stats responsive layout, clipping and artwork-theme card surfaces, style password/URL/email inputs and radio controls, restore select chevrons over wallpapers, and align Settings field/button heights.",
   "platforms": ["windows"],
   "min_native": "0.22.159"
 }

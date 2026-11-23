@@ -49,7 +49,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.165";
+const SRC_VERSION = "0.22.166";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1399,7 +1399,7 @@ function fmtLong(s) {
 }
 
 function statRows(list, labelKey, max, opts = {}) {
-  if (!list.length) return `<div class="st-empty">Rien encore</div>`;
+  if (!list.length) return `<div class="st-empty">No plays yet</div>`;
   const top = list[0]?.n || 1;
   return list.slice(0, max).map((r, i) => `
     <div class="st-row" ${opts.path ? `data-path="${esc(r.path)}"` : ""}>
@@ -1451,18 +1451,21 @@ function showStats() {
     return;
   }
 
+  const topPlayCount = byPlays[0]?.n || 0;
+  const playedInLibrary = Math.max(0, library.length - s.neverPlayed);
+  const coverageLabel = playedInLibrary > 0 && !s.coverage ? "&lt;1" : String(s.coverage);
   host.innerHTML = `
     <div class="st-wrap">
       <div class="st-hero">
         <div class="st-metric st-metric-primary"><span>Listening time</span><strong>${fmtLong(s.secs)}</strong><small>${s.days} active-day span</small></div>
         <div class="st-metric"><span>Total plays</span><strong>${s.total.toLocaleString()}</strong><small>${(s.secs / Math.max(1, s.total) / 60).toFixed(1)} min average</small></div>
-        <div class="st-metric"><span>Tracks discovered</span><strong>${s.rows.length.toLocaleString()}</strong><small>${s.neverPlayed} still unplayed</small></div>
-        <div class="st-metric st-coverage"><span>Library coverage</span><strong>${s.coverage}%</strong><small>${library.length} tracks in library</small></div>
+        <div class="st-metric"><span>Tracks discovered</span><strong>${s.rows.length.toLocaleString()}</strong><small>${s.neverPlayed.toLocaleString()} still unplayed</small></div>
+        <div class="st-metric st-coverage"><span>Library coverage</span><strong>${coverageLabel}%</strong><small>${library.length.toLocaleString()} track${library.length === 1 ? "" : "s"} in library</small></div>
       </div>
       <div class="st-spotlight">
         <span class="st-spotlight-kicker">Your current favorite</span>
         <strong>${esc(byPlays[0]?.title || "—")}</strong>
-        <span>${esc(byPlays[0]?.artist || "Unknown artist")} · ${byPlays[0]?.n || 0} plays · ${fmtLong(byPlays[0]?.secs || 0)}</span>
+        <span>${esc(byPlays[0]?.artist || "Unknown artist")} · ${topPlayCount} play${topPlayCount === 1 ? "" : "s"} · ${fmtLong(byPlays[0]?.secs || 0)}</span>
       </div>
       <div class="st-grid">
         <div class="st-card"><div class="st-h">Most played tracks</div>${statRows(byPlays, "title", 15, { path: true, sub: "artist" })}</div>

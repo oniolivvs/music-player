@@ -194,8 +194,23 @@ test("volume percentage is rendered inside one bordered field", async () => {
 test("text fields keep a visible border over artwork and popup glass", async () => {
   const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(css, /--field-border:/);
-  assert.match(css, /body\.has-bg[\s\S]*input\[type="text"\][\s\S]*border-color:\s*var\(--field-border\)/);
+  assert.match(css, /input\[type="password"\][\s\S]*border-radius:\s*8px/);
+  assert.match(css, /body\.has-bg[\s\S]*input\[type="text"\][\s\S]*input\[type="password"\][\s\S]*border-color:\s*var\(--field-border\)/);
+  assert.match(css, /body\.artwork-theme\s+:where\([^)]*input\[type="password"\][^)]*\)/);
   assert.match(css, /\.modal[\s\S]*backdrop-filter:\s*blur\(var\(--ui-panel-blur/);
+});
+
+test("stats use container-responsive grids and artwork-matched card surfaces", async () => {
+  const css = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(css, /\.st-wrap\s*\{[^}]*container-type:\s*inline-size/s);
+  assert.match(css, /\.st-card\s*\{[^}]*container-type:\s*inline-size/s);
+  assert.match(css, /@container stats \(max-width:\s*720px\)\s*\{[^}]*\.st-grid\s*\{\s*grid-template-columns:\s*1fr/s);
+  assert.match(css, /@container statcard \(max-width:\s*340px\)/);
+  assert.match(css, /body\.artwork-theme\.has-bg \.st-card[\s\S]*background:\s*color-mix\(in srgb, var\(--bg-2\)/);
+  assert.doesNotMatch(main, /Rien encore/);
+  assert.match(main, /topPlayCount === 1 \? "" : "s"/);
+  assert.match(main, /playedInLibrary > 0 && !s\.coverage \? "&lt;1"/);
 });
 
 test("every layout keeps the hot bar full width and aligns Now Playing below it", async () => {

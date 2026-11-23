@@ -70,6 +70,18 @@ function contrast(fg, bg) {
         const dependencyButtons = [...document.querySelectorAll('.dependency-toolbar > button')]
           .map(button => button.getBoundingClientRect());
         const focusStyle = getComputedStyle(document.querySelector('input[type="password"]'));
+        const statsProbe = document.createElement('div');
+        statsProbe.className = 'st-wrap';
+        statsProbe.style.cssText = 'position:fixed;left:0;top:120px;width:516px';
+        statsProbe.innerHTML = `<div class="st-spotlight"><span class="st-spotlight-kicker">Your current favorite</span><strong>Long Track Title Example</strong><span>Artist · 1 play · 1 min</span></div><div class="st-grid"><div class="st-card"><div class="st-h">Most played tracks</div><div class="st-row"><span class="st-rank">1</span><span class="st-name">Track Name<span class="st-sub">Artist</span></span><span class="st-bar"><i style="width:100%"></i></span><span class="st-n">1<span class="st-unit">×</span></span><span class="st-time">1 min</span></div></div><div class="st-card"><div class="st-h">Least played tracks</div><div class="st-row"><span class="st-rank">1</span><span class="st-name">Track Name</span><span class="st-bar"><i style="width:100%"></i></span><span class="st-n">1<span class="st-unit">×</span></span><span class="st-time">1 min</span></div></div></div>`;
+        document.body.append(statsProbe);
+        const stNameW = statsProbe.querySelector('.st-name').getBoundingClientRect().width;
+        const stSpot = statsProbe.querySelector('.st-spotlight');
+        const stSpotOverflow = stSpot.scrollWidth - stSpot.clientWidth;
+        const stCard = statsProbe.querySelector('.st-card');
+        const stCardOverflow = stCard.scrollWidth - stCard.clientWidth;
+        const stCardBg = getComputedStyle(stCard).backgroundColor;
+        statsProbe.remove();
         const shuffle = document.querySelector('#shuffleBtn');
         // Read the end state, not the first frame of its colour transition.
         shuffle.style.transition = 'none';
@@ -110,6 +122,13 @@ function contrast(fg, bg) {
           dependencyTopDelta: Math.max(...dependencyButtons.map(box => box.top)) - Math.min(...dependencyButtons.map(box => box.top)),
           dependencyHeight: dependencyButtons[0].height,
           focusedTextOutline: focusStyle.outlineStyle,
+          passwordBorderStyle: focusStyle.borderTopStyle,
+          passwordBorderRadius: parseFloat(focusStyle.borderTopLeftRadius),
+          passwordPaddingLeft: parseFloat(focusStyle.paddingLeft),
+          stNameW,
+          stSpotOverflow,
+          stCardOverflow,
+          stCardBg,
           navBarBackground,
           activeShuffleChanged: activeShuffle.color !== idleShuffleColor && activeShuffle.backgroundColor !== idleShuffleBackground,
           activeShuffleDot: getComputedStyle(shuffle, '::after').content,
@@ -136,6 +155,13 @@ function contrast(fg, bg) {
       assert.ok(result.dependencyTopDelta <= 0.1, JSON.stringify({ viewport, result }));
       assert.equal(result.dependencyHeight, 40, JSON.stringify({ viewport, result }));
       assert.equal(result.focusedTextOutline, 'none', JSON.stringify({ viewport, result }));
+      assert.equal(result.passwordBorderStyle, 'solid', JSON.stringify({ viewport, result }));
+      assert.ok(result.passwordBorderRadius >= 6, JSON.stringify({ viewport, result }));
+      assert.ok(result.passwordPaddingLeft >= 8, JSON.stringify({ viewport, result }));
+      assert.ok(result.stNameW >= 120, JSON.stringify({ viewport, result }));
+      assert.ok(result.stSpotOverflow <= 1, JSON.stringify({ viewport, result }));
+      assert.ok(result.stCardOverflow <= 1, JSON.stringify({ viewport, result }));
+      assert.notEqual(result.stCardBg, 'rgba(10, 10, 15, 0.85)', JSON.stringify({ viewport, result }));
       assert.equal(result.activeShuffleChanged, true, JSON.stringify({ viewport, result }));
       assert.equal(result.activeShuffleDot, '""', JSON.stringify({ viewport, result }));
       assert.equal(result.nowPlayingFitsViewport, true, JSON.stringify({ viewport, result }));

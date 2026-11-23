@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.165 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.166 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -206,13 +206,41 @@ body.icon-only .vh-actions .btn-line.sm { font-size: 0; gap: 0; padding: 8px 11p
 .update-btn:disabled { opacity: .75; cursor: default; }
 .update-btn + .settings-btn { margin-top: 8px; }
 
-input[type="text"], input[type="search"] {
-  background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1);
-  border-radius: 8px; padding: 9px 11px; font-size: 13px; outline: none;
+input[type="text"],
+input[type="search"],
+input[type="password"],
+input[type="url"],
+input[type="email"],
+.text-in {
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-2); border: 1px solid var(--btn-bd); color: var(--tx-1);
+  border-radius: 8px; padding: 7px 11px; font-size: 13px; line-height: 1.35;
+  min-height: 34px; outline: none;
+  transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease;
+}
+:where(input[type="text"], input[type="search"], input[type="password"], input[type="url"], input[type="email"], .text-in):hover {
+  border-color: var(--btn-bd-hover);
 }
 input:focus { border-color: var(--accent); }
+:where(input[type="text"], input[type="search"], input[type="password"], input[type="url"], input[type="email"], .text-in, .num-in):focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 
-/* ─── Custom checkboxes (replaces the native OS look everywhere) ─── */
+/* ─── Custom checkboxes & radios (replaces the native OS look everywhere) ─── */
+input[type="radio"] {
+  appearance: none; -webkit-appearance: none;
+  width: 17px; height: 17px; margin: 0; flex-shrink: 0;
+  border: 1.5px solid var(--bd-2); border-radius: 50%;
+  background: var(--bg-3);
+  display: inline-grid; place-items: center;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+input[type="radio"]:hover { border-color: var(--accent-2); }
+input[type="radio"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="radio"]:checked::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+input[type="radio"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
 input[type="checkbox"] {
   appearance: none; -webkit-appearance: none;
   width: 17px; height: 17px; margin: 0; flex-shrink: 0;
@@ -326,10 +354,18 @@ body.compact-top .search-wrap input { border-radius: 9px; }
    rendering makes it expensive; a flat translucent fill is enough. */
 body.has-bg input[type="search"],
 body.has-bg input[type="text"],
-body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: var(--field-border); }
+body.has-bg input[type="password"],
+body.has-bg input[type="url"],
+body.has-bg input[type="email"],
+body.has-bg .text-in,
+body.has-bg select.sel { background-color: rgba(255,255,255,.08); border-color: var(--field-border); }
 body.bg-light.has-bg input[type="search"],
 body.bg-light.has-bg input[type="text"],
-body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
+body.bg-light.has-bg input[type="password"],
+body.bg-light.has-bg input[type="url"],
+body.bg-light.has-bg input[type="email"],
+body.bg-light.has-bg .text-in,
+body.bg-light.has-bg select.sel { background-color: rgba(0,0,0,.05); }
 /* Readability over a wallpaper: the translucent panels let the background bleed
    through and wash out the dim grey text (SOURCES / PLAYLISTS labels, artist
    names, counts, placeholders). Instead of per-glyph glows (muddy), lift the
@@ -613,7 +649,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .volume-pct { position: relative; display: inline-flex; align-items: center; width: 58px; height: 30px; color: var(--tx-1); font-size: 11px; font-variant-numeric: tabular-nums; border: 1px solid var(--btn-bd); border-radius: 8px; background: var(--btn-bg); overflow: hidden; transition: border-color .14s, background-color .14s, box-shadow .14s; }
 .volume-pct:hover { border-color: var(--btn-bd-hover); background: var(--btn-bg-hover); }
 .volume-pct:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent); }
-.volume-pct input { width: 100%; height: 100%; box-sizing: border-box; padding: 0 18px 0 6px; text-align: right; font-size: 11px; line-height: 1; background: transparent; border: 0; border-radius: 0; color: var(--tx-1); outline: none; appearance: textfield; -moz-appearance: textfield; }
+.volume-pct input { width: 100%; height: 100%; min-height: 0; box-sizing: border-box; padding: 0 18px 0 6px; text-align: right; font-size: 11px; line-height: 1; background: transparent; border: 0; border-radius: 0; color: var(--tx-1); outline: none; box-shadow: none; appearance: textfield; -moz-appearance: textfield; }
 .volume-pct input::-webkit-inner-spin-button,
 .volume-pct input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .volume-pct input:focus { border-color: var(--accent); }
@@ -692,7 +728,7 @@ body.bg-light.has-bg .set-group { background: rgba(15, 23, 42, .035); }
 .set-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-bottom: 8px; }
 .set-title-sub { margin-top: 14px; margin-bottom: 5px; font-size: 10px; color: var(--tx-3); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 0; }
-.set-row label { font-size: 13px; color: var(--tx-1); }
+.set-row label { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--tx-1); }
 .set-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
 .set-row input[type="range"] { width: 150px; accent-color: var(--accent); }
 .cleanup-delete-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 7px 0; }
@@ -701,23 +737,29 @@ body.bg-light.has-bg .set-group { background: rgba(15, 23, 42, .035); }
 .cleanup-playlist-scope label { color: var(--tx-2); font-size: 12px; font-weight: 700; }
 .cleanup-playlist-scope .sel { width: 100%; }
 .text-in { width: 210px; }
-.num-in { width: 88px; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
+.num-in { width: 88px; min-height: 34px; background: var(--bg-2); border: 1px solid var(--btn-bd); color: var(--tx-1); border-radius: 8px; padding: 6px 9px; font-size: 13px; outline: none; transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease; }
+.num-in:hover { border-color: var(--btn-bd-hover); }
 .num-in:focus { border-color: var(--accent); }
-body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+body.has-bg .num-in { background-color: rgba(255,255,255,.08); border-color: var(--field-border); }
+body.bg-light.has-bg .num-in { background-color: rgba(0,0,0,.05); border-color: var(--field-border); }
 .transition-duration-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: min(100%, 300px); color: var(--tx-2); font-size: 12px; }
 .transition-duration-control input[type="range"] { flex: 1 1 150px; min-width: 90px; }
 .transition-duration-control .num-in { width: 78px; text-align: right; }
 .set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
 .set-hint.set-error { color: #f87171; }
-.secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; width: min(100%, 330px); }
-.secret-field .text-in { width: 100%; min-width: 0; }
+.secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; width: min(100%, 330px); }
+.secret-field .text-in { width: 100%; min-width: 0; height: 34px; }
+.secret-field .btn-line.sm { height: 34px; min-height: 34px; padding: 0 12px; }
 .provider-guide { margin-top: 10px; border: 1px solid var(--bd-2); border-radius: 9px; background: var(--bg-2); overflow: hidden; }
-.provider-guide summary { padding: 10px 12px; color: var(--tx-1); font-size: 12px; font-weight: 750; cursor: pointer; }
+.provider-guide summary { padding: 10px 12px; color: var(--tx-1); font-size: 12px; font-weight: 700; cursor: pointer; transition: background-color .12s ease; }
+.provider-guide summary:hover { background: var(--bg-3); }
 .provider-guide ol { margin: 0; padding: 0 16px 13px 32px; color: var(--tx-2); font-size: 12px; line-height: 1.55; }
 .provider-guide a { color: var(--accent-2); }
 .provider-args { width: min(100%, 330px); }
 .diag-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.diag-toolbar .text-in { flex: 1 1 150px; min-width: 120px; }
+.diag-toolbar .text-in { flex: 1 1 150px; min-width: 120px; height: 34px; }
+.diag-toolbar .btn-line.sm,
+.diag-toolbar select.sel { height: 34px; min-height: 34px; }
 .diag-list {
   display: block; max-height: 320px; overflow: auto; padding: 12px;
   border: 1px solid var(--bd-2); border-radius: 9px; background: var(--bg-0);
@@ -923,6 +965,10 @@ body.bg-light.has-bg .pl-row.active,
 body.bg-light.has-bg .src-row.active { background: rgba(0, 0, 0, .09); }
 body.bg-light.has-bg input[type="text"],
 body.bg-light.has-bg input[type="search"],
+body.bg-light.has-bg input[type="password"],
+body.bg-light.has-bg input[type="url"],
+body.bg-light.has-bg input[type="email"],
+body.bg-light.has-bg .text-in,
 body.bg-light.has-bg select.sel,
 body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
 body.bg-light.has-bg button.ctrl.play { background: var(--tx-1); color: #fff; }
@@ -952,16 +998,19 @@ body.has-bg :where(.icon-btn, .ctrl:not(.play), .pl-del, .pl-eye, .src-btn, .fl-
 /* Editable controls must belong to the same palette as the cover. Keep this
    after the generic wallpaper overrides so artwork themes do not fall back to
    a fixed white/black glass tint. */
-body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in) {
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], textarea, select, .num-in, .text-in) {
   background: var(--bg-3);
   color: var(--tx-1);
   border-color: var(--icon-border);
 }
-body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in)::placeholder {
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], textarea, select, .num-in, .text-in):hover {
+  border-color: var(--btn-bd-hover);
+}
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], textarea, select, .num-in, .text-in)::placeholder {
   color: var(--tx-2);
   opacity: .9;
 }
-body.artwork-theme :where(input[type="text"], input[type="search"], input[type="number"], textarea, select, .num-in, .text-in):focus {
+body.artwork-theme :where(input[type="text"], input[type="search"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], textarea, select, .num-in, .text-in):focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
 }
@@ -1166,7 +1215,7 @@ input[type="color"] {
 }
 input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
-.set-sub { font-size: 10px; color: var(--tx-3); font-weight: 400; }
+.set-sub { font-size: 11px; color: var(--tx-3); font-weight: 400; }
 
 /* Import chooser */
 .pick-opt { display: flex; align-items: center; gap: 13px; width: 100%; text-align: left; background: var(--btn-bg); border: 1px solid var(--btn-bd); color: var(--tx-1); border-radius: 10px; padding: 13px 15px; cursor: pointer; transition: background-color .12s, border-color .12s; }
@@ -1364,8 +1413,10 @@ body.compact .list-head { padding-bottom: 5px; }
 body.no-anim * { transition: none !important; }
 
 /* ─── Playlist import modal ─── */
-.imp-row { display: flex; gap: 8px; padding: 12px 0 4px; }
-.imp-row input { flex: 1; min-width: 0; }
+.imp-row { display: flex; align-items: center; gap: 8px; padding: 12px 0 4px; }
+.imp-row input { flex: 1; min-width: 0; height: 34px; }
+.imp-row .btn,
+.imp-row .btn-line { height: 34px; min-height: 34px; padding: 0 13px; }
 .imp-list { display: flex; flex-direction: column; gap: 2px; max-height: 44vh; overflow-y: auto; margin-top: 8px; }
 .imp-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
 .imp-item:hover { background: var(--bg-3); }
@@ -1379,19 +1430,19 @@ body.no-anim * { transition: none !important; }
 .imp-count { margin-left: auto; font-size: 12px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
 .imp-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; flex-shrink: 0; }
 .imp-foot select, select.sel {
-  flex: 1; min-width: 0;
+  flex: 1; min-width: 0; min-height: 34px;
   appearance: none; -webkit-appearance: none;
   background: var(--btn-bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a6a9b8' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
   border: 1px solid var(--btn-bd); color: var(--tx-1);
-  border-radius: 8px; padding: 8px 32px 8px 11px; font-size: 13px; outline: none; cursor: pointer;
+  border-radius: 8px; padding: 7px 32px 7px 11px; font-size: 13px; outline: none; cursor: pointer;
   transition: border-color .12s, background-color .12s;
 }
 .imp-foot select:hover, select.sel:hover { border-color: var(--btn-bd-hover); background-color: var(--btn-bg-hover); }
 .imp-foot select:focus, select.sel:focus { border-color: var(--accent); }
-select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
-.dir-pick { display: flex; gap: 6px; align-items: center; }
-.dir-pick .text-in { width: 180px; }
-.dir-pick .btn-line.sm { flex-shrink: 0; }
+select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 6px 28px 6px 10px; min-height: 34px; }
+.dir-pick { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: 100%; }
+.dir-pick .text-in { width: 180px; height: 34px; min-width: 120px; flex: 1 1 140px; }
+.dir-pick .btn-line.sm { flex-shrink: 0; height: 34px; min-height: 34px; min-width: 34px; padding: 0 10px; }
 
 /* ─── First-run setup wizard ─── */
 .modal.setup { width: min(620px, 94vw); }
@@ -1407,7 +1458,8 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .setup-status.ok { border-color: rgba(52, 211, 153, .45); color: #34d399; }
 .setup-status.bad { border-color: rgba(245, 158, 11, .45); color: #f59e0b; }
 .setup-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
-.setup-row .grow { flex: 1; min-width: 0; }
+.setup-row .grow { flex: 1; min-width: 0; height: 34px; }
+.setup-row .btn-line.sm { height: 34px; min-height: 34px; padding: 0 12px; }
 .setup-chk { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--tx-1); padding: 7px 0; cursor: pointer; user-select: none; }
 .setup-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 0 6px; }
 .dependency-grid { display: grid; gap: 8px; margin: 12px 0; }
@@ -1427,7 +1479,7 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .dependency-toolbar > button:not(:disabled):hover { transform: none; }
 .dependency-loading { color: var(--tx-3); font-size: 12px; padding: 12px; }
 @media (max-width: 560px) { .dependency-card { grid-template-columns: 24px minmax(0, 1fr); } .dependency-card button { grid-column: 2; justify-self: stretch; } .dependency-toolbar { width: 100%; } }
-select.sel.sm-sel.wide { width: 158px; }
+select.sel.sm-sel.wide { width: 210px; }
 
 .ui-scale-control { display: grid; grid-template-columns: minmax(140px, 1fr) 52px; align-items: center; gap: 10px; width: min(310px, 100%); }
 .ui-scale-control output { color: var(--accent-2); font-size: 12px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
@@ -1487,38 +1539,67 @@ select.sel.sm-sel.wide { width: 158px; }
 .dl-toggle.busy::before { animation: dlpulse 1.2s ease-in-out infinite; }
 
 /* ─── Listening stats ─── */
-.st-wrap { padding: 4px 2px 24px; }
-.st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.st-wrap { padding: 4px 2px 24px; container-type: inline-size; container-name: stats; }
+.st-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .st-wide { grid-column: 1 / -1; }
-.st-card { background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 12px; padding: 12px 14px 14px; min-width: 0; }
-/* Stats cards ride over the wallpaper: same translucency as every other surface
-   (driven by the Panel opacity slider, which already blends the base into the
-   rgba() tint), not the flat opaque --bg-2 they had by default. */
-body.has-bg .st-card { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
-body.bg-light.has-bg .st-card { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
-.st-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx-3); margin-bottom: 8px; }
+.st-card {
+  background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: var(--r);
+  padding: 14px; min-width: 0; container-type: inline-size; container-name: statcard;
+}
+/* Stats surfaces follow wallpaper translucency and the dynamic artwork palette
+   instead of dropping back to opaque solid cards or pitch-black blocks. */
+body.has-bg .st-card,
+body.has-bg .st-metric:not(.st-metric-primary),
+body.has-bg .st-spotlight {
+  background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100 * .72));
+  border-color: var(--btn-bd-subtle);
+}
+body.bg-light.has-bg .st-card,
+body.bg-light.has-bg .st-metric:not(.st-metric-primary),
+body.bg-light.has-bg .st-spotlight {
+  background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100 * .72));
+  border-color: var(--btn-bd-subtle);
+}
+body.artwork-theme.has-bg .st-card,
+body.artwork-theme.has-bg .st-metric:not(.st-metric-primary),
+body.artwork-theme.has-bg .st-spotlight {
+  background: color-mix(in srgb, var(--bg-2) 82%, transparent);
+  border-color: var(--btn-bd-subtle);
+}
+body.artwork-theme.has-bg .st-metric-primary {
+  background: color-mix(in srgb, var(--accent) 18%, color-mix(in srgb, var(--bg-2) 86%, transparent));
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--btn-bd));
+}
+.st-h { font-size: 12.5px; font-weight: 600; color: var(--tx-2); margin-bottom: 10px; }
 .st-row {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr) 70px 52px 62px;
-  align-items: center; gap: 8px; padding: 4px 2px; border-radius: 6px;
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(44px, 68px) 38px 54px;
+  align-items: center; gap: 8px; padding: 6px 8px; margin: 1px -4px;
+  border: 1px solid transparent; border-radius: 7px;
+  transition: background-color .12s ease, border-color .12s ease;
 }
 .st-row[data-path] { cursor: pointer; }
-.st-row[data-path]:hover { background: var(--bg-3); }
+.st-row[data-path]:hover { background: var(--bg-3); border-color: var(--bd); }
+body.has-bg .st-row[data-path]:hover { background: rgba(255, 255, 255, .07); border-color: var(--btn-bd-subtle); }
+body.bg-light.has-bg .st-row[data-path]:hover { background: rgba(0, 0, 0, .06); border-color: var(--btn-bd-subtle); }
 .st-rank { font-size: 11px; color: var(--tx-3); text-align: right; font-variant-numeric: tabular-nums; }
 .st-name { min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Artist on the same line as the title: two lines per entry would spread a
    top-15 across two screens. */
 .st-sub { color: var(--tx-3); font-size: 11.5px; margin-left: 6px; }
-.st-bar { height: 5px; border-radius: 999px; background: var(--bg-3); overflow: hidden; }
+.st-bar { height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--tx-1) 12%, var(--bg-3)); overflow: hidden; }
 .st-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
-.st-n { font-size: 12px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.st-n { font-size: 12px; font-weight: 700; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .st-unit { font-weight: 400; color: var(--tx-3); margin-left: 1px; }
-.st-time { font-size: 11px; color: var(--tx-3); text-align: right; font-variant-numeric: tabular-nums; }
+.st-time { font-size: 11px; color: var(--tx-3); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .st-empty { font-size: 12px; color: var(--tx-3); padding: 6px 2px; }
 .st-note { font-size: 11.5px; color: var(--tx-3); padding: 14px 4px 0; line-height: 1.5; }
-/* Under 700px the numeric columns collide: the bar is dropped, being only a
-   visual echo of the number printed right beside it. */
+@container statcard (max-width: 340px) {
+  .st-row { grid-template-columns: 18px minmax(0, 1fr) 36px 50px; gap: 6px; padding: 5px 6px; }
+  .st-bar { display: none; }
+}
+/* Fallback for engines without container-query support. */
 @media (max-width: 700px) {
-  .st-row { grid-template-columns: 20px minmax(0, 1fr) 46px 56px; }
+  .st-row { grid-template-columns: 20px minmax(0, 1fr) 40px 54px; }
   .st-bar { display: none; }
 }
 
@@ -2164,11 +2245,12 @@ body.has-bg .ctrl.state-ctrl.active,
 #setBackupStatus { overflow-wrap: anywhere; }
 #setBackupStatus.is-error { color: #f87171; }
 
-/* Stats: flat cards; only the headline figure carries the accent. */
+/* Stats: flat cards; container queries keep every column legible even when
+   Sidebar and Now Playing are docked beside the list. */
 .st-wrap { padding: 4px 6px 28px; }
 .st-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
 .st-metric {
-  min-height: 112px;
+  min-height: 108px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -2176,18 +2258,19 @@ body.has-bg .ctrl.state-ctrl.active,
   border: 1px solid var(--bd-2);
   border-radius: var(--r);
   background: var(--bg-2);
+  min-width: 0;
 }
 .st-metric-primary {
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
   border-color: color-mix(in srgb, var(--accent) 44%, var(--bd-2));
   color: var(--tx-1);
 }
-.st-metric span { margin-bottom: auto; color: currentColor; opacity: .75; font-size: 12px; font-weight: 600; }
-.st-metric strong { font-family: var(--ui-font-display); font-size: clamp(24px, 2.4vw, 34px); font-weight: 600; letter-spacing: -.02em; line-height: 1; }
-.st-metric small { margin-top: 7px; color: currentColor; opacity: .72; }
+.st-metric span { margin-bottom: auto; color: currentColor; opacity: .78; font-size: 12px; font-weight: 600; line-height: 1.3; }
+.st-metric strong { margin-top: 8px; font-family: var(--ui-font-display); font-size: clamp(22px, 2.2vw, 32px); font-weight: 600; letter-spacing: -.02em; line-height: 1.05; }
+.st-metric small { margin-top: 6px; color: currentColor; opacity: .74; font-size: 11.5px; line-height: 1.3; }
 .st-spotlight {
   display: grid;
-  grid-template-columns: minmax(150px, .7fr) minmax(180px, 1fr) minmax(180px, 1.4fr);
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   margin-bottom: 12px;
@@ -2202,13 +2285,28 @@ body.has-bg .ctrl.state-ctrl.active,
 .st-spotlight > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-spotlight-kicker { color: var(--accent-2); font-size: 12px; font-weight: 600; }
 .st-spotlight strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.st-spotlight > span:last-child { color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-spotlight > span:last-child { color: var(--tx-2); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .st-card { padding: 14px; border-radius: var(--r); box-shadow: none; }
 .st-h { color: var(--tx-2); letter-spacing: 0; text-transform: none; }
+@container stats (max-width: 720px) {
+  .st-grid { grid-template-columns: 1fr; }
+  .st-wide { grid-column: auto; }
+}
+@container stats (max-width: 660px) {
+  .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container stats (max-width: 620px) {
+  .st-spotlight { grid-template-columns: 1fr; gap: 3px; }
+  .st-spotlight > span:last-child { text-align: left; }
+}
+@container stats (max-width: 340px) {
+  .st-hero { grid-template-columns: 1fr; }
+}
 @media (max-width: 980px) {
   .st-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .st-spotlight { grid-template-columns: 1fr; gap: 5px; }
+  .st-spotlight { grid-template-columns: 1fr; gap: 3px; }
+  .st-spotlight > span:last-child { text-align: left; }
   .st-grid { grid-template-columns: 1fr; }
   .st-wide { grid-column: auto; }
 }
@@ -2571,6 +2669,28 @@ body.has-bg .reco-card {
 body.has-bg .yt-grid .track.yt-card:hover,
 body.has-bg .pl-card:hover,
 body.has-bg .reco-card:hover {
+  border-color: var(--btn-bd-hover);
+}
+body.artwork-theme.has-bg .yt-grid .track.yt-card,
+body.artwork-theme.has-bg .pl-card,
+body.artwork-theme.has-bg .reco-card {
+  background: color-mix(in srgb, var(--bg-2) 78%, transparent);
+  border-color: var(--btn-bd-subtle);
+}
+body.artwork-theme.has-bg .yt-grid .track.yt-card:hover,
+body.artwork-theme.has-bg .pl-card:hover,
+body.artwork-theme.has-bg .reco-card:hover {
+  background: color-mix(in srgb, var(--bg-3) 86%, transparent);
+  border-color: var(--btn-bd-hover);
+}
+body.artwork-theme.has-bg select.sel,
+body.artwork-theme.has-bg .imp-foot select {
+  background-color: var(--bg-3);
+  border-color: var(--icon-border);
+  color: var(--tx-1);
+}
+body.artwork-theme.has-bg select.sel:hover,
+body.artwork-theme.has-bg .imp-foot select:hover {
   border-color: var(--btn-bd-hover);
 }
 body.artwork-theme.has-bg .track :where(.meta .t, .meta .s, .album, .dur) {
